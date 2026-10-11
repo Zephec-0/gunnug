@@ -5,21 +5,33 @@
 -- An item is a table { kind = "ammo" | "attachment", name, short, color }.
 -- No items exist in the game yet; the slots are ready for them.
 local guns = require("src.guns")
+local items = require("src.items")
+local perks = require("src.perks")
 
 local inventory = {}
 
 inventory.WEAPON_SLOTS = 3
 inventory.ITEM_SLOTS = 7
+local START_ITEM_CHANCE = 0.5
 
 local Inventory = {}
 Inventory.__index = Inventory
 
 function inventory.new()
-  local self = setmetatable({ weapons = {}, items = {}, selected = 1, gold = 0 }, Inventory)
-  -- No weapon pickups yet, so a run starts with one of each archetype
-  self.weapons[1] = guns.new("revolver")
-  self.weapons[2] = guns.new("shotgun")
-  self.weapons[3] = guns.new("automatic")
+  local self = setmetatable({ weapons = {}, items = {}, perks = {}, selected = 1, gold = 0 }, Inventory)
+  perks.bind(self)
+  -- Every run starts with a revolver that has rolled its own stat variation
+  -- and, half the time, one ammo type or attachment already fitted (never a
+  -- cursed one)
+  local gun = guns.generate("revolver", nil, 0)
+  if love.math.random() < START_ITEM_CHANCE then
+    local item
+    repeat
+      item = items.random()
+    until item.rarity ~= "cursed"
+    gun.slots[love.math.random(1, gun.slotCount)] = item
+  end
+  self.weapons[1] = gun
   return self
 end
 
@@ -59,7 +71,9 @@ end
 --   { kind = "item", index }              one of the 7 loose item slots
 --   { kind = "gunSlot", gun, index }      a slot on a specific gun
 function Inventory:get(ref)
-  if ref.kind == "weapon" then
+  if ref.kind == "perk" then
+    return ref.perk -- shown in the panel for its tooltip only
+  elseif ref.kind == "weapon" then
     return self.weapons[ref.index]
   elseif ref.kind == "item" then
     return self.items[ref.index]
@@ -89,6 +103,9 @@ end
 -- Moves the contents of one slot to another, swapping if the target is full.
 -- Returns true if anything moved.
 function Inventory:move(from, to)
+  if from.kind == "perk" or to.kind == "perk" then
+    return false
+  end
   local a, b = self:get(from), self:get(to)
   if a == nil or not accepts(to, a) or not accepts(from, b) then
     return false

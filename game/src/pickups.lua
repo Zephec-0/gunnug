@@ -15,6 +15,7 @@ local effects = require("src.effects")
 local guns = require("src.guns")
 local inventory = require("src.inventory")
 local itembar = require("src.itembar")
+local perks = require("src.perks")
 local items = require("src.items")
 
 local pickups = {}
@@ -29,6 +30,7 @@ local GRAVITY = config.gravity * 0.8
 local DESPAWN_TIME = 7 -- a coin that has hit the ground vanishes after this long
 local FADE_TIME = 1.5 -- it blinks for the last stretch
 local overflow = 0 -- value of coins removed to stay under the cap; added to the next coin
+pickups.extraMagnet = 0 -- extra pickup range from the held gun (Magnetic Loader)
 
 function pickups.clear()
   list = {}
@@ -155,9 +157,10 @@ local function collect(p, player)
       effects.particle(p.x, p.y, (love.math.random() - 0.5) * 70, -love.math.random() * 60, 0.35, p.item.color, 200, true)
     end
   elseif p.kind == "gold" then
-    inv.gold = inv.gold + p.value
+    local value = math.max(1, math.floor(p.value * perks.prod("gold") + 0.5))
+    inv.gold = inv.gold + value
     audio.play("coin")
-    effects.popup(p.x, p.y - 6, "+" .. p.value, { 1, 0.82, 0.25 })
+    effects.popup(p.x, p.y - 6, "+" .. value, { 1, 0.82, 0.25 })
     for _ = 1, 4 do
       effects.particle(p.x, p.y, (love.math.random() - 0.5) * 70, -love.math.random() * 60, 0.35, { 1, 0.9, 0.4 }, 200, true)
     end
@@ -168,6 +171,7 @@ end
 function pickups.update(dt, world, player)
   local px, py = player:center()
   local canCollect = not player.dead
+  local magnetRange = MAGNET_RANGE * perks.prod("magnet") + pickups.extraMagnet
   for i = #list, 1, -1 do
     local p = list[i]
     p.age = p.age + dt
@@ -178,9 +182,9 @@ function pickups.update(dt, world, player)
     if canCollect and p.age > MAGNET_DELAY and p.kind == "gold" then
       if dist < PICKUP_RADIUS then
         taken = collect(p, player)
-      elseif dist < MAGNET_RANGE then
+      elseif dist < magnetRange then
         -- Pulled in, faster the closer it is
-        local pull = 900 * (1 - dist / MAGNET_RANGE) + 120
+        local pull = 900 * (1 - dist / magnetRange) + 120
         p.vx = p.vx + dx / dist * pull * dt
         p.vy = p.vy + dy / dist * pull * dt
         p.pulled = true
@@ -193,7 +197,7 @@ function pickups.update(dt, world, player)
     end
     if taken then
       table.remove(list, i)
-    elseif not p.pulled or dist >= MAGNET_RANGE then
+    elseif not p.pulled or dist >= magnetRange then
       p.pulled = false
       p.vy = math.min(p.vy + GRAVITY * dt, 450)
       local nx, ny = p.x + p.vx * dt, p.y + p.vy * dt

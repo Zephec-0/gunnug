@@ -27,6 +27,7 @@ local inventory = require("src.inventory")
 local itembar = require("src.itembar")
 local lighting = require("src.lighting")
 local menu = require("src.menu")
+local perks = require("src.perks")
 local physics = require("src.physics")
 local pickups = require("src.pickups")
 local Player = require("src.player")
@@ -113,6 +114,19 @@ function game.load()
   itembar.onDrop = function(item)
     local px, py = player:center()
     pickups.dropItem(px + player.facing * 6, py, item, player.facing * 70, -50)
+  end
+  -- Kills: heal, momentum and refills for the hunter, and Death Burst
+  enemies.onKill = function(e, fx)
+    if player then
+      player:onKill(e, fx)
+    end
+    if perks.has("death_burst") then
+      local b = e.body
+      local x, y = b.x + b.w / 2, b.y + b.h / 2
+      effects.explosion(x, y, 22)
+      audio.play("explosion", 0.6)
+      enemies.damageArea(x, y, 22, 12, 180)
+    end
   end
   load("overworld")
   menu.open("title") -- the world waits, dimmed, behind the title screen
@@ -398,6 +412,10 @@ end
 -- For tests and future pickups
 function game.inventory()
   return inv
+end
+
+function game.player()
+  return player
 end
 
 return game

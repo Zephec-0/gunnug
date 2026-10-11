@@ -6,12 +6,15 @@
 --
 -- Everything is drawn at full window resolution; u = one game pixel.
 local inventory = require("src.inventory")
+local items = require("src.items")
+local perks = require("src.perks")
 
 local itembar = {}
 
 local isOpen = false
 local hitboxes = {} -- slot rectangles from the last draw: { x, y, w, h, ref }
 local drag -- { ref } while an item is being dragged
+local perkCache = {} -- perk id -> the table the UI draws and tooltips
 
 local WEAPON_SIZE, ITEM_SIZE, GUN_SLOT_SIZE = 18, 14, 13
 
@@ -64,6 +67,10 @@ local function isWeapon(thing)
 end
 
 local function nameOf(thing)
+  local rarity = thing.rarity and items.rarities[thing.rarity]
+  if rarity and thing.rarity ~= "common" then
+    return thing.name .. "  [" .. rarity.name .. "]"
+  end
   return thing.name
 end
 
@@ -80,6 +87,13 @@ local function drawThing(thing, x, y, size, u, alpha)
     local pad = size * 0.18
     love.graphics.setColor(c[1], c[2], c[3], alpha)
     love.graphics.rectangle("fill", x + pad, y + pad, size - 2 * pad, size - 2 * pad, u, u)
+    -- Rare items get a blue rim, cursed ones a red one
+    local rarity = thing.rarity and thing.rarity ~= "common" and items.rarities[thing.rarity]
+    if rarity then
+      love.graphics.setLineWidth(math.max(1, u * 0.7))
+      love.graphics.setColor(rarity.border[1], rarity.border[2], rarity.border[3], alpha)
+      love.graphics.rectangle("line", x + pad - u * 0.5, y + pad - u * 0.5, size - 2 * pad + u, size - 2 * pad + u, u, u)
+    end
     local f = font(size * 0.38)
     local label = thing.short or "?"
     love.graphics.setFont(f)
@@ -142,7 +156,30 @@ local function drawBar(inv, u)
     drawSlot(inv, { kind = "item", index = i }, x, itemY, size, u, false)
     x = x + size + 2 * u
   end
+  -- The perks taken this run, as small badges under the bar
+  local list = perks.list()
+  if #list > 0 then
+    local px, py = margin, margin + WEAPON_SIZE * u + 3 * u
+    local size = 9 * u
+    for i, id in ipairs(list) do
+      perkCache[id] = perkCache[id] or perks.new(id)
+      drawSlot(inv, { kind = "perk", index = i, perk = perkCache[id] }, px, py, size, u, false)
+      px = px + size + u
+    end
+  end
 end
+
+-- Effects shown in the stats under the usual numbers
+local EFFECT_LABELS = {
+  { "pierce", "Pierce" }, { "bounces", "Ricochet" }, { "explosive", "Explosive" }, { "incendiary", "Incendiary" },
+  { "freeze", "Frost" }, { "shock", "Shock" }, { "poison", "Venom" }, { "acid", "Acid" }, { "concussive", "Concussive" },
+  { "sticky", "Sticky" }, { "homing", "Seeking" }, { "gravity", "Singularity" }, { "split", "Splitting" },
+  { "cluster", "Cluster" }, { "boomerang", "Boomerang" }, { "ghost", "Spectral" }, { "execute", "Executioner" },
+  { "vamp", "Vampiric" }, { "greed", "Gilded" }, { "burst", "Burst" }, { "rear", "Backblast" }, { "mortar", "Mortar" },
+  { "overheat", "Overclock" }, { "refill", "Scavenger" }, { "jets", "Jets" }, { "bayonet", "Bayonet" },
+  { "opener", "Primer" }, { "quickdraw", "Quickdraw" }, { "sneak", "Suppressed" }, { "laser", "Laser" },
+  { "steady", "Steady" }, { "glow", "Glowing" }, { "bloodCost", "Blood" }, { "misfire", "Unstable" },
+}
 
 -- The gun's effective stats (fitted ammo and attachments applied)
 local function statLine(gun)
@@ -150,30 +187,28 @@ local function statLine(gun)
   local dmg = math.max(1, math.floor(st.damage + 0.5))
   local damage = st.pellets > 1 and string.format("%d x %d", dmg, st.pellets) or tostring(dmg)
   local text = string.format(
-    "Chambers %d    Fire delay %.2fs    Reload %.2fs\nSpread %.1f°    Damage %s    Impact %d    Recoil %d",
+    "Chambers %d    Fire delay %.2fs    Reload %.2fs    Slots %d\nSpread %.1f°    Damage %s    Impact %d    Recoil %d",
     st.chambers,
     st.fireDelay,
     st.reloadTime,
+    gun.slotCount,
     st.spread,
     damage,
     st.impactForce,
     st.recoil
   )
   local effects = {}
-  if st.pierce > 0 then
-    effects[#effects + 1] = "Pierce " .. st.pierce
+  if st.critChance > 0 then
+    effects[#effects + 1] = string.format("Crit %d%%", math.floor(st.critChance * 100 + 0.5))
   end
-  if st.bounces > 0 then
-    effects[#effects + 1] = "Ricochet " .. st.bounces
-  end
-  if st.explosive > 0 then
-    effects[#effects + 1] = "Explosive " .. st.explosive
-  end
-  if st.incendiary > 0 then
-    effects[#effects + 1] = "Incendiary " .. st.incendiary
+  for _, e in ipairs(EFFECT_LABELS) do
+    local n = st[e[1]]
+    if n and n > 0 then
+      effects[#effects + 1] = (n >= 2 and (e[2] .. " " .. math.floor(n)) or e[2])
+    end
   end
   if #effects > 0 then
-    text = text .. "\n" .. table.concat(effects, "    ")
+    text = text .. "\n" .. table.concat(effects, "   ")
   end
   return text
 end
@@ -184,7 +219,7 @@ local function drawPanel(inv, u)
   love.graphics.setColor(0.02, 0.01, 0.04, 0.6)
   love.graphics.rectangle("fill", 0, 0, ww, wh)
 
-  local cardW, cardH = 190 * u, 46 * u
+  local cardW, cardH = 196 * u, 50 * u
   local x = math.floor((ww - cardW) / 2)
   local y = 36 * u
   local titleFont, textFont = font(5 * u), font(3.4 * u)
@@ -210,7 +245,7 @@ local function drawPanel(inv, u)
       -- The gun's own ammo/attachment slots
       local sy = y + cardH - GUN_SLOT_SIZE * u - 4 * u
       shadowPrint("Slots", x + 6 * u, sy + (GUN_SLOT_SIZE * u - textFont:getHeight()) / 2, textFont, { 1, 0.86, 0.45 })
-      for s = 1, gun.def.slots do
+      for s = 1, gun.slotCount do
         local sx = tx + (s - 1) * (GUN_SLOT_SIZE + 2) * u
         drawSlot(inv, { kind = "gunSlot", gun = gun, index = s }, sx, sy, GUN_SLOT_SIZE * u, u, false)
       end
@@ -273,7 +308,7 @@ function itembar.mousepressed(inv, x, y, button)
     return false
   end
   local h = hitTest(x, y)
-  if h and inv:get(h.ref) then
+  if h and h.ref.kind ~= "perk" and inv:get(h.ref) then
     drag = { ref = h.ref }
   end
   return true

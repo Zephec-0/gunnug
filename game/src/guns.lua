@@ -1,6 +1,8 @@
 -- Gun definitions and the gun state machine (design doc §5).
 -- A gun fires its chambers in order and reloads automatically once empty,
 -- like a Noita wand's cast delay / recharge time.
+local perks = require("src.perks")
+
 local guns = {}
 
 guns.defs = {
@@ -52,6 +54,7 @@ guns.defs = {
     digRadius = 2,
     digPower = 1,
     slots = 3,
+    slotBias = -1, -- generated shotguns average a slot fewer (many pellets per shot)
     model = "shotgun",
     length = 12.5,
     kick = 1.4,
@@ -115,7 +118,8 @@ guns.defs = {
     impactForce = 120,
     digRadius = 2,
     digPower = 1,
-    slots = 5,
+    slots = 4,
+    slotBias = -1, -- a hose of bullets: average one slot fewer
     model = "automatic",
     length = 11.5,
     kick = 0.45,
@@ -136,7 +140,9 @@ guns.defs = {
 local Gun = {}
 Gun.__index = Gun
 
-function guns.new(name)
+-- slotCount: how many ammo/attachment slots this particular gun has (a
+-- generated gun rolls it; see guns.generate)
+function guns.new(name, slotCount)
   local def = assert(guns.defs[name], "unknown gun: " .. tostring(name))
   local self = setmetatable({
     def = def,
@@ -146,21 +152,49 @@ function guns.new(name)
     fireTimer = 0,
     reloadTimer = 0,
     reloadTotal = def.reloadTime,
-    slots = {}, -- slots[i] = item or nil, for i = 1..def.slots
+    slotCount = slotCount or def.slots,
+    slots = {}, -- slots[i] = item or nil, for i = 1..slotCount
+    burstLeft = 0, -- shots still to come in the current burst (Burst Fire)
+    heat = 0, -- Overclock: builds with every shot, bleeds off when idle
+    fresh = true, -- freshly reloaded: Primer Coil's double-damage shot is ready
+    drawn = false, -- just switched to: Quickdraw Holster's shot is ready
+    shotCount = 0, -- Mortar Breech fires every fifth shot big
   }, Gun)
   return self
 end
 
 -- The gun's effective stats: its definition with every fitted ammo type and
--- attachment applied (design doc §5.5). Cached until the slots change.
+-- attachment applied (design doc §5.5), then the hunter's perks. Cached until
+-- the slots or the perks change.
 local MULTIPLIED = { "damage", "spread", "recoil", "fireDelay", "reloadTime", "bulletSpeed", "impactForce", "chambers" }
-local ADDED = { "pellets", "digRadius", "digPower" }
-local EFFECTS = { "pierce", "bounces", "explosive", "incendiary" }
+-- Everything that adds up: base stats first, then the effect counts (see
+-- src.items for what each does)
+local ADDED = {
+  "pellets", "digRadius", "digPower", "critChance", "magnet", "lamp",
+  "pierce", "bounces", "explosive", "incendiary",
+  "freeze", "shock", "poison", "acid", "concussive",
+  "vamp", "greed", "refill",
+  "sticky", "homing", "gravity", "split", "cluster",
+  "boomerang", "ghost", "execute", "glow", "sneak",
+  "bloodCost", "misfire",
+  "burst", "rear", "opener", "quickdraw", "mortar",
+  "laser", "bayonet", "overheat", "jets", "steady", "vulnerable",
+}
+-- Ammo with any of these tints its bullets with the item's colour
+local TINTING = {
+  "incendiary", "explosive", "freeze", "shock", "poison", "acid", "vamp", "greed", "sticky", "homing", "gravity",
+  "split", "cluster", "boomerang", "ghost", "execute", "glow", "concussive", "bloodCost", "misfire",
+}
+-- Effects handed to every bullet (see src.bullets)
+local BULLET_FX = {
+  "freeze", "shock", "poison", "acid", "concussive", "vamp", "greed", "refill", "sticky", "homing", "gravity",
+  "split", "cluster", "boomerang", "ghost", "execute", "glow", "sneak",
+}
 
 function Gun:stats()
-  local ids = {}
-  for i = 1, self.def.slots do
-    ids[i] = self.slots[i] and self.slots[i].id or "-"
+  local ids = { perks.version }
+  for i = 1, self.slotCount do
+    ids[#ids + 1] = self.slots[i] and self.slots[i].id or "-"
   end
   local signature = table.concat(ids, ",")
   if self.statsSignature == signature then
@@ -177,20 +211,16 @@ function Gun:stats()
     bulletSpeed = def.bulletSpeed,
     impactForce = def.impactForce,
     chambers = def.chambers,
-    pellets = def.pellets,
-    digRadius = def.digRadius,
-    digPower = def.digPower,
-    pierce = 0,
-    bounces = 0,
-    explosive = 0,
-    incendiary = 0,
   }
+  for _, k in ipairs(ADDED) do
+    st[k] = def[k] or 0
+  end
   if self.rolls then
     for _, k in ipairs(MULTIPLIED) do
       st[k] = st[k] * (self.rolls[k] or 1)
     end
   end
-  for i = 1, def.slots do
+  for i = 1, self.slotCount do
     local item = self.slots[i]
     if item then
       for _, k in ipairs(MULTIPLIED) do
@@ -199,13 +229,13 @@ function Gun:stats()
       for _, k in ipairs(ADDED) do
         st[k] = st[k] + (item.mods[k] or 0)
       end
-      for _, k in ipairs(EFFECTS) do
-        st[k] = st[k] + (item.mods[k] or 0)
-      end
     end
   end
+  perks.modifyStats(st)
   st.chambers = math.max(1, math.floor(st.chambers + 0.5))
   st.damage = math.max(1, st.damage)
+  st.critChance = math.min(0.95, st.critChance)
+  st.fireDelay = math.max(0.03, st.fireDelay)
   self.statsSignature, self.cached = signature, st
   -- A smaller magazine can't hold more rounds than it has room for
   self.chambers = math.min(self.chambers, st.chambers)
@@ -216,7 +246,9 @@ end
 -- A generated weapon is a base archetype plus stat variation: two stats rolled
 -- better (+8-18%), one rolled worse (-5-12%), the rest nudged a little (+-4%),
 -- named after its best roll, and each ammo/attachment slot has a chance of
--- already holding something.
+-- already holding something. The number of slots is rolled too: from two
+-- fewer than the archetype's base up to five more, mostly near the middle
+-- (shotguns and machine guns average a slot fewer, see def.slotBias).
 local ROLL_STATS = {
   -- stat, which way is better (+1 higher, -1 lower), name prefix when rolled better
   { "damage", 1, "Heavy" },
@@ -228,8 +260,25 @@ local ROLL_STATS = {
   { "chambers", 1, "Capacious" },
   { "recoil", 0, nil }, -- neither better nor worse; only nudged
 }
+-- Slot roll: { cumulative chance, slots added }
+local SLOT_ROLLS = {
+  { 0.10, -2 }, { 0.22, -1 }, { 0.50, 0 }, { 0.72, 1 }, { 0.86, 2 }, { 0.94, 3 }, { 0.98, 4 }, { 1.00, 5 },
+}
 local FIT_CHANCE = 0.22 -- chance each slot of a generated gun is already filled
 local ARCHETYPE_ORDER = { "revolver", "shotgun", "semiauto", "automatic" }
+
+-- How many slots a freshly generated gun of this archetype gets
+local function rollSlots(def, random)
+  local r = random()
+  local delta = 0
+  for _, entry in ipairs(SLOT_ROLLS) do
+    if r <= entry[1] then
+      delta = entry[2]
+      break
+    end
+  end
+  return math.max(1, def.slots + delta + (def.slotBias or 0))
+end
 
 -- rng: a love.math RandomGenerator (default: the global one);
 -- fitChance: chance each slot already holds an item (default FIT_CHANCE)
@@ -237,7 +286,7 @@ function guns.generate(archetype, rng, fitChance)
   local items = require("src.items")
   local random = rng and function(...) return rng:random(...) end or love.math.random
   archetype = archetype or ARCHETYPE_ORDER[random(1, #ARCHETYPE_ORDER)]
-  local gun = guns.new(archetype)
+  local gun = guns.new(archetype, rollSlots(guns.defs[archetype], random))
 
   local order = {}
   for i = 1, 7 do
@@ -275,9 +324,9 @@ function guns.generate(archetype, rng, fitChance)
 
   -- Pre-fitted ammo and attachments, never the same one twice
   local used = {}
-  for slot = 1, gun.def.slots do
+  for slot = 1, gun.slotCount do
     if random() < (fitChance or FIT_CHANCE) then
-      local item = items.new(items.order[random(1, #items.order)])
+      local item = items.random(random)
       if not used[item.id] then
         used[item.id] = true
         gun.slots[slot] = item
@@ -298,11 +347,15 @@ end
 
 function Gun:update(dt)
   self.fireTimer = math.max(0, self.fireTimer - dt)
+  self.heat = math.max(0, self.heat - 4 * dt)
   if self.reloadTimer > 0 then
     self.reloadTimer = self.reloadTimer - dt
     if self.reloadTimer <= 0 then
       self.reloadTimer = 0
       self.chambers = self:maxChambers()
+      self.fresh = true
+      self.burstLeft = 0
+      self.heat = 0
     end
   end
 end
@@ -325,44 +378,105 @@ function Gun:reload()
   end
   self.reloadTimer = st.reloadTime
   self.reloadTotal = st.reloadTime
+  self.burstLeft = 0
   return true
+end
+
+-- A kill with Scavenger Bolt: puts rounds back in the gun, or speeds up a reload
+function Gun:refill(n)
+  if self.reloadTimer > 0 then
+    self.reloadTimer = math.max(0.001, self.reloadTimer - 0.5 * n)
+  else
+    self.chambers = math.min(self:maxChambers(), self.chambers + n)
+  end
 end
 
 function Gun:canFire()
   return self.chambers > 0 and self.fireTimer <= 0 and self.reloadTimer <= 0
 end
 
--- Fires the next chamber. Returns a list of shots (see bullets.spawn) or nil.
-function Gun:fire(angle)
+-- Fires the next chamber. Returns a list of shots (see bullets.spawn) or nil,
+-- plus a table of side effects for the hunter: { cost = HP lost, misfire = true }.
+-- ctx (all optional): { damageMult, fireRate, still } from the hunter.
+function Gun:fire(angle, ctx)
   if not self:canFire() then
     return nil
   end
+  ctx = ctx or {}
   local def, st = self.def, self:stats()
   self.chambers = self.chambers - 1
-  self.fireTimer = st.fireDelay
+  self.shotCount = self.shotCount + 1
+
+  local delay = st.fireDelay / (ctx.fireRate or 1)
+  local mult = ctx.damageMult or 1
+  if self.fresh and st.opener > 0 then
+    mult = mult * (1 + st.opener) -- Primer Coil
+  end
+  self.fresh = false
+  if self.drawn and st.quickdraw > 0 then
+    mult = mult * (1 + st.quickdraw) -- Quickdraw Holster
+  end
+  self.drawn = false
+
+  if st.burst > 0 then
+    if self.burstLeft > 0 then
+      self.burstLeft = self.burstLeft - 1
+    else
+      self.burstLeft = 1 + st.burst
+    end
+    delay = self.burstLeft > 0 and 0.055 or delay * 2.2
+  end
+  self.fireTimer = delay
+
+  if st.overheat > 0 then
+    self.heat = self.heat + 1
+    if self.heat >= 9 then
+      self.heat = 0
+      self.chambers = 0 -- jammed: the magazine is dumped and the gun reloads
+    end
+  end
   if self.chambers == 0 then
     self.reloadTimer = st.reloadTime
     self.reloadTotal = st.reloadTime
+    self.burstLeft = 0
   end
 
-  -- Tracer colour: the last fitted ammo type that has one
+  -- Tracer colour: the last fitted ammo type with an effect
   local tint
-  for i = 1, def.slots do
+  for i = 1, self.slotCount do
     local item = self.slots[i]
-    if item and item.kind == "ammo" and (item.mods.incendiary or item.mods.explosive) then
-      tint = item.color
+    if item and item.kind == "ammo" then
+      for _, k in ipairs(TINTING) do
+        if item.mods[k] then
+          tint = item.color
+          break
+        end
+      end
     end
   end
 
+  local fx = { gun = self }
+  for _, k in ipairs(BULLET_FX) do
+    fx[k] = st[k]
+  end
+
   local pellets = st.pellets
+  local explosive = st.explosive
+  local bigBlast = st.mortar > 0 and self.shotCount % 5 == 0
+  if bigBlast then
+    explosive = explosive + 2
+  end
+  local spread = st.spread * ((st.steady > 0 and ctx.still) and 0.12 or 1)
   local shots = {}
-  for i = 1, pellets do
-    local offset = math.rad(st.spread) * (love.math.random() - 0.5)
+  local function makeShot(shotAngle, damageScale)
+    local crit = love.math.random() < st.critChance
     local jitter = (def.speedJitter or 0) * (love.math.random() * 2 - 1)
-    shots[i] = {
-      angle = angle + offset,
+    local damage = st.damage * mult * damageScale * (crit and 2 or 1)
+    shots[#shots + 1] = {
+      angle = shotAngle,
       speed = st.bulletSpeed * (1 + jitter),
-      damage = math.max(1, math.floor(st.damage + 0.5)),
+      damage = math.max(1, math.floor(damage + 0.5)),
+      crit = crit,
       impact = st.impactForce,
       digRadius = st.digRadius,
       digPower = st.digPower,
@@ -370,15 +484,30 @@ function Gun:fire(angle)
       bounces = st.bounces,
       -- Explosions are scaled down for multi-pellet shots so a shotgun blast
       -- isn't seven full explosions
-      explosive = st.explosive > 0 and {
-        count = st.explosive,
-        scale = pellets > 1 and 1 / math.sqrt(pellets) or 1,
+      explosive = explosive > 0 and {
+        count = explosive,
+        scale = pellets > 1 and 1 / math.sqrt(pellets) or (bigBlast and 1.3 or 1),
       } or nil,
       burn = st.incendiary > 0 and { dps = 3 * st.incendiary, time = 2 + st.incendiary } or nil,
       tint = tint,
+      fx = fx,
     }
   end
-  return shots
+  for _ = 1, pellets do
+    makeShot(angle + math.rad(spread) * (love.math.random() - 0.5), 1)
+  end
+  if st.rear > 0 then
+    makeShot(angle + math.pi + math.rad(spread) * (love.math.random() - 0.5), 0.6)
+  end
+
+  local sideEffects
+  if st.bloodCost > 0 or st.misfire > 0 then
+    sideEffects = {
+      cost = st.bloodCost,
+      misfire = st.misfire > 0 and love.math.random() < math.min(0.6, 0.2 * st.misfire),
+    }
+  end
+  return shots, sideEffects
 end
 
 return guns

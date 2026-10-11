@@ -1,6 +1,8 @@
 -- The shop rooms (design doc §9). At the end of each area the shop has:
---   * a healing pedestal on the left (ivory, with a glowing heart): each E buys
---     10% of max health, priced by how much health is missing;
+--   * three perk pedestals at the far left (free: take one and the others
+--     vanish; the perks are rolled when the hunter walks in);
+--   * a healing pedestal to their right (ivory, with a glowing heart): each E
+--     buys 10% of max health, priced by how much health is missing;
 --   * one generated weapon, then ammo types and attachments to its right, on
 --     stone pedestals with prices floating over them;
 --   * a hatch in the floor (when another area lies below) held shut by a chain.
@@ -18,6 +20,7 @@ local inventory = require("src.inventory")
 local itembar = require("src.itembar")
 local items = require("src.items")
 local materials = require("src.materials")
+local perks = require("src.perks")
 local physics = require("src.physics")
 
 local shop = {}
@@ -42,6 +45,14 @@ local function roundTo5(n)
   return math.floor(n / 5 + 0.5) * 5
 end
 
+-- What a stock entry costs now (the Haggler and Greedy Hands perks lower prices)
+local function priceOf(entry)
+  if entry.price <= 0 then
+    return 0
+  end
+  return math.max(5, roundTo5(entry.price * perks.prod("shopPrice")))
+end
+
 -- Creates the shop for the room rectangle { x, y, w, h, hatch? } of area `level`
 function shop.populate(room, world, level)
   local s = {
@@ -52,7 +63,7 @@ function shop.populate(room, world, level)
     stock = {},
     locked = false,
     entered = false,
-    heal = { x = room.x + 45 },
+    heal = { x = room.x + 105 },
   }
   shops[#shops + 1] = s
   local function add(entry, x)
@@ -63,15 +74,20 @@ function shop.populate(room, world, level)
     s.stock[#s.stock + 1] = entry
   end
 
+  -- Three perk pedestals at the far left; what they hold is rolled on entry
+  for i = 1, 3 do
+    add({ kind = "perk", name = "", price = 0, hidden = true }, room.x + 30 + (i - 1) * 25)
+  end
+
   -- One weapon, then the ammo types and attachments to its right
   local gun = guns.generate(nil, nil, 0.3)
   local fitted = 0
-  for slot = 1, gun.def.slots do
+  for slot = 1, gun.slotCount do
     if gun.slots[slot] then
       fitted = fitted + 1
     end
   end
-  add({ kind = "weapon", gun = gun, name = gun.name, price = roundTo5(45 + 25 * fitted + love.math.random(0, 20)) }, room.x + 95)
+  add({ kind = "weapon", gun = gun, name = gun.name, price = roundTo5(45 + 25 * fitted + 8 * math.max(0, gun.slotCount - gun.def.slots) + love.math.random(0, 20)) }, room.x + 155)
   local used = {}
   for i = 1, ITEMS do
     local item
@@ -79,7 +95,8 @@ function shop.populate(room, world, level)
       item = items.random()
     until not used[item.id]
     used[item.id] = true
-    add({ kind = "item", item = item, name = item.name, price = roundTo5(20 + love.math.random(0, 15)) }, room.x + 125 + (i - 1) * SPACING)
+    local range = items.rarities[item.rarity].price
+    add({ kind = "item", item = item, name = item.name, price = roundTo5(love.math.random(range[1], range[2])) }, room.x + 185 + (i - 1) * SPACING)
   end
 
   local h = room.hatch
@@ -100,8 +117,50 @@ function shop.populate(room, world, level)
 end
 
 function shop.take(entry, inv)
-  inv.gold = inv.gold - entry.price
+  inv.gold = inv.gold - priceOf(entry)
   entry.sold = true
+end
+
+-- Rolls the three perks on offer
+local function offerPerks(s)
+  local picks = perks.roll(3)
+  local n = 0
+  for _, e in ipairs(s.stock) do
+    if e.kind == "perk" then
+      n = n + 1
+      local id = picks[n]
+      if id then
+        e.perkId = id
+        e.perk = perks.new(id)
+        e.name = e.perk.name
+        e.hidden = false
+        local c = e.perk.color
+        for _ = 1, 10 do
+          effects.particle(e.x + (love.math.random() - 0.5) * 8, s.floorY - 14, (love.math.random() - 0.5) * 40, -10 - love.math.random() * 40, 0.6, c, 0, true)
+        end
+      else
+        e.sold = true
+      end
+    end
+  end
+end
+
+-- Taking a perk: it is yours, and the other two vanish
+local function takePerk(s, e, player)
+  perks.add(e.perkId)
+  player:refreshMaxHp()
+  audio.play("buy")
+  e.sold = true
+  for _, other in ipairs(s.stock) do
+    if other.kind == "perk" and not other.sold then
+      other.sold = true
+      if other.perk then
+        for _ = 1, 10 do
+          effects.particle(other.x + (love.math.random() - 0.5) * 8, s.floorY - 14, (love.math.random() - 0.5) * 50, -20 - love.math.random() * 40, 0.5, { 0.6, 0.6, 0.65 }, 100, true)
+        end
+      end
+    end
+  end
 end
 
 -- What the hunter is next to: returns shop, kind ("stock" or "heal"), entry
@@ -111,7 +170,7 @@ local function nearest(player)
   local bs, bk, be
   for _, s in ipairs(shops) do
     for _, e in ipairs(s.stock) do
-      if not e.sold then
+      if not e.sold and not e.hidden then
         local d = math.sqrt((e.x - px) ^ 2 + (s.floorY - 8 - py) ^ 2)
         if d < bestDist then
           best, bestDist, bs, bk, be = e, d, s, "stock", e
@@ -130,7 +189,7 @@ end
 -- 50g when nearly dead, for each 10% of max health
 local function healCost(player)
   local missing = (player.maxHp - player.hp) / player.maxHp
-  return roundTo5(10 + 40 * missing)
+  return roundTo5((10 + 40 * missing) * perks.prod("healPrice"))
 end
 
 local function healAmount(player)
@@ -175,7 +234,12 @@ function shop.interact(player)
     end
     return true
   end
-  if inv.gold < e.price then
+  if e.kind == "perk" then
+    takePerk(s, e, player)
+    say(e.name, e.perk.color)
+    return true
+  end
+  if inv.gold < priceOf(e) then
     say("Not enough gold", { 1, 0.45, 0.4 })
     audio.play("deny")
     return true
@@ -282,6 +346,9 @@ function shop.update(dt, player)
     end
     if not s.locked then
       if inside(s.room, px, py, 0) then
+        if not s.entered then
+          offerPerks(s)
+        end
         s.entered = true
       elseif s.entered and not inside(s.room, px, py, 10) then
         s.locked = true
@@ -295,6 +362,11 @@ end
 
 local function onScreen(s, x, view)
   return x > view.x - 24 and x < view.x + view.w + 24 and s.floorY > view.y - 30 and s.floorY < view.y + view.h + 30
+end
+
+-- Any part of the shop room in view
+local function roomOnScreen(s, view)
+  return s.room.x < view.x + view.w + 24 and s.room.x + s.room.w > view.x - 24 and s.floorY > view.y - 30 and s.floorY < view.y + view.h + 30
 end
 
 -- The ivory healing pedestal with a glowing heart floating over it
@@ -316,16 +388,18 @@ end
 -- (before the lighting)
 function shop.draw(view)
   for _, s in ipairs(shops) do
-    if onScreen(s, s.heal.x, view) or (s.hatch and onScreen(s, s.hatch.cx, view)) then
+    if roomOnScreen(s, view) then
       drawHealPedestal(s)
       for _, e in ipairs(s.stock) do
         love.graphics.setColor(0.34, 0.32, 0.38)
         love.graphics.rectangle("fill", e.x - 6, s.floorY - 5, 12, 5)
         love.graphics.setColor(0.46, 0.44, 0.50)
         love.graphics.rectangle("fill", e.x - 6, s.floorY - 5, 12, 1)
-        if not e.sold then
+        if not e.sold and not e.hidden then
           local dim = s.locked and 0.45 or 1
-          if e.kind == "weapon" then
+          if e.kind == "perk" then
+            -- (the perk itself floats over its pedestal, drawn glowing)
+          elseif e.kind == "weapon" then
             local icon = itembar.weaponIcon(e.gun.def)
             love.graphics.setColor(dim, dim, dim)
             love.graphics.draw(icon, e.x - 8, s.floorY - 5 - icon:getHeight())
@@ -335,6 +409,11 @@ function shop.draw(view)
             love.graphics.rectangle("fill", e.x - 3, s.floorY - 11, 6, 6)
             love.graphics.setColor(c[1] * dim, c[2] * dim, c[3] * dim)
             love.graphics.rectangle("fill", e.x - 2, s.floorY - 10, 4, 4)
+            local rarity = e.item.rarity ~= "common" and items.rarities[e.item.rarity]
+            if rarity then
+              love.graphics.setColor(rarity.border[1] * dim, rarity.border[2] * dim, rarity.border[3] * dim)
+              love.graphics.rectangle("line", e.x - 3.5, s.floorY - 11.5, 7, 7)
+            end
           end
         end
       end
@@ -369,7 +448,25 @@ end
 function shop.drawEmissive(view)
   local t = love.timer.getTime()
   for _, s in ipairs(shops) do
-    if onScreen(s, s.heal.x, view) then
+    if roomOnScreen(s, view) then
+      -- Perks float and glow over their pedestals
+      for _, e in ipairs(s.stock) do
+        if e.kind == "perk" and not e.sold and not e.hidden then
+          local c = e.perk.color
+          local k = s.locked and 0.35 or 1
+          local bob = math.floor(math.sin(t * 2 + e.x) * 1.5)
+          local y = s.floorY - 14 + bob
+          local pulse = 0.8 + 0.2 * math.sin(t * 3 + e.x)
+          love.graphics.setColor(c[1] * 0.5 * k, c[2] * 0.5 * k, c[3] * 0.5 * k)
+          love.graphics.rectangle("fill", e.x - 3, y - 1, 7, 7)
+          love.graphics.rectangle("fill", e.x - 1, y - 3, 3, 11)
+          love.graphics.setColor(c[1] * pulse * k, c[2] * pulse * k, c[3] * pulse * k)
+          love.graphics.rectangle("fill", e.x - 2, y, 5, 5)
+          love.graphics.rectangle("fill", e.x, y - 2, 1, 9)
+          love.graphics.setColor(math.min(1, c[1] + 0.4) * k, math.min(1, c[2] + 0.4) * k, math.min(1, c[3] + 0.4) * k)
+          love.graphics.rectangle("fill", e.x - 1, y + 1, 1, 1)
+        end
+      end
       -- The floating heart
       local x, y = s.heal.x, s.floorY - 25 + math.floor(math.sin(t * 2) * 1.5)
       local pulse = 0.8 + 0.2 * math.sin(t * 3)
@@ -392,8 +489,13 @@ function shop.addLights(lighting, view)
       lighting.add(s.heal.x, s.floorY - 22, 38, 1, 0.78, 0.7, 0.5)
     end
     for _, e in ipairs(s.stock) do
-      if not e.sold and not s.locked and onScreen(s, e.x, view) then
-        lighting.add(e.x, s.floorY - 9, 28, 1, 0.8, 0.5, 0.5)
+      if not e.sold and not e.hidden and not s.locked and onScreen(s, e.x, view) then
+        if e.kind == "perk" then
+          local c = e.perk.color
+          lighting.add(e.x, s.floorY - 12, 34, c[1], c[2], c[3], 0.7)
+        else
+          lighting.add(e.x, s.floorY - 9, 28, 1, 0.8, 0.5, 0.5)
+        end
       end
     end
   end
@@ -436,12 +538,33 @@ function shop.drawScreen(toScreen, font, player)
         end
       end
       for _, e in ipairs(s.stock) do
-        if not e.sold then
-          local sx, sy = toScreen(e.x, s.floorY - 14)
+        if not e.sold and not e.hidden then
+          local sx, sy = toScreen(e.x, s.floorY - (e.kind == "perk" and 22 or 14))
           if sx > -60 and sx < sw + 60 and sy > -20 and sy < sh + 20 then
-            local y = label(e.price .. "g", sx, sy, gold >= e.price and { 1, 0.86, 0.45 } or { 0.85, 0.4, 0.38 })
+            local price = priceOf(e)
+            local y
+            if e.kind == "perk" then
+              y = label("Free", sx, sy, { 0.6, 1, 0.65 })
+            else
+              y = label(price .. "g", sx, sy, gold >= price and { 1, 0.86, 0.45 } or { 0.85, 0.4, 0.38 })
+            end
             if e == nentry then
-              label("[E] Buy " .. e.name, sx, y - 2, { 1, 0.95, 0.75 })
+              local thing = e.perk or e.item
+              local title = (e.kind == "perk" and "[E] Take " or "[E] Buy ") .. e.name
+              if thing and thing.rarity ~= "common" then
+                title = title .. " (" .. items.rarities[thing.rarity].name .. ")"
+              end
+              y = label(title, sx, y - 2, thing and thing.rarity == "cursed" and { 1, 0.55, 0.5 } or { 1, 0.95, 0.75 })
+              if thing and thing.desc then
+                -- The effect, wrapped in a box above the prompt
+                local width = 460
+                local _, lines = font:getWrap(thing.desc, width)
+                local top = y - 4 - #lines * font:getHeight()
+                love.graphics.setColor(0, 0, 0, 0.8)
+                love.graphics.printf(thing.desc, math.floor(sx - width / 2) + 2, top + 2, width, "center")
+                love.graphics.setColor(0.9, 0.88, 0.82)
+                love.graphics.printf(thing.desc, math.floor(sx - width / 2), top, width, "center")
+              end
             end
           end
         end

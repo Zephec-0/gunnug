@@ -12,6 +12,7 @@ local audio = require("src.audio")
 local Body = require("src.body")
 local config = require("src.config")
 local effects = require("src.effects")
+local perks = require("src.perks")
 local physics = require("src.physics")
 local pickups = require("src.pickups")
 local props = require("src.props")
@@ -75,6 +76,10 @@ local GLOB_LIFE = 4
 local list = {}
 local globs = {}
 
+-- Set by src.game: called as onKill(enemy, fx) when an enemy dies, with the
+-- effects of the bullet that last hit it (nil for kicks and explosions)
+enemies.onKill = nil
+
 function enemies.clear()
   list, globs = {}, {}
 end
@@ -93,6 +98,7 @@ function enemies.spawn(kind, x, y, toughness)
     def = def,
     body = Body.new(math.floor(x - def.w / 2), math.floor(top), def.w, def.h),
     hp = math.floor(def.hp * (toughness or 1) + 0.5),
+    maxHp = math.floor(def.hp * (toughness or 1) + 0.5),
     toughness = toughness or 1,
     state = kind == "ghoul" and "idle" or "sleep",
     facing = love.math.random() < 0.5 and -1 or 1,
@@ -144,8 +150,12 @@ local function die(e)
   removePhysics(e)
   local cx, cy = center(e)
   local gold = love.math.random(e.def.gold[1], e.def.gold[2])
-  pickups.dropGold(cx, cy, math.floor(gold * e.toughness + 0.5))
-  pickups.maybeDropItem(cx, cy, ITEM_DROP_CHANCE)
+  local greed = e.lastFx and e.lastFx.greed or 0
+  pickups.dropGold(cx, cy, math.floor(gold * e.toughness * (1 + greed) + 0.5))
+  pickups.maybeDropItem(cx, cy, ITEM_DROP_CHANCE * perks.prod("loot"))
+  if enemies.onKill then
+    enemies.onKill(e, e.lastFx)
+  end
   -- (Monsters never drop weapons: those come from chests and the shop.)
   local colors = {
     ghoul = { { 0.42, 0.10, 0.10 }, { 0.55, 0.52, 0.48 } },
@@ -161,14 +171,24 @@ local function die(e)
 end
 
 -- Damages an enemy. (dx, dy) is the hit direction, force the impact
-function enemies.damage(e, amount, dx, dy, force)
+function enemies.damage(e, amount, dx, dy, force, crit, fx)
   if e.dead then
     return
   end
+  if e.acid and e.acid > 0 then
+    amount = math.floor(amount * 1.3 + 0.5) -- corroded
+  end
   e.hp = e.hp - amount
   e.flash = 0.08
+  if fx then
+    e.lastFx = fx
+  end
   local cx = center(e)
-  effects.popup(cx, e.body.y - 2, tostring(amount), { 1, 0.9, 0.3 })
+  if crit then
+    effects.popup(cx, e.body.y - 4, amount .. "!", { 1, 0.55, 0.15 })
+  else
+    effects.popup(cx, e.body.y - 2, tostring(amount), { 1, 0.9, 0.3 })
+  end
   -- Being shot wakes it and makes it hunt the hunter
   if e.state == "sleep" or e.state == "idle" then
     e.state = e.kind == "spitter" and "watch" or "chase"
@@ -216,8 +236,88 @@ function enemies.ignite(e, dps, time)
   end
 end
 
--- A faint purple glow behind every monster, so they stand out in the dark:
--- a soft halo plus a few motes that drift up from it (drawn behind the sprite)
+-- Status effects from special ammo ---------------------------------------
+
+-- Poison: steady damage for `time` seconds (a stronger dose replaces a weaker one)
+function enemies.poison(e, dps, time)
+  if e.dead then
+    return
+  end
+  if e.poisoned then
+    e.poisoned.dps = math.max(e.poisoned.dps, dps)
+    e.poisoned.left = math.max(e.poisoned.left, time)
+  else
+    e.poisoned = { dps = dps, left = time, tick = 0.5 }
+  end
+end
+
+-- Chilled: moves and acts slowly for `time` seconds
+function enemies.chill(e, time)
+  e.slow = math.max(e.slow or 0, time)
+end
+
+-- Corroded: takes extra damage for `time` seconds
+function enemies.corrode(e, time)
+  e.acid = math.max(e.acid or 0, time)
+end
+
+function enemies.stun(e, time)
+  e.stun = math.max(e.stun, time)
+end
+
+-- The closest living enemy to (x, y) within range, skipping `skip` (a set)
+function enemies.nearest(x, y, range, skip)
+  local best, bestDist = nil, range
+  for _, e in ipairs(list) do
+    if not e.dead and not (skip and skip[e]) then
+      local cx, cy = center(e)
+      local d = math.sqrt((cx - x) ^ 2 + (cy - y) ^ 2)
+      if d < bestDist then
+        best, bestDist = e, d
+      end
+    end
+  end
+  return best
+end
+
+-- Shock Rounds: lightning arcs from a hit enemy to up to two others nearby
+function enemies.chain(from, damage, fx)
+  local skip = { [from] = true }
+  local ax, ay = center(from)
+  for _ = 1, 2 do
+    local target = enemies.nearest(ax, ay, 48, skip)
+    if not target then
+      return
+    end
+    skip[target] = true
+    local bx, by = center(target)
+    for i = 0, 8 do
+      local t = i / 8
+      effects.particle(ax + (bx - ax) * t + (love.math.random() - 0.5) * 3, ay + (by - ay) * t + (love.math.random() - 0.5) * 3, 0, 0, 0.12, { 0.65, 0.75, 1 }, 0, true)
+    end
+    enemies.damage(target, math.max(1, math.floor(damage * 0.5 + 0.5)), 0, 0, 0, false, fx)
+    ax, ay = bx, by
+  end
+end
+
+-- Singularity Rounds: drags enemies within radius toward (x, y)
+function enemies.pull(x, y, radius, speed)
+  for _, e in ipairs(list) do
+    if not e.dead and e.def.knockback > 0 then
+      local cx, cy = center(e)
+      local dx, dy = x - cx, y - cy
+      local dist = math.sqrt(dx * dx + dy * dy)
+      if dist < radius and dist > 1 then
+        local k = speed * (1 - 0.5 * dist / radius)
+        e.body.vx = e.body.vx * 0.3 + dx / dist * k
+        e.body.vy = e.body.vy * 0.3 + dy / dist * k - 20
+        e.stun = math.max(e.stun, 0.25)
+      end
+    end
+  end
+end
+
+-- A few purple motes drift up from every monster and trail away (drawn behind the sprite)
 local AURA = { 0.62, 0.36, 0.95 }
 
 local function updateMotes(e, dt)
@@ -243,12 +343,6 @@ local function updateMotes(e, dt)
 end
 
 local function drawAura(e)
-  local b = e.body
-  local t = love.timer.getTime()
-  local a = (e.state == "sleep" and 0.13 or 0.22) * (0.85 + 0.15 * math.sin(t * 3 + e.phase))
-  love.graphics.setColor(AURA[1], AURA[2], AURA[3], a)
-  love.graphics.rectangle("fill", b.x - 1, b.y, b.w + 2, b.h)
-  love.graphics.rectangle("fill", b.x, b.y - 1, b.w, b.h + 2)
   for _, m in ipairs(e.motes or {}) do
     love.graphics.setColor(AURA[1], AURA[2], AURA[3], 0.7 * m.life / 0.8)
     love.graphics.rectangle("fill", math.floor(m.x), math.floor(m.y), 1, 1)
@@ -276,6 +370,27 @@ local function updateBurn(e, dt)
   end
 end
 
+-- Poison: a damage tick every half second
+local function updatePoison(e, dt)
+  local poison = e.poisoned
+  if not poison then
+    return
+  end
+  poison.left = poison.left - dt
+  poison.tick = poison.tick - dt
+  if love.math.random() < 0.3 then
+    local cx = center(e)
+    effects.particle(cx + (love.math.random() - 0.5) * e.body.w, e.body.y + love.math.random() * e.body.h, 0, -14, 0.4, { 0.45, 0.85, 0.30 }, -10, true)
+  end
+  if poison.tick <= 0 then
+    poison.tick = 0.5
+    enemies.damage(e, math.max(1, math.floor(poison.dps * 0.5 + 0.5)))
+  end
+  if poison.left <= 0 then
+    e.poisoned = nil
+  end
+end
+
 -- Bullet hit test: an enemy or an acid glob at the pixel (globs can be shot down)
 function enemies.hitTest(px, py)
   for _, e in ipairs(list) do
@@ -293,14 +408,14 @@ function enemies.hitTest(px, py)
 end
 
 -- Applies a bullet to whatever hitTest returned
-function enemies.hit(thing, amount, dx, dy, force)
+function enemies.hit(thing, amount, dx, dy, force, crit, fx)
   if thing.isGlob then
     thing.dead = true
     for _ = 1, 6 do
       effects.particle(thing.x, thing.y, (love.math.random() - 0.5) * 90, -love.math.random() * 60, 0.4, { 0.55, 0.95, 0.35 }, 300, true)
     end
   else
-    enemies.damage(thing, amount, dx, dy, force)
+    enemies.damage(thing, amount, dx, dy, force, crit, fx)
   end
 end
 
@@ -609,9 +724,16 @@ function enemies.update(dt, world, player)
           e.sightTimer = 0.25
           e.seesPlayer = lineOfSight(world, cx, cy, px, py)
         end
-        UPDATE[e.kind](e, dt, world, player, px, py)
+        if e.slow and e.slow > 0 then
+          e.slow = e.slow - dt
+        end
+        if e.acid and e.acid > 0 then
+          e.acid = e.acid - dt
+        end
+        UPDATE[e.kind](e, (e.slow and e.slow > 0) and dt * 0.45 or dt, world, player, px, py)
         propImpacts(e, dt)
         updateBurn(e, dt)
+        updatePoison(e, dt)
         updateMotes(e, dt)
         -- Touching the hunter hurts him
         local b = e.body
@@ -782,6 +904,20 @@ function enemies.draw(view)
     if onScreen(e, view) then
       drawAura(e)
       DRAW[e.kind](e)
+      -- Status tints: frost, venom and acid wash over the sprite
+      local b = e.body
+      if e.slow and e.slow > 0 then
+        love.graphics.setColor(0.55, 0.85, 1, 0.35)
+        love.graphics.rectangle("fill", math.floor(b.x), math.floor(b.y), b.w, b.h)
+      end
+      if e.poisoned then
+        love.graphics.setColor(0.4, 0.9, 0.3, 0.25)
+        love.graphics.rectangle("fill", math.floor(b.x), math.floor(b.y), b.w, b.h)
+      end
+      if e.acid and e.acid > 0 then
+        love.graphics.setColor(0.8, 1, 0.2, 0.25)
+        love.graphics.rectangle("fill", math.floor(b.x), math.floor(b.y), b.w, b.h)
+      end
     end
   end
 end
@@ -809,8 +945,6 @@ function enemies.addLights(lighting, view)
   for _, e in ipairs(list) do
     if onScreen(e, view) then
       local cx, cy = center(e)
-      -- The purple back-light
-      lighting.add(cx, cy, 13, AURA[1], AURA[2], AURA[3], e.state == "sleep" and 0.3 or 0.45)
       if e.kind == "spitter" then
         lighting.add(cx, cy + 4, e.windup and 30 or 16, 0.5, 1, 0.35, 0.5)
       end

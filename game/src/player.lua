@@ -5,7 +5,9 @@ local bullets = require("src.bullets")
 local config = require("src.config")
 local effects = require("src.effects")
 local enemies = require("src.enemies")
+local perks = require("src.perks")
 local physics = require("src.physics")
+local pickups = require("src.pickups")
 local playeranim = require("src.playeranim")
 local props = require("src.props")
 local targets = require("src.targets")
@@ -52,8 +54,14 @@ function Player.new(x, y, world, inv)
   love.physics.newFixture(self.physBody, love.physics.newRectangleShape(cfg.width, cfg.height))
   self.physBody:setFixedRotation(true)
   self.groundProp = nil
-  self.hp = cfg.maxHp
-  self.maxHp = cfg.maxHp
+  self.maxHp = perks.maxHp(cfg.maxHp)
+  self.hp = self.maxHp
+  self.airJumps = 0 -- Double Jump: mid-air jumps left
+  self.haste = 0 -- Adrenaline: seconds of extra speed left
+  self.streak = 0 -- Momentum: recent kills
+  self.streakTimer = 0
+  self.regenAcc = 0
+  self.drainTimer = 3
   self.dead = false
   self.invuln = 0 -- can't be hurt again until this runs out
   self.hurtFlash = 0 -- red screen flash after a hit
@@ -105,9 +113,13 @@ function Player:kick()
   local b = self.body
   local x = self.facing > 0 and b.x + b.w or b.x - cfg.kickRange
   audio.play("kick")
-  targets.kick(x, b.y + 6, cfg.kickRange, b.h - 6, cfg.kickDamage)
-  enemies.kick(x, b.y + 6, cfg.kickRange, b.h - 6, self.facing, cfg.kickDamage)
-  props.kick(x, b.y + 6, cfg.kickRange, b.h - 6, self.facing, cfg.kickForce, cfg.kickLift, cfg.kickDamage)
+  local damage = cfg.kickDamage * perks.prod("kickDamage")
+  if self.gun and self.gun:stats().bayonet > 0 then
+    damage = damage * 3
+  end
+  targets.kick(x, b.y + 6, cfg.kickRange, b.h - 6, damage)
+  enemies.kick(x, b.y + 6, cfg.kickRange, b.h - 6, self.facing, damage)
+  props.kick(x, b.y + 6, cfg.kickRange, b.h - 6, self.facing, cfg.kickForce, cfg.kickLift, damage)
 end
 
 -- Velocity along an axis after an airborne recoil kick: at least the kick's
@@ -124,11 +136,13 @@ end
 -- Pushes the player opposite the shot. On the ground the push is heavily reduced.
 function Player:applyRecoil(angle)
   local b = self.body
-  local strength = self.gun:stats().recoil
+  local st = self.gun:stats()
+  local strength = st.recoil
   local ix, iy = -math.cos(angle) * strength, -math.sin(angle) * strength
   if self.grounded then
-    b.vx = b.vx + ix * cfg.groundRecoilScale
-    b.vy = b.vy + iy * cfg.groundRecoilScale
+    local scale = st.jets > 0 and 0.6 or cfg.groundRecoilScale -- Jump Jets
+    b.vx = b.vx + ix * scale
+    b.vy = b.vy + iy * scale
   else
     b.vx = airKick(b.vx, ix)
     b.vy = airKick(b.vy, iy)
@@ -142,7 +156,13 @@ function Player:shoot()
   if not self.gun then
     return
   end
-  local shots = self.gun:fire(self.aimAngle)
+  local st = self.gun:stats()
+  local ctx = {
+    damageMult = (self.hp < self.maxHp * 0.3) and (1 + perks.sum("lastStand")) or 1,
+    fireRate = 1 + 0.06 * self.streak,
+    still = math.abs(self.body.vx) < 25 and self.grounded,
+  }
+  local shots, side = self.gun:fire(self.aimAngle, ctx)
   if not shots then
     return
   end
@@ -153,8 +173,19 @@ function Player:shoot()
   for _, s in ipairs(shots) do
     bullets.spawn(sx, sy, s)
   end
-  effects.muzzleFlash(self.muzzleX, self.muzzleY, self.aimAngle, self.gun.def.flash)
-  audio.play("shot_" .. (self.gun.def.model == "pistol" and "pistol" or self.gun.def.model))
+  local quiet = st.sneak > 0 -- Suppressor
+  effects.muzzleFlash(self.muzzleX, self.muzzleY, self.aimAngle, self.gun.def.flash * (quiet and 0.5 or 1))
+  audio.play("shot_" .. (self.gun.def.model == "pistol" and "pistol" or self.gun.def.model), quiet and 0.35 or nil)
+  if side then
+    if side.cost > 0 and self.hp > 1 then
+      -- Blood Rounds: every shot costs blood, but never the last drop
+      self.hp = math.max(1, self.hp - side.cost)
+      effects.popup(self.muzzleX, self.muzzleY - 6, "-" .. side.cost, { 0.8, 0.1, 0.15 })
+    end
+    if side.misfire then
+      bullets.blast(self.muzzleX, self.muzzleY, 1, 0.8) -- Unstable Rounds
+    end
+  end
   if self.gun.chambers == 0 then
     audio.play("reload", 0.8)
   end
@@ -170,7 +201,20 @@ function Player:hurt(amount, fromX, fromY)
   end
   local b = self.body
   local cx, cy = self:center()
-  self.hp = math.max(0, self.hp - amount)
+  local vulnerable = self.gun and self.gun:stats().vulnerable or 0
+  amount = math.max(1, math.floor(amount * perks.prod("dmgTaken") * (1 + vulnerable) + 0.5))
+  if self.hp - amount <= 0 and perks.has("second_wind") and not self.inventory.secondWindUsed then
+    -- Second Wind: the first killing blow leaves the hunter standing
+    self.inventory.secondWindUsed = true
+    amount = 0
+    self.hp = math.ceil(self.maxHp * 0.3)
+    effects.popup(cx, b.y - 14, "Second Wind!", { 0.55, 0.9, 0.8 })
+  else
+    self.hp = math.max(0, self.hp - amount)
+  end
+  if perks.has("adrenaline") then
+    self.haste = 3
+  end
   audio.play(self.hp <= 0 and "death" or "hurt")
   self.invuln = cfg.hurtInvulnerability
   self.hurtFlash = 1
@@ -192,6 +236,69 @@ function Player:hurt(amount, fromX, fromY)
     end
   end
   return true
+end
+
+-- Healing from perks, ammo and kills
+function Player:heal(amount)
+  if self.dead or amount <= 0 or self.hp >= self.maxHp then
+    return
+  end
+  local healed = math.min(self.maxHp - self.hp, amount)
+  self.hp = self.hp + healed
+  local cx = self:center()
+  effects.popup(cx, self.body.y - 4, "+" .. math.floor(healed + 0.5), { 0.5, 1, 0.55 })
+end
+
+-- A new max health (a perk was taken): the extra health is granted at once,
+-- a lower maximum cuts current health down to it
+function Player:refreshMaxHp()
+  local newMax = perks.maxHp(cfg.maxHp)
+  if newMax > self.maxHp then
+    self.hp = self.hp + (newMax - self.maxHp)
+  end
+  self.maxHp = newMax
+  self.hp = math.min(self.hp, newMax)
+end
+
+-- An enemy died; fx is the effects of the bullet that last hit it
+function Player:onKill(enemy, fx)
+  if self.dead then
+    return
+  end
+  self:heal(perks.sum("killHeal") + (fx and fx.vamp or 0))
+  if perks.has("momentum") then
+    self.streak = math.min(5, self.streak + 1)
+    self.streakTimer = 4
+  end
+  if fx and fx.refill and fx.refill > 0 and fx.gun then
+    fx.gun:refill(fx.refill)
+  end
+end
+
+-- Perks that tick over time
+function Player:updatePerks(dt)
+  self.haste = math.max(0, self.haste - dt)
+  if self.streakTimer > 0 then
+    self.streakTimer = self.streakTimer - dt
+    if self.streakTimer <= 0 then
+      self.streak = 0
+    end
+  end
+  local regen = perks.sum("regen")
+  if regen > 0 and self.hp < self.maxHp then
+    self.regenAcc = self.regenAcc + regen * dt
+    if self.regenAcc >= 1 then
+      self.regenAcc = self.regenAcc - 1
+      self.hp = math.min(self.maxHp, self.hp + 1)
+    end
+  end
+  if perks.sum("drain") > 0 then
+    self.drainTimer = self.drainTimer - dt
+    if self.drainTimer <= 0 then
+      self.drainTimer = 3
+      self.hp = math.max(1, self.hp - 1)
+    end
+  end
 end
 
 -- Hurt timers keep running while dead (the screen flash fades out)
@@ -299,6 +406,10 @@ function Player:update(dt, aimX, aimY)
   self.jumpBufferTimer = math.max(0, self.jumpBufferTimer - dt)
   self:checkGround()
   self.coyoteTimer = self.grounded and cfg.coyoteTime or math.max(0, self.coyoteTimer - dt)
+  if self.grounded then
+    self.airJumps = perks.sum("airJumps")
+  end
+  self:updatePerks(dt)
 
   -- Horizontal movement. Momentum above walk speed (from recoil) is kept and
   -- only bled off by friction, so walking never cancels a recoil jump.
@@ -311,7 +422,8 @@ function Player:update(dt, aimX, aimY)
   end
   self:updateCrouch(dt, love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl"))
 
-  local maxSpeed = (self.crouched and self.grounded) and cfg.crouchSpeed or cfg.walkSpeed
+  local walk = cfg.walkSpeed * perks.prod("speed") * (self.haste > 0 and 1.35 or 1)
+  local maxSpeed = (self.crouched and self.grounded) and cfg.crouchSpeed or walk
   local friction = self.grounded and cfg.groundFriction or cfg.airFriction
   if self.sliding and self.grounded then
     -- Sliding ignores steering and coasts on its momentum. Gravity along the
@@ -320,7 +432,7 @@ function Player:update(dt, aimX, aimY)
     local along = config.gravity * cfg.gravityScale * slope / math.sqrt(1 + slope * slope)
     local before = math.abs(b.vx)
     b.vx = b.vx + along * cfg.slideSlopeAccel * dt
-    b.vx = approach(b.vx, 0, cfg.slideFriction * dt)
+    b.vx = approach(b.vx, 0, cfg.slideFriction * perks.prod("slideFriction") * dt)
     if math.abs(b.vx) > cfg.slideTopSpeed and math.abs(b.vx) > before then
       b.vx = sign(b.vx) * math.max(before, cfg.slideTopSpeed)
     end
@@ -353,13 +465,13 @@ function Player:update(dt, aimX, aimY)
       -- The extra speed is a temporary bonus that fades in the air
       self.springBonus = sprung - before
       self.springDir = dir
-      b.vy = -cfg.jumpSpeed * cfg.slideJumpHeight
+      b.vy = -cfg.jumpSpeed * perks.prod("jump") * cfg.slideJumpHeight
       for _ = 1, 10 do
         local c = 0.4 + love.math.random() * 0.15
         effects.particle(b.x + b.w / 2 + (love.math.random() - 0.5) * 8, b.y + b.h - 1, -dir * (20 + love.math.random() * 50), -10 - love.math.random() * 40, 0.5, { c, c * 0.9, c * 0.85 }, 200)
       end
     else
-      b.vy = -cfg.jumpSpeed
+      b.vy = -cfg.jumpSpeed * perks.prod("jump")
     end
     self.sliding = false
     self.jumping = true
@@ -368,6 +480,16 @@ function Player:update(dt, aimX, aimY)
     self.grounded = false
     self.groundProp = nil
     jumped = true
+  elseif self.jumpBufferTimer > 0 and not self.grounded and self.airJumps > 0 then
+    -- Double Jump
+    self.airJumps = self.airJumps - 1
+    b.vy = -cfg.jumpSpeed * perks.prod("jump") * 0.95
+    self.jumping = true
+    self.jumpBufferTimer = 0
+    jumped = true
+    for _ = 1, 8 do
+      effects.particle(b.x + b.w / 2 + (love.math.random() - 0.5) * 6, b.y + b.h, (love.math.random() - 0.5) * 60, 20 + love.math.random() * 30, 0.35, { 0.8, 0.92, 1 }, 60, true)
+    end
   end
   local jumpHeld = love.keyboard.isDown("w") or love.keyboard.isDown("space")
   if self.jumping and not jumpHeld and b.vy < 0 then
@@ -390,6 +512,13 @@ function Player:update(dt, aimX, aimY)
   -- Gun
   self.inventory:update(dt)
   self.gun = self.inventory:selectedGun()
+  if self.gun ~= self.lastGun then
+    self.lastGun = self.gun
+    if self.gun then
+      self.gun.drawn = true -- Quickdraw Holster: the first shot after switching
+    end
+  end
+  pickups.extraMagnet = self.gun and self.gun:stats().magnet or 0
   if love.mouse.isDown(1) then
     self:shoot()
   end
@@ -471,6 +600,10 @@ end
 function Player:addLights(lighting)
   local cx, cy = self:center()
   lighting.add(cx, cy, 150, 1, 0.86, 0.66, 0.75)
+  local lamp = self.gun and self.gun:stats().lamp or 0
+  if lamp > 0 then
+    lighting.add(cx, cy, 150 + lamp, 1, 0.82, 0.55, 0.6) -- Muzzle Lantern
+  end
   local ex, ey = playeranim.eyes(self)
   lighting.add(ex, ey, 9, 1, 0.8, 0.4, 0.7)
 end
@@ -483,6 +616,19 @@ end
 function Player:drawEmissive()
   if visible(self) then
     playeranim.drawEyes(self)
+    -- Laser Sight: a red line out to the first solid pixel
+    if self.gun and self.gun:stats().laser > 0 then
+      local dx, dy = math.cos(self.aimAngle), math.sin(self.aimAngle)
+      local x, y = self.muzzleX, self.muzzleY
+      local length = 0
+      while length < 320 and not self.world:isSolid(math.floor(x + dx * length), math.floor(y + dy * length)) do
+        length = length + 2
+      end
+      love.graphics.setColor(1, 0.15, 0.15, 0.55)
+      love.graphics.line(x, y, x + dx * length, y + dy * length)
+      love.graphics.setColor(1, 0.5, 0.5)
+      love.graphics.rectangle("fill", math.floor(x + dx * length), math.floor(y + dy * length), 1, 1)
+    end
   end
 end
 

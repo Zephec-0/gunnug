@@ -89,17 +89,17 @@ local function card(gun, x, y, w, h, u, borderColor, tag)
   itembar.shadowPrint(gun.name, tx, y + 2 * u, itembar.font(3.8 * u), { 1, 0.9, 0.6 })
   itembar.shadowPrint(itembar.statLine(gun), tx, y + 8 * u, itembar.font(3.1 * u), { 0.88, 0.86, 0.82 })
 
-  -- Fitted ammo and attachments, right-aligned
-  local size = 9 * u
-  local bx = x + w - 3 * u - gun.def.slots * (size + u)
-  for s = 1, gun.def.slots do
-    local sx = bx + (s - 1) * (size + u)
+  -- Fitted ammo and attachments, in a row along the bottom
+  local size = 7 * u
+  local sy = y + h - size - 1.5 * u
+  for s = 1, gun.slotCount do
+    local sx = tx + (s - 1) * (size + u)
     love.graphics.setColor(0.06, 0.05, 0.08, 0.9)
-    love.graphics.rectangle("fill", sx, y + 3 * u, size, size, u, u)
+    love.graphics.rectangle("fill", sx, sy, size, size, u, u)
     love.graphics.setColor(0.45, 0.4, 0.38)
-    love.graphics.rectangle("line", sx, y + 3 * u, size, size, u, u)
+    love.graphics.rectangle("line", sx, sy, size, size, u, u)
     if gun.slots[s] then
-      itembar.drawThing(gun.slots[s], sx, y + 3 * u, size, u)
+      itembar.drawThing(gun.slots[s], sx, sy, size, u)
     end
   end
   if tag then
@@ -116,7 +116,7 @@ function compare.draw(inv, u)
   love.graphics.setColor(0.02, 0.01, 0.04, 0.75)
   love.graphics.rectangle("fill", 0, 0, ww, wh)
 
-  local cardW, cardH = 200 * u, 30 * u
+  local cardW, cardH = 200 * u, 36 * u
   local x = math.floor((ww - cardW) / 2)
   local y = 10 * u
   local title, small = itembar.font(5 * u), itembar.font(3.4 * u)
@@ -130,7 +130,7 @@ function compare.draw(inv, u)
   y = y + 7 * u
 
   hitboxes = {}
-  local carriedH = 28 * u
+  local carriedH = 34 * u
   for i = 1, inventory.WEAPON_SLOTS do
     local gun = inv.weapons[i]
     if gun then

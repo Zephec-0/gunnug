@@ -127,6 +127,111 @@ Noita-style, along the top-left of the screen:
 - **Tab** opens the weapon panel in the middle of the screen and **pauses the game**. Each carried weapon gets a card with its stats and its own ammo/attachment slots. Anything in a slot can be dragged to another slot (dropping on a full slot swaps them); weapons only go in weapon slots, ammo/attachments everywhere else. Hovering shows the name. Tab or Escape closes it.
 - The inventory belongs to the run: it carries over between areas and resets on restart. All carried guns keep reloading, held or not.
 
+### 5.7 The full item list: 53 ammo types & attachments, with rarity (implemented)
+
+Every item has a **rarity**: **Common** (grey rim, drops most, ~20-35g), **Rare** (blue rim, ~45-70g) or **Cursed** (red rim, ~35-55g; powerful with a real downside). Drop and shop weights are 70 / 24 / 6. Each is pure data in `src/items.lua`; effects are applied in `src/guns.lua` (stats), `src/bullets.lua` (flight and impact) and `src/player.lua` (side effects).
+
+**Original 13:** Heavy Slug, Piercing Rounds (rare), Ricochet Rounds, Explosive Rounds (rare), Incendiary Rounds, Scatter Shot - Long Barrel, Extended Magazine, Recoil Compensator, Speed Loader, Hair Trigger, Choke, Powder Charge.
+
+**New ammo (20):**
+
+| # | Name | Rarity | Effect |
+|---|------|--------|--------|
+| 1 | Frost Rounds | common | Hits slow the enemy to under half speed for 3s |
+| 2 | Shock Rounds | rare | A hit arcs lightning to 2 nearby enemies for half damage |
+| 3 | Venom Rounds | common | Poison: steady damage for 5s |
+| 4 | Vampiric Rounds | rare | Kills heal 3 HP |
+| 5 | Gilded Rounds | common | Kills spill 50% more gold |
+| 6 | Sticky Bombs | rare | Bullets stick (to terrain or an enemy) and detonate 0.8s later |
+| 7 | Seeker Rounds | rare | Bullets curve toward the nearest enemy |
+| 8 | Singularity Rounds | rare | Impacts drag nearby enemies toward the point |
+| 9 | Auger Rounds | common | Bigger craters, digs hard rock |
+| 10 | Splitting Rounds | common | On impact, splits into two weaker bullets |
+| 11 | Boomerang Rounds | common | Turn around after a short flight and hit again |
+| 12 | Acid Rounds | common | Enemies take +30% damage from everything for 4s |
+| 13 | Concussive Rounds | common | Huge impact and a stun, half damage |
+| 14 | Spectral Rounds | rare | Fly through terrain, stop only on enemies |
+| 15 | Executioner Rounds | rare | Double damage to enemies under 30% health |
+| 16 | Glowing Rounds | common | Bullets light up the dark; +10% damage |
+| 17 | Cluster Rounds | rare | Burst into three small bombs on impact |
+| 18 | Featherweight Rounds | common | Faster bullets, less recoil, faster fire, less damage |
+| 19 | Blood Rounds | **cursed** | +90% damage, +15% crit; every shot costs 1 HP (never lethal) |
+| 20 | Unstable Rounds | **cursed** | Explosive, +75% damage, faster fire; 1 shot in 5 explodes in your face |
+
+**New attachments (20):**
+
+| # | Name | Rarity | Effect |
+|---|------|--------|--------|
+| 21 | Burst Fire | common | Bursts of three, then a pause |
+| 22 | Backblast | common | Also fires a weaker bullet backwards |
+| 23 | Primer Coil | common | First shot after each reload deals double damage |
+| 24 | Suppressor | common | Triple damage to sleeping enemies; quieter |
+| 25 | Laser Sight | common | Shows the aim line; tighter spread |
+| 26 | Bayonet | common | Kick deals triple damage |
+| 27 | Overclock | rare | 35% faster fire, but overheats and dumps the magazine after ~9 rapid shots |
+| 28 | Magnetic Loader | common | Gold within 90px flies to you |
+| 29 | Muzzle Lantern | common | Lights the dark around you while held |
+| 30 | Jump Jets | rare | +30% recoil, and recoil lifts you almost as much on the ground |
+| 31 | Mortar Breech | rare | Every fifth shot is a big explosive round |
+| 32 | Scavenger Bolt | common | Kills refill a chamber / speed a reload |
+| 33 | Quickdraw Holster | common | First shot after switching to the gun deals double damage |
+| 34 | Glass Barrel | rare | Double damage, half the chambers, slower reload |
+| 35 | Hunter's Scope | rare | +20% crit chance (crits deal double damage); tighter spread |
+| 36 | Weighted Stock | common | Much tighter spread, less recoil, slightly slower fire |
+| 37 | Penetrator Rod | rare | Bullets pass through two enemies |
+| 38 | Stabilizer Grip | common | Standing still makes shots almost perfectly accurate |
+| 39 | Dead Man's Mag | **cursed** | 2.5x chambers and +20% damage; reloads over twice as long, 30% slower fire |
+| 40 | Reckless Trigger | **cursed** | 55% faster fire and +25% damage; triple spread and you take 25% more damage |
+
+### 5.7a Weapon slots roll with the weapon
+
+A generated weapon's number of ammo/attachment slots is rolled: from **2 fewer** than the archetype's base up to **5 more**, weighted toward the middle (10% -2, 12% -1, 28% 0, 22% +1, 14% +2, 8% +3, 4% +4, 2% +5). Double-barrels and machine guns carry a **-1 bias** so they average fewer slots (about 2.9 and 3.7; revolvers and broomhandles average about 4.7). Minimum 1. Slot count is shown in the weapon stats and raises a shop weapon's price.
+
+### 5.8 Perks (implemented)
+
+Passive upgrades for the run. They have no slot and cannot be dropped. They appear **only in the shop**: three perk pedestals sit at the far left, past the healing pedestal; the three perks are rolled (never repeating ones you own) when you walk in. They are **free - take one and the other two vanish.** Perks have the same rarities as items. Taken perks show as small badges under the item bar (hover them in the weapon panel for their text). Implemented in `src/perks.lua`.
+
+| # | Perk | Rarity | Effect |
+|---|------|--------|--------|
+| 1 | Thick Skin | common | +25 max health |
+| 2 | Iron Will | rare | +50 max health |
+| 3 | Second Wind | rare | First lethal hit of the run leaves you on 30% health |
+| 4 | Scar Tissue | common | Take 15% less damage |
+| 5 | Last Stand | rare | Below 30% health, deal 50% more damage |
+| 6 | Regeneration | rare | Heal 1 HP every 3s |
+| 7 | Bloodthirst | common | Heal 2 HP per kill |
+| 8 | Adrenaline | common | Being hurt makes you 35% faster for 3s |
+| 9 | Springheel | common | Jump 15% higher |
+| 10 | Fleet Foot | common | Walk 15% faster |
+| 11 | Slick Soles | common | Slides carry far more momentum |
+| 12 | Double Jump | rare | One extra jump in mid-air |
+| 13 | Prospector | common | Gold picked up is worth 25% more |
+| 14 | Haggler | common | Shop prices 20% lower |
+| 15 | Lucky Find | rare | Monsters drop items 2.5x as often |
+| 16 | Magnetic Pockets | common | Gold is drawn from 2.5x further |
+| 17 | Sharp Eyes | common | +10% crit chance on every gun |
+| 18 | Heavy Hitter | common | +15% damage on every gun |
+| 19 | Quick Hands | common | Reload 20% faster |
+| 20 | Momentum | rare | Each kill: +6% fire rate for 4s, stacking to 5x |
+| 21 | Pyromaniac | rare | Every shot ignites |
+| 22 | Ricochet Master | rare | Every bullet ricochets once |
+| 23 | Needle Sight | rare | Every bullet pierces one extra enemy |
+| 24 | Death Burst | rare | Killed enemies explode, hurting others (never you) |
+| 25 | Kicker | common | Kick deals triple damage |
+| 26 | Glass Cannon | **cursed** | +60% damage, but 40% less max health |
+| 27 | Devil's Bargain | **cursed** | Gold worth double, but you take 50% more damage |
+| 28 | Greedy Hands | **cursed** | +60% gold and 30% off the shop, but healing costs double |
+| 29 | Berserker | **cursed** | Fire 40% faster, reload 30% faster, but 70% wider spread |
+| 30 | Pact of Pain | **cursed** | Kills heal 6 HP and kicks hit triple, but you bleed 1 HP every 3s (never to death) |
+
+### 5.9 Starting a run
+
+A run starts with a single **Revolver** that has rolled like a generated weapon: a random stat variation, a random slot count, and a 50% chance of one (never cursed) ammo type or attachment already fitted - so every run starts differently. The shotgun and machine gun come from chests, drops and the shop.
+
+### 5.10 The shop layout
+
+The shop room is 310px wide (was 240). Left to right: three free perk pedestals, the healing pedestal, the weapon, four ammo/attachment pedestals, and the hatch at the far right.
+
 ## 6. World & Terrain
 
 - **Pixel terrain, destructible, static materials.** Bullets and explosions carve holes in terrain. Detached chunks/debris may fall. No fluids, gases, or fire spreading in this milestone.
@@ -180,7 +285,7 @@ The second area, reached by dropping through the first shop's hatch into a timbe
 | **Spitter** | 20 | Fleshy sac clinging to a ceiling. On sight (300 px) swells up (0.45 s tell) and lobs an acid glob in an arc that lands on the hunter, every 2.4 s. Globs can be dodged or shot down. Falls if its rock is shot away. | 10 per glob |
 
 - **Placement:** each generated area places its monsters at generation: none near the entrance or in the shop, at least 48 px apart, and **more and tougher deeper down** (spawn chance 35% at the top to 100% at the bottom; HP up to ×1.6). About 70 per area. Only monsters within ~520 px of the hunter are active.
-- **Visibility:** every monster has a faint **purple back-glow** - a thin 1-pixel halo behind its sprite, a few motes drifting up from it that trail away, and a small purple light - so they stand out in the dark (dimmer while asleep).
+- **Visibility:** every monster sheds a few purple motes that drift up and trail away (no halo or back-light), so they can be tracked in the dark.
 - **[Later]** more types (e.g. a heavy brute), loot drops, respawning.
 
 ## 9. Economy & Shop **[Roadmap steps 1 and 6]**

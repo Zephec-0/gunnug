@@ -1,6 +1,7 @@
 -- Hand-built room for tuning movement, recoil jumping and the revolver.
 -- Layout (left to right): floating platform, ramp, steps, a pillar that needs
 -- recoil to clear, and a high ledge only reachable by recoil jumping.
+local config = require("src.config")
 local materials = require("src.materials")
 local props = require("src.props")
 local targets = require("src.targets")
@@ -71,7 +72,7 @@ function testroom.build()
   world:repaintAll()
 
   local spawnX = 30
-  return world, spawnX, world:findGround(spawnX, BORDER) - 11
+  return world, spawnX, world:findGround(spawnX, BORDER) - config.player.height
 end
 
 -- Places targets and props. Call after physics.init(world).

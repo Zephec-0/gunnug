@@ -13,7 +13,9 @@ A 2D roguelite dungeon crawler built on the bones of **Noita**: pixel-simulated,
 ## 2. Art Direction
 
 - Pixel art in the spirit of Noita, but **more vibrant** — saturated palette, strong contrast between terrain materials, punchy muzzle flashes and impacts.
-- **Rendering:** the game draws to a low-resolution canvas (~**480×270**) that is scaled up (nearest-neighbour) to the 1920×1080 window. One game pixel = one terrain pixel.
+- **Rendering:** the game draws to a low-resolution canvas of **400×225** (zoomed in 20% from the original 480×270) that fills the window. Non-whole-number scales (e.g. 4.8× at 1920×1080) use "sharp bilinear" scaling: a crisp whole-number upscale followed by a smooth fit, so every pixel stays the same size. One game pixel = one terrain pixel.
+- **Camera:** keeps the player centred (leaning slightly toward the aim) and is not clamped to the level; past a level's edge, the edge terrain continues.
+- **Character:** a lanky gunslinger (hat, poncho, jeans) drawn as 1-pixel limbs on a procedural skeleton rather than sprite frames: legs walk via inverse kinematics, both hands grip the gun and follow the aim, the gun kicks on firing, legs tuck when rising and dangle when falling, the kick extends a leg, and landings dip the body.
 
 ## 3. Game Structure
 
@@ -30,7 +32,7 @@ Overworld (hand-built, same every run)
 ## 4. Player
 
 ### 4.1 Movement
-Modelled on Noita: walk, jump, air control, gravity, collision against pixel terrain (including walking up small slopes/steps).
+Modelled on Noita: walk, jump, air control, gravity, collision against pixel terrain (including walking up small slopes/steps). The player's hitbox is 5×12 px, and the player feels **80% of world gravity** (its own gravity scale, like physics objects have) with strong air control, so it stays manoeuvrable in the air.
 
 **Levitation is replaced by recoil jumping.** Firing a weapon pushes the player in the direction opposite the shot. Firing downward launches the player upward; this is the primary means of gaining height and crossing gaps. Each weapon has its own recoil strength, so weapon choice affects mobility (e.g. the shotgun is a strong "jump" gun).
 
@@ -50,9 +52,9 @@ Kept from Noita. A short-range kick (**F**) that shoves loose objects (and later
 
 | Noita wand | Gunnug gun |
 |---|---|
-| Capacity (spell slots) | Chambers / magazine size |
-| Spells in slots | Ammo type loaded in each chamber **[Later]** |
-| Modifier spells | Attachments **[Later]** |
+| Capacity | Chambers / magazine size |
+| Spell slots | Ammo/attachment slots, separate from chambers (revolver: 4) |
+| Spells | Ammo types and attachments **[Later]** |
 | Cast delay | Fire delay (time between shots) |
 | Recharge time | Reload time — **automatic** when the gun is empty |
 | Spread | Spread (accuracy) |
@@ -61,7 +63,7 @@ Kept from Noita. A short-range kick (**F**) that shoves loose objects (and later
 ### 5.2 Firing model
 - A gun holds N chambers. Firing consumes the next chamber in order.
 - When all chambers are spent, the gun **automatically reloads** over its reload time, then is ready again.
-- Every gun fires its **default round** with its own base damage and behaviour. Ammo types and attachments will later alter how individual shots behave (planned: one ammo type per chamber, fired left-to-right like Noita's spell order).
+- Every gun fires its **default round** with its own base damage and behaviour. Ammo types and attachments fitted in the gun's slots will later alter how shots behave (exact rules to be designed — see §5.5).
 - Every gun has an **impact force**: the impulse a bullet applies to physics objects where it hits. Deliberately larger than realistic (a crate shot should skip across the room), and a stat that ammo types/attachments can modify later (e.g. heavy slugs).
 
 ### 5.3 Base weapon archetypes
@@ -78,7 +80,13 @@ Starting tuning values — to be adjusted by feel.
 Weapons from the Western period up to pre-WW1 (e.g. revolvers, lever-action rifles, double-barrel shotguns, derringers, Gatling and Maxim guns). No modern firearms. Specific weapon roster **[Later]**.
 
 ### 5.5 Ammo types & attachments **[Later]**
-Placeholder — to be designed once the base guns feel right.
+Placeholder — to be designed once the base guns feel right. Each gun has its own number of slots for them (revolver: 4), separate from its chamber count.
+
+### 5.6 Item bar & weapon panel
+Noita-style, along the top-left of the screen:
+- **3 weapon slots** (keys **1–3** or the mouse wheel select one; the selected slot is outlined in gold), followed by **7 slots** for loose ammo types and attachments.
+- **Tab** opens the weapon panel in the middle of the screen and **pauses the game**. Each carried weapon gets a card with its stats and its own ammo/attachment slots. Anything in a slot can be dragged to another slot (dropping on a full slot swaps them); weapons only go in weapon slots, ammo/attachments everywhere else. Hovering shows the name. Tab or Escape closes it.
+- The inventory belongs to the run: it carries over between areas and resets on restart. All carried guns keep reloading, held or not.
 
 ## 6. World & Terrain
 

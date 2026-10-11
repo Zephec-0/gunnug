@@ -131,9 +131,19 @@ function World:refresh()
   end
 end
 
+-- Drawn with a margin around the level: the image's edge pixels are stretched
+-- outward (clamp wrapping), so bedrock borders continue as solid rock and open
+-- sky continues as sky when the camera looks past the level's edge.
+local EDGE_MARGIN = 400
+
 function World:draw()
+  if not self.edgeQuad then
+    local m = EDGE_MARGIN
+    self.image:setWrap("clamp", "clamp")
+    self.edgeQuad = love.graphics.newQuad(-m, -m, self.width + 2 * m, self.height + 2 * m, self.width, self.height)
+  end
   love.graphics.setColor(1, 1, 1)
-  love.graphics.draw(self.image, 0, 0)
+  love.graphics.draw(self.image, self.edgeQuad, -EDGE_MARGIN, -EDGE_MARGIN)
 end
 
 return World

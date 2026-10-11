@@ -1,26 +1,25 @@
--- Follows the player, leaning slightly toward the aim point.
+-- Keeps the player centred, leaning slightly toward the aim point. The camera
+-- is not clamped to the level, so the player stays in the middle even at the
+-- edges; world.draw extends the edge terrain to fill anything beyond.
 local config = require("src.config")
 
 local camera = { x = 0, y = 0 }
 
-local LOOK_AHEAD = 0.2
+local LOOK_AHEAD = 0.12
 local SMOOTHING = 10
 
-local function target(world, fx, fy, aimX, aimY)
-  local W, H = config.VIRTUAL_W, config.VIRTUAL_H
-  local tx = fx + (aimX - fx) * LOOK_AHEAD - W / 2
-  local ty = fy + (aimY - fy) * LOOK_AHEAD - H / 2
-  tx = math.max(0, math.min(tx, world.width - W))
-  ty = math.max(0, math.min(ty, world.height - H))
+local function target(fx, fy, aimX, aimY)
+  local tx = fx + (aimX - fx) * LOOK_AHEAD - config.VIRTUAL_W / 2
+  local ty = fy + (aimY - fy) * LOOK_AHEAD - config.VIRTUAL_H / 2
   return tx, ty
 end
 
-function camera.snap(world, fx, fy)
-  camera.x, camera.y = target(world, fx, fy, fx, fy)
+function camera.snap(fx, fy)
+  camera.x, camera.y = target(fx, fy, fx, fy)
 end
 
-function camera.update(dt, world, fx, fy, aimX, aimY)
-  local tx, ty = target(world, fx, fy, aimX, aimY)
+function camera.update(dt, fx, fy, aimX, aimY)
+  local tx, ty = target(fx, fy, aimX, aimY)
   local t = 1 - math.exp(-SMOOTHING * dt)
   camera.x = camera.x + (tx - camera.x) * t
   camera.y = camera.y + (ty - camera.y) * t

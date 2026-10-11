@@ -3,8 +3,8 @@ local Body = require("src.body")
 local bullets = require("src.bullets")
 local config = require("src.config")
 local effects = require("src.effects")
-local guns = require("src.guns")
 local physics = require("src.physics")
+local playeranim = require("src.playeranim")
 local props = require("src.props")
 local targets = require("src.targets")
 
@@ -24,7 +24,8 @@ local function sign(v)
   return v > 0 and 1 or (v < 0 and -1 or 0)
 end
 
-function Player.new(x, y, world)
+-- inv: the run's inventory (src.inventory); the held gun is its selected weapon
+function Player.new(x, y, world, inv)
   local self = setmetatable({}, Player)
   self.body = Body.new(x, y, cfg.width, cfg.height)
   self.world = world
@@ -51,7 +52,8 @@ function Player.new(x, y, world)
   self.groundProp = nil
   self.hp = cfg.maxHp
   self.maxHp = cfg.maxHp
-  self.gun = guns.new("revolver")
+  self.inventory = inv
+  self.gun = inv:selectedGun()
   self.facing = 1
   self.aimAngle = 0
   self.grounded = false
@@ -60,7 +62,7 @@ function Player.new(x, y, world)
   self.jumping = false -- true while rising from a jump (so releasing jump can cut it)
   self.kickCooldown = 0
   self.kickTimer = 0
-  self.walkTimer = 0
+  self.anim = playeranim.new()
   self:updateMuzzle()
   return self
 end
@@ -71,14 +73,11 @@ function Player:center()
 end
 
 function Player:shoulder()
-  local b = self.body
-  return b.x + b.w / 2, b.y + 6
+  return playeranim.shoulder(self)
 end
 
 function Player:updateMuzzle()
-  local sx, sy = self:shoulder()
-  self.muzzleX = sx + math.cos(self.aimAngle) * 6
-  self.muzzleY = sy + math.sin(self.aimAngle) * 6
+  self.muzzleX, self.muzzleY = playeranim.muzzle(self)
 end
 
 function Player:pressJump()
@@ -126,6 +125,9 @@ function Player:applyRecoil(angle)
 end
 
 function Player:shoot()
+  if not self.gun then
+    return
+  end
   local shots = self.gun:fire(self.aimAngle)
   if not shots then
     return
@@ -135,6 +137,7 @@ function Player:shoot()
   end
   effects.muzzleFlash(self.muzzleX, self.muzzleY, self.aimAngle)
   self:applyRecoil(self.aimAngle)
+  playeranim.onShoot(self)
 end
 
 -- Grounded state, plus the prop underfoot (nil when standing on terrain)
@@ -199,10 +202,11 @@ function Player:update(dt, aimX, aimY)
   end
 
   -- Gravity
-  b.vy = math.min(b.vy + config.gravity * dt, cfg.maxFallSpeed)
+  b.vy = math.min(b.vy + config.gravity * cfg.gravityScale * dt, cfg.maxFallSpeed)
 
   -- Gun
-  self.gun:update(dt)
+  self.inventory:update(dt)
+  self.gun = self.inventory:selectedGun()
   if love.mouse.isDown(1) then
     self:shoot()
   end
@@ -243,11 +247,7 @@ function Player:update(dt, aimX, aimY)
     props.push(self.groundProp, 0, cfg.standForce)
   end
 
-  if self.grounded and input ~= 0 then
-    self.walkTimer = self.walkTimer + dt
-  else
-    self.walkTimer = 0
-  end
+  playeranim.update(self, dt)
   self:updateMuzzle()
 end
 
@@ -276,53 +276,8 @@ function Player:ride(dt)
   Body.moveX(b, self.collide, vx * dt, cfg.stepHeight)
 end
 
-
 function Player:draw()
-  local b = self.body
-  local f = self.facing
-
-  -- Draws a rect given in body-local coords, mirrored when facing left
-  local function px(x, y, w, h)
-    if f < 0 then
-      x = b.w - x - w
-    end
-    love.graphics.rectangle("fill", b.x + x, b.y + y, w, h)
-  end
-
-  -- Legs (alternate while walking), kick extends the front leg
-  love.graphics.setColor(0.22, 0.32, 0.62)
-  local stride = math.floor(self.walkTimer * 10) % 2
-  if self.kickTimer > 0 then
-    px(1, 9, 1, 2)
-    px(3, 9, 3, 1)
-    love.graphics.setColor(0.35, 0.2, 0.1)
-    px(6, 9, 1, 1)
-  else
-    px(1, 9 + stride, 1, 2 - stride)
-    px(3, 9 + (1 - stride), 1, 1 + stride)
-  end
-  -- Poncho
-  love.graphics.setColor(0.90, 0.30, 0.18)
-  px(0, 5, 5, 4)
-  love.graphics.setColor(1.0, 0.75, 0.25)
-  px(0, 7, 5, 1)
-  -- Face
-  love.graphics.setColor(0.96, 0.75, 0.58)
-  px(1, 3, 3, 2)
-  love.graphics.setColor(0.1, 0.08, 0.1)
-  px(3, 3, 1, 1)
-  -- Hat
-  love.graphics.setColor(0.45, 0.28, 0.14)
-  px(1, 0, 3, 2)
-  px(-1, 2, 7, 1)
-
-  -- Revolver
-  local sx, sy = self:shoulder()
-  love.graphics.setColor(0.25, 0.25, 0.3)
-  love.graphics.setLineWidth(1)
-  love.graphics.line(sx, sy, self.muzzleX, self.muzzleY)
-  love.graphics.setColor(0.7, 0.72, 0.8)
-  love.graphics.rectangle("fill", math.floor(self.muzzleX), math.floor(self.muzzleY), 1, 1)
+  playeranim.draw(self)
 end
 
 return Player

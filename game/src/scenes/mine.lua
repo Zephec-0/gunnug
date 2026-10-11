@@ -1,6 +1,7 @@
 -- The Old Mine: a randomly generated descending cave area that ends at the
 -- shop room (design doc §3, §7). The shop is empty for now.
 local cavegen = require("src.cavegen")
+local config = require("src.config")
 local hud = require("src.hud")
 local props = require("src.props")
 local targets = require("src.targets")
@@ -55,7 +56,7 @@ end
 function mine.drawBackground(camX, camY)
   local t = math.min(1, camY / 900)
   love.graphics.setColor(0.10 - t * 0.05, 0.07 - t * 0.04, 0.15 - t * 0.07)
-  love.graphics.rectangle("fill", 0, 0, 480, 270)
+  love.graphics.rectangle("fill", 0, 0, config.VIRTUAL_W, config.VIRTUAL_H)
 end
 
 local function drawLantern(x, y, flicker)

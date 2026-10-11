@@ -12,7 +12,7 @@ local function font(size)
 end
 
 function hud.font(scale)
-  return font(math.max(10, scale * 4))
+  return font(math.max(10, math.floor(scale * 4)))
 end
 
 local function shadowText(text, x, y, f)
@@ -41,13 +41,32 @@ function hud.draw(player, scale)
   local hpText = tostring(math.floor(player.hp))
   shadowText(hpText, x - f:getWidth(hpText) - 4 * u, y + barH / 2 - f:getHeight() / 2, f)
 
-  -- Chambers: filled = loaded, hollow = spent
-  local gun = player.gun
+  if player.gun then
+    hud.drawGunStatus(player.gun, ww, margin, y + barH, u, f)
+  end
+
+  -- Controls hint
+  love.graphics.setColor(1, 1, 1, 0.6)
+  local small = font(math.max(10, math.floor(scale * 3)))
+  shadowText(
+    "A/D move   W/Space jump   LMB shoot (aim down mid-air to recoil jump)   F kick   Tab weapons   1-3 switch   "
+      .. "R restart   F9 test room   F10 new cave   F2 physics   F3 stats",
+    margin,
+    love.graphics.getHeight() - margin - small:getHeight(),
+    small
+  )
+
+  hud.drawBanner(scale)
+end
+
+-- Chambers (filled = loaded, hollow = spent), name and reload bar of the held
+-- gun, right-aligned below the health bar
+function hud.drawGunStatus(gun, ww, margin, top, u, f)
   local r = 2 * u
   local gap = 2 * u
   local count = gun.def.chambers
   local rowW = count * 2 * r + (count - 1) * gap
-  local cy = y + barH + 8 * u
+  local cy = top + 8 * u
   local cx0 = ww - margin - rowW + r
   for i = 1, count do
     local cx = cx0 + (i - 1) * (2 * r + gap)
@@ -71,19 +90,6 @@ function hud.draw(player, scale)
     love.graphics.setColor(0.4, 0.85, 1)
     love.graphics.rectangle("fill", ww - margin - rowW, ry, rowW * gun:reloadProgress(), u * 1.5)
   end
-
-  -- Controls hint
-  love.graphics.setColor(1, 1, 1, 0.6)
-  local small = font(math.max(10, scale * 3))
-  shadowText(
-    "A/D move   W/Space jump   LMB shoot (aim down mid-air to recoil jump)   F kick   "
-      .. "R restart   F9 test room   F10 new cave   F2 physics   F3 stats",
-    margin,
-    love.graphics.getHeight() - margin - small:getHeight(),
-    small
-  )
-
-  hud.drawBanner(scale)
 end
 
 -- Area title card, e.g. when entering a new area
@@ -105,8 +111,8 @@ function hud.drawBanner(scale)
   local elapsed = BANNER_TIME - banner.time
   local alpha = math.min(1, elapsed / 0.4, banner.time / 0.8)
   local ww, wh = love.graphics.getDimensions()
-  local big = font(math.max(16, scale * 9))
-  local f = font(math.max(10, scale * 4))
+  local big = font(math.max(16, math.floor(scale * 9)))
+  local f = font(math.max(10, math.floor(scale * 4)))
   local y = math.floor(wh * 0.22)
   love.graphics.setColor(1, 0.86, 0.45, alpha)
   shadowText(banner.title, math.floor((ww - big:getWidth(banner.title)) / 2), y, big)

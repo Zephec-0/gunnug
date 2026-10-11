@@ -20,12 +20,26 @@ function love.update(dt)
 end
 
 function love.keypressed(key)
+  if game.keypressed(key) then
+    return
+  end
   if key == "escape" and love.system.getOS() ~= "Web" then
     love.event.quit()
   else
-    game.keypressed(key)
     overlayStats.handleKeyboard(key) -- Should always be called last
   end
+end
+
+function love.mousepressed(x, y, button)
+  game.mousepressed(x, y, button)
+end
+
+function love.mousereleased(x, y, button)
+  game.mousereleased(x, y, button)
+end
+
+function love.wheelmoved(x, y)
+  game.wheelmoved(x, y)
 end
 
 function love.touchpressed(id, x, y, dx, dy, pressure)

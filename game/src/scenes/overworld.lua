@@ -1,6 +1,7 @@
 -- The Badlands: hand-built desert canyon surface. Same every run. The player
 -- starts on the left and drops down the old mine shaft on the right to enter
 -- the dungeon.
+local config = require("src.config")
 local materials = require("src.materials")
 local props = require("src.props")
 local targets = require("src.targets")
@@ -14,12 +15,12 @@ local overworld = {
   subtitle = "Find the old mine",
 }
 
-local WIDTH, HEIGHT = 1200, 420
+local WIDTH, HEIGHT = 1200, 640 -- deep enough that the camera never sees past the bottom
 local FLOOR = 6 -- bedrock rows at the bottom
 
 -- Mine shaft
 local SHAFT_X0, SHAFT_X1 = 1010, 1034
-local SHAFT_BOTTOM = HEIGHT - FLOOR - 1
+local SHAFT_BOTTOM = 413
 
 local background -- pre-rendered sky and parallax layers
 local cacti = {}
@@ -48,7 +49,7 @@ local function canyonWall(world, x0, x1, fromLeft)
 end
 
 local function buildBackground()
-  local W, H = 480, 270
+  local W, H = config.VIRTUAL_W, config.VIRTUAL_H
   local sky = love.image.newImageData(W, H)
   for y = 0, H - 1 do
     local t = y / (H - 1)
@@ -138,18 +139,18 @@ function overworld.build()
     cacti[#cacti + 1] = { x = x, y = world:findGround(x, 100), tall = 10 + (x % 5) }
   end
 
-  local spawnX = 70
-  return world, spawnX, world:findGround(spawnX + 2, 100) - 11
+  local spawnX = 210
+  return world, spawnX, world:findGround(spawnX + 2, 100) - config.player.height
 end
 
 function overworld.populate(world)
   targets.clear()
   props.clear()
   -- A little shooting range near the start
-  for _, x in ipairs({ 160, 185 }) do
+  for _, x in ipairs({ 250, 272 }) do
     targets.addDummy(x, world:findGround(x, 100))
   end
-  for i, x in ipairs({ 214, 223, 232 }) do
+  for i, x in ipairs({ 292, 301, 310 }) do
     props.spawn("crate", x, world:findGround(x, 100) - 4.5)
     if i < 3 then
       props.spawn("crate", x + 4.5, world:findGround(x, 100) - 12.5)

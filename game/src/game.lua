@@ -12,8 +12,11 @@
 --   drawScreen(toScreen, font)    full-resolution text such as signs
 local bullets = require("src.bullets")
 local camera = require("src.camera")
+local config = require("src.config")
 local effects = require("src.effects")
 local hud = require("src.hud")
+local inventory = require("src.inventory")
+local itembar = require("src.itembar")
 local physics = require("src.physics")
 local Player = require("src.player")
 local props = require("src.props")
@@ -29,6 +32,7 @@ local scenes = {
 local game = {}
 
 local scene, world, player
+local inv -- the run's inventory; survives area changes, reset on restart
 local pending -- { name, opts } of a scene to load on the next update
 local fade = 0 -- black overlay alpha, fades out after entering a scene
 local mouseVX, mouseVY = 0, 0
@@ -48,15 +52,25 @@ local function load(name, opts)
   world, spawnX, spawnY = scene.build(opts)
   physics.init(world)
   scene.populate(world)
-  player = Player.new(spawnX, spawnY, world)
-  camera.snap(world, player:center())
+  player = Player.new(spawnX, spawnY, world, inv)
+  camera.snap(player:center())
   hud.showBanner(scene.title, scene.subtitle)
   fade = 1
+end
+
+-- Starts a fresh run in the overworld
+local function newRun()
+  inv = inventory.new()
+  if itembar.isOpen() then
+    itembar.toggle()
+  end
+  game.enter("overworld")
 end
 
 function game.load()
   render.load()
   love.mouse.setVisible(false)
+  inv = inventory.new()
   load("overworld")
 end
 
@@ -72,8 +86,14 @@ function game.update(dt)
     return
   end
 
-  fade = math.max(0, fade - dt * 2)
   render.layout()
+  -- The weapon panel pauses the game, like Noita's inventory
+  love.mouse.setVisible(itembar.isOpen())
+  if itembar.isOpen() then
+    return
+  end
+
+  fade = math.max(0, fade - dt * 2)
   mouseVX, mouseVY = render.toVirtual(love.mouse.getPosition())
   local camX, camY = camera.offset()
   local aimX, aimY = mouseVX + camX, mouseVY + camY
@@ -95,7 +115,7 @@ function game.update(dt)
   end
 
   local px, py = player:center()
-  camera.update(dt, world, px, py, aimX, aimY)
+  camera.update(dt, px, py, aimX, aimY)
 end
 
 local function drawLoading()
@@ -135,10 +155,12 @@ function game.draw()
     physics.drawDebug()
   end
   love.graphics.pop()
-  hud.drawCrosshair(mouseVX, mouseVY)
+  if not itembar.isOpen() then
+    hud.drawCrosshair(mouseVX, mouseVY)
+  end
   if fade > 0 then
     love.graphics.setColor(0, 0, 0, fade)
-    love.graphics.rectangle("fill", 0, 0, 480, 270)
+    love.graphics.rectangle("fill", 0, 0, config.VIRTUAL_W, config.VIRTUAL_H)
   end
   render.endWorld()
 
@@ -152,26 +174,61 @@ function game.draw()
   end
   effects.drawScreen(toScreen, font)
   hud.draw(player, render.scale)
+  itembar.draw(inv, render.scale)
   love.graphics.setColor(1, 1, 1)
 end
 
+-- Returns true if the key was handled (main.lua uses this so Escape closes
+-- the weapon panel instead of quitting)
 function game.keypressed(key)
   if pending then
-    return
+    return false
+  end
+  if key == "tab" or (key == "escape" and itembar.isOpen()) then
+    itembar.toggle()
+    return true
+  elseif key == "1" or key == "2" or key == "3" then
+    inv:select(tonumber(key))
+    return true
+  end
+  if itembar.isOpen() then
+    return false -- everything else waits until the panel is closed
   end
   if key == "w" or key == "space" then
     player:pressJump()
   elseif key == "f" then
     player:kick()
   elseif key == "r" then
-    game.enter("overworld")
+    newRun()
   elseif key == "f9" then
     game.enter("testroom")
   elseif key == "f10" then
     game.enter("mine")
   elseif key == "f2" then
     showPhysics = not showPhysics
+  else
+    return false
   end
+  return true
+end
+
+function game.mousepressed(x, y, button)
+  itembar.mousepressed(inv, x, y, button)
+end
+
+function game.mousereleased(x, y, button)
+  itembar.mousereleased(inv, x, y, button)
+end
+
+function game.wheelmoved(_, dy)
+  if dy ~= 0 and not itembar.isOpen() then
+    inv:cycle(dy > 0 and -1 or 1)
+  end
+end
+
+-- For tests and future pickups
+function game.inventory()
+  return inv
 end
 
 return game

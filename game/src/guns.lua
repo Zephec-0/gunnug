@@ -17,6 +17,18 @@ guns.defs = {
     impactForce = 160, -- impulse a bullet gives physics objects (deliberately exaggerated)
     digRadius = 2.5, -- crater size in terrain (pixels)
     digPower = 1, -- vs. material hardness: dirt 1, sandstone 2, rock 3
+    slots = 4, -- ammo type / attachment slots (separate from chambers)
+    -- Inventory icon: L light steel, # dark steel, c cylinder, w wood grip
+    icon = {
+      "                ",
+      "   LLLLLLLLLLLLL",
+      "  #############L",
+      "  ####ccc###    ",
+      "  ##  ccc  #    ",
+      " www###  ##     ",
+      "wwww            ",
+      "www             ",
+    },
   },
 }
 
@@ -25,7 +37,13 @@ Gun.__index = Gun
 
 function guns.new(name)
   local def = assert(guns.defs[name], "unknown gun: " .. tostring(name))
-  return setmetatable({ def = def, chambers = def.chambers, fireTimer = 0, reloadTimer = 0 }, Gun)
+  return setmetatable({
+    def = def,
+    chambers = def.chambers,
+    fireTimer = 0,
+    reloadTimer = 0,
+    slots = {}, -- slots[i] = item or nil, for i = 1..def.slots
+  }, Gun)
 end
 
 function Gun:update(dt)

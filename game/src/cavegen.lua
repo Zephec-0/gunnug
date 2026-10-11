@@ -1,6 +1,7 @@
 -- Procedural generation for a descending cave area (design doc §7):
 -- an entrance chamber at the top, organic caves, a guaranteed tunnel winding
 -- down through them, and the shop room at the bottom.
+local config = require("src.config")
 local materials = require("src.materials")
 local World = require("src.world")
 
@@ -13,7 +14,7 @@ local WIDTH, HEIGHT = 512, 1152
 local BORDER = 8
 local CELL = 6 -- cellular-automata cave grid resolution, in pixels
 
-local PLAYER_W, PLAYER_H = 5, 11
+local PLAYER_W, PLAYER_H = config.player.width, config.player.height
 
 local function carveCircle(world, cx, cy, r)
   local r2 = r * r

@@ -1,8 +1,9 @@
 -- Central tuning values. Units are game pixels and seconds.
 local config = {
-  -- Low-res render target, scaled up to the window (see design doc §2)
-  VIRTUAL_W = 480,
-  VIRTUAL_H = 270,
+  -- Low-res render target, scaled up to the window (see design doc §2).
+  -- 400x225 is a 20% zoom-in from the original 480x270.
+  VIRTUAL_W = 400,
+  VIRTUAL_H = 225,
 
   -- World gravity, shared by the player and physics objects. Objects scale it
   -- with their own gravityScale (see props.lua).
@@ -16,20 +17,22 @@ local config = {
 
   player = {
     width = 5,
-    height = 11,
+    height = 12,
     maxHp = 100,
 
-    maxFallSpeed = 320,
+    -- The player feels less gravity than the world default, for more air control
+    gravityScale = 0.8,
+    maxFallSpeed = 280,
     maxSpeed = 360, -- hard cap on total velocity (recoil stacking)
 
     walkSpeed = 70,
     groundAccel = 900,
-    airAccel = 450,
+    airAccel = 650,
     groundFriction = 1000,
-    airFriction = 160, -- how quickly excess (recoil) momentum bleeds off in the air
+    airFriction = 130, -- how quickly excess (recoil) momentum bleeds off in the air
     stepHeight = 3, -- pixels the player can walk up without jumping
 
-    jumpSpeed = 140,
+    jumpSpeed = 132,
     jumpCutMultiplier = 0.5, -- releasing jump early shortens it
     coyoteTime = 0.08,
     jumpBufferTime = 0.1,

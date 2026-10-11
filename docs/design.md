@@ -30,9 +30,9 @@ Overworld (hand-built, same every run)
 
 - **One seamless world, no loading screens** (as in Noita): the overworld and the areas below it are a single continuous level. The whole world is there from the start of a run — you walk to the mine shaft and drop straight down into Area 1, and could dig down from anywhere. Areas are stacked vertically under the overworld.
 - **Overworld:** hand-crafted, consistent across runs. Eventually large and explorable; for now a walkable area that leads to the dungeon entrance.
-- **Areas:** each is randomly generated and ends at a **shop room**, which then leads into the next area (as in Noita).
+- **Areas:** each is randomly generated, stacked one under the next in the one seamless world (currently two: the Catacombs and the Sunken Hollows), and ends at a **shop room**. A shop with another area below it has a **hatch** in its floor that drops into the next area (like the mine shaft does from the surface); the last area's shop has none yet. Areas generate in order in the background, each a few milliseconds per frame (about 9 seconds for both), and an area is finished at once if the hunter gets within 900 px of its top before it is ready.
 - **Background generation:** a new run builds the overworld at once (~0.25 s) and generates Area 1 a few milliseconds per frame while the hunter is still on the surface (~3.5 s, finished long before anyone can walk to the shaft). If the hunter gets underground first, the rest is generated immediately.
-- **Shop room:** for now, simply the endpoint of an area's generation — an empty room that exists. No items or purchasing yet.
+- **Shop room:** healing, goods and the hatch (§9). Leaving the shop locks it.
 
 ## 4. Player
 
@@ -166,6 +166,9 @@ Hand-built and the same every run: a **desolate desert at dusk** — dusty sand 
 ### 7b. The Catacombs
 The generated area (above) under the dark-fantasy palette: the light blends from the warm surface ambient to dim but readable cave light as the hunter goes underground (the sunlight fades with it), and the backdrop behind the rock gets gloomier with depth. Entering it shows the "The Catacombs" banner; clusters of glowing teal fungus scattered across the cave floors (they light the way), and a candlelit stone shop room with wall sconces and candles on the counter.
 
+### 7c. The Sunken Hollows
+The second area, reached by dropping through the first shop's hatch into a timber-lined shaft that opens into its entrance chamber. It follows the same generation and layout (routes of drops and corridors, large caverns, chests, crates, gold ore, monsters - tougher by 0.6 toughness than the first area), under a **cold palette**: dark grey-blue **slate** for rock and **blue clay** with cold-green moss for earth, a darker, bluer ambient light and backdrop, and **lots of green glowing mushrooms** (480 clusters, brighter and larger-lit than the first area's 150 teal ones) as the main light. Chests there are better equipped. Its own shop sits at the bottom; with no area below it yet, that shop has no hatch.
+
 ## 8. Targets & Enemies
 - **Test dummies / targets** on the surface practice range and in the test room, for checking damage numbers and hit detection.
 - **Enemies** (first batch), all pixel-collision creatures like the hunter: they collide with terrain **and physics objects** (crates, fallen debris) — standing on them, and ghouls shove crates in their way (and hop over them when chasing). While active, each has a kinematic physics stand-in, so falling crates and debris land on them; acid globs splash on objects and nudge them. Bullets hurt them (with knockback from the gun's impact force), kicks hurt and shove them, and being shot wakes them and sets them on the hunter. They notice the hunter only with a clear line of sight. Bullets start at the hunter's shoulder, so a monster pressed against him (closer than the muzzle) can still be shot.
@@ -183,7 +186,7 @@ The generated area (above) under the dark-fantasy palette: the light blends from
 ## 9. Economy & Shop **[Roadmap steps 1 and 6]**
 - **Gold** (implemented, step 1) spills out as small coins that bounce on the terrain, glint (they're drawn emissive so they can be spotted in the dark) and are pulled toward the hunter within ~36 px, then collected on touch (a short delay after spilling). **A coin that has landed and isn't picked up vanishes 7 seconds later** (blinking for the last 1.5 s); its gold is lost, and being pulled toward the hunter restarts the timer. Coins are pixel-simulated like particles rather than Box2D bodies, so hundreds can lie around (cap 400; the oldest give way and their value carries on to the next coin). The run's total shows next to a coin icon under the gun status. **It resets every run** (no meta-progression for now).
 - **Sources:** enemy drops (ghoul 3–6, bat 1–3, spitter 4–8, × the monster's toughness), **crates, which now break** from damage (wooden: 25 total, 0–4 gold; iron: 90, 5–12 gold) and splinter, and the dungeon itself: **gold ore** (rock veined with gold flecks, scattered through the cave walls — 150 veins per area) spills a speck or two from a tenth of the pixels you dig out. Rare hidden chests in caverns come with the weapon chests (step 5).
-- **Shop** (implemented, roadmap step 6): the shop room at the end of the area has **one generated weapon on the left** (30% chance per slot of a fitted item) and **4 different ammo types/attachments to its right**, on stone pedestals, each with a price floating over it (gold, or red when you cannot afford it). Standing next to one shows "[E] Buy Name"; E buys it. Prices: the weapon 45g + 25g per fitted item + 0-20g (45-140g), items 20-35g. Not enough gold or no free item slot just shows a message. A weapon bought with all three weapon slots full opens the **compare prompt** and is only paid for once you choose which gun to replace (cancel and nothing is charged). Sold items vanish from their pedestal. The stock is generated when the area is, and is not restocked yet; selling is not possible yet.
+- **Shop** (implemented, roadmap step 6): each shop room has, left to right: an **ivory healing pedestal** with a glowing heart, **one generated weapon** (30% chance per slot of a fitted item), and **4 different ammo types/attachments**, on stone pedestals with prices floating over them (gold, or red when you cannot afford them). Standing next to one shows "[E] Buy Name"; E buys it. Weapon price 45g + 25g per fitted item + 0-20g, items 20-35g. A weapon bought with all three slots full opens the **compare prompt** and is paid for only once you pick which gun to replace. **Healing:** each E on the pedestal heals 10% of max health, priced by how much is missing (10g when nearly full up to 50g when nearly dead; "Already at full health" costs nothing). **The hatch:** an iron plate set into the floor at the right end of the room (indestructible terrain), held shut by a **chain hanging from the ceiling** - shoot the chain (or blow it up) and a moment later the plate drops away, opening a shaft down into the next area. **Leaving the shop locks it** (stepping out of the room after having been in it): nothing can be bought afterwards (the items dim and the prompt says the shop is closed). The stock is generated with the area, not restocked; selling is not possible yet.
 
 ## 9a. Items, finding & generating weapons **[Roadmap steps 1, 4, 5, 6]**
 - **Pickups:** gold is collected by walking near it. **Ammo types, attachments and (later) weapons are picked up with E** while standing next to them (within ~18 px; a "[E] Name" prompt shows over the nearest one, and "No room" appears if the loose item slots are full).
@@ -195,7 +198,7 @@ The generated area (above) under the dark-fantasy palette: the light blends from
 
 ## 9b. Menu & audio **[Roadmap steps 2 and 7]**
 - **Menu** (implemented, step 2): the game opens on a **title screen** (Play, Quit) over the dimmed, paused world, and **Esc** during play opens a **pause menu** (Resume, Restart run, Title screen, Quit) — Esc no longer quits instantly (Esc still closes the weapon panel first). Navigate with W/S or the arrows and Enter/Space, or the mouse (hovering selects; a button fires on release, so the click never also fires a shot). Menus pause the game and swallow all other keys. R still restarts directly; settings (volume, keys) come later.
-- **Audio:** no sound yet. Placeholder sounds are generated in code (shots per gun, hits, footsteps, pickups, ambient cave tone) so they can be swapped for real assets later.
+- **Audio** (implemented, roadmap step 7): placeholder sounds are **synthesised in code at start-up** (src/audio.lua: noise bursts, sine thumps and chirps with envelopes, 23 sounds): shots per gun, bullet hits and impacts, explosions, enemy death, the hunter being hurt and dying, coins, pickups, chests, buying and denied purchases, healing, reload, kick, menu clicks, the chain clank and hatch opening; plus looping beds - desert wind on the surface and a low drone underground, faded by depth. Each play varies pitch and volume a little; overlapping voices are capped. The mixer is silent if there is no audio device. Swap in real recordings later by loading files under the same names.
 
 ---
 
@@ -221,8 +224,8 @@ Order of work, by what unlocks what (items/pickups → loot → shop; ammo/attac
 4. **Weapon generation** — *done:* archetype + rolled variance + chance of fitted ammo/attachments; semi-auto added; F6 debug key.
 5. **Finding weapons** - *done:* chests (gold or a weapon), weapon pickups with E, the 4th-gun compare/choose prompt.
 6. **Shop** - *done:* 3 generated weapons and 4 ammo types/attachments on pedestals with prices, bought with E.
-7. **Audio** — generated placeholder sounds.
-8. **Then:** healing (flasks/pickups), a boss and more enemy types, Area 2, a run summary on death.
+7. **Audio** - *done:* generated placeholder sounds.
+8. **Healing** - *done:* the shop pedestal. **Area 2** - *done:* the Sunken Hollows. **Then:** a boss and more enemy types, a third area, healing pickups, a run summary on death.
 
 ## 12. Open Questions
 - Overworld size and contents for the long-term version.

@@ -1,5 +1,6 @@
 -- The gunslinger: Noita-style walking/jumping, recoil jumping, aiming and kicking.
 local Body = require("src.body")
+local audio = require("src.audio")
 local bullets = require("src.bullets")
 local config = require("src.config")
 local effects = require("src.effects")
@@ -103,6 +104,7 @@ function Player:kick()
   self.kickTimer = cfg.kickDuration
   local b = self.body
   local x = self.facing > 0 and b.x + b.w or b.x - cfg.kickRange
+  audio.play("kick")
   targets.kick(x, b.y + 6, cfg.kickRange, b.h - 6, cfg.kickDamage)
   enemies.kick(x, b.y + 6, cfg.kickRange, b.h - 6, self.facing, cfg.kickDamage)
   props.kick(x, b.y + 6, cfg.kickRange, b.h - 6, self.facing, cfg.kickForce, cfg.kickLift, cfg.kickDamage)
@@ -152,6 +154,10 @@ function Player:shoot()
     bullets.spawn(sx, sy, s)
   end
   effects.muzzleFlash(self.muzzleX, self.muzzleY, self.aimAngle, self.gun.def.flash)
+  audio.play("shot_" .. (self.gun.def.model == "pistol" and "pistol" or self.gun.def.model))
+  if self.gun.chambers == 0 then
+    audio.play("reload", 0.8)
+  end
   self:applyRecoil(self.aimAngle)
   playeranim.onShoot(self)
 end
@@ -165,6 +171,7 @@ function Player:hurt(amount, fromX, fromY)
   local b = self.body
   local cx, cy = self:center()
   self.hp = math.max(0, self.hp - amount)
+  audio.play(self.hp <= 0 and "death" or "hurt")
   self.invuln = cfg.hurtInvulnerability
   self.hurtFlash = 1
   effects.popup(cx, b.y - 4, "-" .. amount, { 1, 0.3, 0.3 })

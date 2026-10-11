@@ -3,6 +3,7 @@
 -- (80%) or a generated weapon (20%), never both, so the real prize is saved
 -- for playing well down to the shop. Deeper chests hold more gold and
 -- better-equipped weapons (more pre-fitted slots).
+local audio = require("src.audio")
 local effects = require("src.effects")
 local guns = require("src.guns")
 local pickups = require("src.pickups")
@@ -51,6 +52,7 @@ function chests.interact(player)
     return false
   end
   c.opened = true
+  audio.play("chest")
   if love.math.random() < GOLD_CHANCE then
     pickups.dropGold(c.x, c.y - H, math.floor(love.math.random(15, 40) * (1 + c.depth)))
   else

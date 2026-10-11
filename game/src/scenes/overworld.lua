@@ -9,6 +9,7 @@ local config = require("src.config")
 local hud = require("src.hud")
 local materials = require("src.materials")
 local props = require("src.props")
+local shop = require("src.shop")
 local targets = require("src.targets")
 local World = require("src.world")
 
@@ -22,14 +23,15 @@ local overworld = {
 }
 
 local SURFACE_AMBIENT = { 0.88, 0.76, 0.74 } -- warm evening light
-local CAVE_AMBIENT = { 0.36, 0.32, 0.44 } -- dim but readable
+local CAVE_AMBIENT = { 0.36, 0.32, 0.44 } -- dim but readable (area 1; later areas have their own)
 
--- The surface's sandstone runs down to CAVE_TOP, where the catacombs begin
--- (twice the size of the original separate cave area in both directions)
+-- The surface's sandstone runs down to CAVE_TOP, where the first area begins;
+-- the generated areas are stacked below it, each CAVE_HEIGHT tall
 local WIDTH = 1920
 local CAVE_TOP = 760
 local CAVE_HEIGHT = 3680
-local HEIGHT = CAVE_TOP + CAVE_HEIGHT
+local AREAS = 2
+local HEIGHT = CAVE_TOP + AREAS * CAVE_HEIGHT
 
 -- Mine shaft: from the headframe down into the catacombs' entrance chamber
 local SHAFT_X0, SHAFT_X1 = 1616, 1654
@@ -202,14 +204,12 @@ local function buildBackground()
 end
 
 local seed
-local caveAnnounced = false
 
 -- opts.seed: cave seed (default random). opts.atCave: start in the
 -- catacombs' entrance chamber instead of on the surface (generates at once).
 function overworld.build(opts)
   local world = World.new(WIDTH, HEIGHT)
   seed = (opts and opts.seed) or math.floor(love.math.random() * 1000000)
-  caveAnnounced = false
 
   -- Sand over sandstone (the cave generator replaces what lies below CAVE_TOP)
   for x = 0, WIDTH - 1 do
@@ -240,18 +240,22 @@ function overworld.build(opts)
     trees[#trees + 1] = { x = t[1], y = world:findGround(t[1], 160), lean = t[2], height = 46 + (t[1] % 17) }
   end
 
+  -- Shooting a shop hatch's chain makes sure the area below it exists first
+  shop.onHatchBreak = function(level)
+    catacombs.finish(level + 1)
+  end
   catacombs.start(world, {
     x0 = 0,
     y0 = CAVE_TOP,
     x1 = WIDTH - 1,
-    y1 = HEIGHT - 1,
+    y1 = CAVE_TOP + CAVE_HEIGHT - 1,
     entranceX = math.floor((SHAFT_X0 + SHAFT_X1) / 2),
     entranceY = ENTRANCE_Y,
     shaftX0 = SHAFT_X0,
     shaftX1 = SHAFT_X1,
-  }, seed)
+  }, seed, AREAS)
   if opts and opts.atCave then
-    catacombs.finish()
+    catacombs.finish(1)
     local info = catacombs.info()
     return world, info.spawnX, info.spawnY
   end
@@ -286,6 +290,11 @@ local function underground(x, y)
   return math.max(0, math.min(1, (y - surface(x) - 24) / 220))
 end
 
+-- The same, for the game's sound mixer
+function overworld.undergroundFactor(x, y)
+  return underground(x, y)
+end
+
 -- Campfire smoke, cave generation in the background, and the light and
 -- banners changing as the hunter goes underground
 function overworld.update(dt, player, game, effects)
@@ -297,21 +306,20 @@ function overworld.update(dt, player, game, effects)
   end
 
   local px, py = player:center()
-  -- The cave must be complete before the hunter can get anywhere near it
+  -- An area must be complete before the hunter can get anywhere near it
   if not catacombs.ready() and py > surface(px) + 12 then
-    catacombs.finish()
+    catacombs.finish(1)
   else
     catacombs.step(GEN_BUDGET)
   end
+  catacombs.ensure(py)
   catacombs.update(player)
 
+  -- The light blends from the surface to the ambient of the area the hunter is in
   local t = underground(px, py)
+  local cave = catacombs.theme(catacombs.levelAt(py) or 1).ambient
   for i = 1, 3 do
-    overworld.ambient[i] = SURFACE_AMBIENT[i] + (CAVE_AMBIENT[i] - SURFACE_AMBIENT[i]) * t
-  end
-  if not caveAnnounced and py > CAVE_TOP then
-    caveAnnounced = true
-    hud.showBanner("The Catacombs", "Area 1  ·  seed " .. seed)
+    overworld.ambient[i] = SURFACE_AMBIENT[i] + (cave[i] - SURFACE_AMBIENT[i]) * t
   end
 end
 
@@ -396,7 +404,7 @@ local function backdrop(y)
   if y < CAVE_TOP then
     return lerpColor(EARTH, CAVE_BACK, math.max(0, (y - (CAVE_TOP - 120)) / 120))
   end
-  return lerpColor(CAVE_BACK, CAVE_DEEP_BACK, math.min(1, (y - CAVE_TOP) / (CAVE_HEIGHT * 0.8)))
+  return catacombs.backdrop(y)
 end
 
 -- Decorations drawn behind the player (they receive lighting)

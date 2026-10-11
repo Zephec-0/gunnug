@@ -1,10 +1,12 @@
 -- Fast projectiles, marched one pixel at a time so they never tunnel through
 -- thin terrain, targets or props.
+local audio = require("src.audio")
 local destruction = require("src.destruction")
 local effects = require("src.effects")
 local enemies = require("src.enemies")
 local materials = require("src.materials")
 local props = require("src.props")
+local shop = require("src.shop")
 local targets = require("src.targets")
 
 local bullets = {}
@@ -55,6 +57,8 @@ local function explode(b, world, x, y)
   local damage = (10 + 4 * (count - 1)) * scale
   destruction.dig(world, x, y, math.max(3, radius * 0.25), 1.5, b.dx, b.dy)
   effects.explosion(x, y, radius)
+  audio.play("explosion")
+  shop.explosion(x, y, radius)
   -- The hunter is caught in it too
   local player = bullets.player
   if player and not player.dead then
@@ -110,6 +114,7 @@ local function step(b, dt, world)
     if enemy and not b.hit[enemy] then
       b.x, b.y = nx, ny
       enemies.hit(enemy, b.damage, b.dx, b.dy, b.impact)
+      audio.play("hit")
       if b.burn and not enemy.isGlob then
         enemies.ignite(enemy, b.burn.dps, b.burn.time)
       end
@@ -120,6 +125,15 @@ local function step(b, dt, world)
       else
         return finish(b, world, b.x, b.y)
       end
+    end
+
+    -- The shop hatch's chain: a shot that hits it snaps it
+    local chainOf = shop.chainAt(px, py)
+    if chainOf then
+      b.x, b.y = nx, ny
+      shop.breakChain(chainOf)
+      effects.impact(b.x, b.y, b.dx, b.dy, nil)
+      return finish(b, world, b.x, b.y)
     end
 
     local target = targets.hitTest(px, py)
@@ -148,6 +162,7 @@ local function step(b, dt, world)
       else
         -- Spawn effects in the last open pixel so debris isn't stuck in the wall
         effects.impact(b.x, b.y, b.dx, b.dy, def.color)
+        audio.play("impact")
         if b.explosive then
           explode(b, world, b.x, b.y) -- the blast does the digging
         elseif b.digRadius > 0 then

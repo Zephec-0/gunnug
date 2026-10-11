@@ -13,6 +13,7 @@
 --   drawBackground(camX, camY)    on the low-res canvas, behind everything
 --   drawDecor(camX, camY)         world-space decorations behind the player
 --   drawScreen(toScreen, font)    full-resolution text such as signs
+local audio = require("src.audio")
 local bullets = require("src.bullets")
 local camera = require("src.camera")
 local chests = require("src.chests")
@@ -86,6 +87,7 @@ local function newRun()
 end
 
 function game.load()
+  audio.load()
   render.load()
   lighting.load()
   love.mouse.setVisible(false)
@@ -118,6 +120,9 @@ end
 
 -- Carries out the action a menu button chose
 local function menuAction(action)
+  if action then
+    audio.play("select")
+  end
   if action == "play" then
     menu.close()
     hud.showBanner(scene.title, scene.subtitle)
@@ -147,6 +152,7 @@ function game.update(dt)
   end
 
   render.layout()
+  audio.update(dt, (scene.undergroundFactor and not menu.isOpen() and not itembar.isOpen()) and scene.undergroundFactor(player:center()) or 0, menu.isOpen())
   -- The weapon panel and the menus pause the game, like Noita's inventory
   love.mouse.setVisible(itembar.isOpen() or menu.isOpen() or compare.isOpen())
   menu.update()
@@ -176,6 +182,7 @@ function game.update(dt)
   targets.update(dt)
   props.update(dt)
   chests.update(dt)
+  shop.update(dt, player)
   bullets.update(dt, world)
   enemies.update(dt, world, player)
   pickups.update(dt, world, player)
@@ -249,6 +256,7 @@ function game.draw()
   enemies.drawEmissive(view)
   pickups.drawEmissive(view)
   chests.drawEmissive(view)
+  shop.drawEmissive(view)
   bullets.draw()
   effects.drawEmissive()
   if showPhysics then
@@ -363,7 +371,9 @@ function game.mousepressed(x, y, button)
     return
   end
   if button == 2 and inv:selectedGun() then
-    inv:selectedGun():reload()
+    if inv:selectedGun():reload() then
+      audio.play("reload")
+    end
   end
 end
 

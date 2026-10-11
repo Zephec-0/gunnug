@@ -9,6 +9,7 @@
 -- A pickup is { kind, value, x, y, vx, vy, ... }. Coins are simulated per
 -- pixel like particles (cheap, so hundreds can lie around) rather than as
 -- Box2D bodies.
+local audio = require("src.audio")
 local config = require("src.config")
 local effects = require("src.effects")
 local guns = require("src.guns")
@@ -135,6 +136,7 @@ local function collect(p, player)
     for i = 1, inventory.WEAPON_SLOTS do
       if not inv.weapons[i] then
         inv.weapons[i] = p.gun
+        audio.play("pickup")
         effects.popup(p.x, p.y - 6, p.gun.name, { 1, 0.9, 0.6 })
         return true
       end
@@ -147,12 +149,14 @@ local function collect(p, player)
     if not inv:addItem(p.item) then
       return false
     end
+    audio.play("pickup")
     effects.popup(p.x, p.y - 6, p.item.name, p.item.color)
     for _ = 1, 4 do
       effects.particle(p.x, p.y, (love.math.random() - 0.5) * 70, -love.math.random() * 60, 0.35, p.item.color, 200, true)
     end
   elseif p.kind == "gold" then
     inv.gold = inv.gold + p.value
+    audio.play("coin")
     effects.popup(p.x, p.y - 6, "+" .. p.value, { 1, 0.82, 0.25 })
     for _ = 1, 4 do
       effects.particle(p.x, p.y, (love.math.random() - 0.5) * 70, -love.math.random() * 60, 0.35, { 1, 0.9, 0.4 }, 200, true)

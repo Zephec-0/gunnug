@@ -10,6 +10,7 @@ local config = require("src.config")
 local materials = require("src.materials")
 
 local AIR, DIRT, ROCK, BEDROCK = materials.AIR, materials.DIRT, materials.ROCK, materials.BEDROCK
+local IRON = materials.IRON
 local WOOD, BRICK, GOLDORE = materials.WOOD, materials.BRICK, materials.GOLDORE
 local solid = materials.solid
 
@@ -24,7 +25,15 @@ local ENTRANCE_GAP = 26 -- half-width of the opening down from the entrance cham
 local PLAYER_W, PLAYER_H = config.player.width, config.player.height
 
 -- Generates a cave in world. area: { x0, y0, x1, y1, entranceX, entranceY }
--- (inclusive pixel bounds; the surface's rock lies above y0). tick: optional,
+-- (inclusive pixel bounds; the surface's rock, or the previous area, lies
+-- above y0), plus optionally:
+--   level          1 for the first area, 2 for the next... (monsters get tougher)
+--   palette        { rock, dirt } material ids (default rock and dirt)
+--   hasNext        true if another area lies below: the shop gets a hatch
+--                  down to it, and the bottom is left open (no bedrock floor)
+--   shaftX0/X1     x range of the shaft that drops into the entrance chamber
+--   shaftTop       y where that shaft starts (default: just above y0)
+--   glowCount      how many glowing mushroom clusters to scatter (default 150) tick: optional,
 -- called regularly so a coroutine can yield. Returns a description:
 --   { seed, area, spawnX, spawnY, shop = {x, y, w, h}, crates, ironCrates, chests, glows, enemies }
 -- (spots are { x, groundY }). Never fails: if the reachability check can't
@@ -35,6 +44,9 @@ function cavegen.generate(world, area, seed, tick)
   local W, H = X1 - X0 + 1, Y1 - Y0 + 1
   local rng = love.math.newRandomGenerator(seed)
   local noiseSeed = (seed % 1000) + 0.5
+  local level = area.level or 1
+  local ROCKID = area.palette and area.palette.rock or ROCK
+  local DIRTID = area.palette and area.palette.dirt or DIRT
 
   -- Carving never touches the bedrock shell or anything above the cave
   local function carvable(x, y)
@@ -62,7 +74,7 @@ function cavegen.generate(world, area, seed, tick)
         local top = Y0 - BLEND + math.floor(love.math.noise(x * 0.02, noiseSeed + 21) * BLEND)
         if y >= top then
           local n = love.math.noise(x * 0.011, y * 0.011, noiseSeed)
-          world:setRaw(x, y, n > 0.38 + depth * 0.35 and DIRT or ROCK)
+          world:setRaw(x, y, n > 0.38 + depth * 0.35 and DIRTID or ROCKID)
         end
       end
       tick()
@@ -156,7 +168,7 @@ function cavegen.generate(world, area, seed, tick)
           local thick = 4 + math.floor(love.math.noise(x * 0.2, ly) * 4)
           for y = math.floor(ly), math.floor(ly) + thick do
             if carvable(x, y) then
-              world:setRaw(x, y, ROCK)
+              world:setRaw(x, y, ROCKID)
             end
           end
         end
@@ -257,14 +269,16 @@ function cavegen.generate(world, area, seed, tick)
     -- with timber and open all the way, so the hunter drops straight through.
     if area.shaftX0 then
       local sx0, sx1 = area.shaftX0, area.shaftX1
-      local top = Y0 - BLEND - 4
+      local top = area.shaftTop or (Y0 - BLEND - 4)
       world:fillRect(sx0, top, sx1, y - 30, AIR)
       world:fillRect(sx0 - 3, top, sx0 - 1, y - 38, WOOD)
       world:fillRect(sx1 + 1, top, sx1 + 3, y - 38, WOOD)
     end
   end
 
-  -- Builds the brick shop room. Returns its interior rectangle.
+  -- Builds the brick shop room. Returns its interior rectangle, plus (when
+  -- another area lies below) the hatch: an iron plate set into the floor near
+  -- the right end, held shut by a chain the hunter has to shoot.
   local function buildShop(cx, floorY)
     local w, h = 240, 86
     local x0, y0 = math.floor(cx - w / 2), floorY - h
@@ -273,9 +287,13 @@ function cavegen.generate(world, area, seed, tick)
     world:fillRect(x0, y0, x1, y1, AIR)
     -- Opening in the ceiling, with a short drop shaft up to where the tunnels end
     world:fillRect(math.floor(cx) - 21, y0 - 54, math.floor(cx) + 21, y0 - 1, AIR)
-    -- Wooden counter
-    world:fillRect(x0 + 29, y1 - 14, x0 + 83, y1, WOOD)
-    return { x = x0, y = y0, w = w, h = h }
+    local room = { x = x0, y = y0, w = w, h = h }
+    if area.hasNext then
+      local hx = x0 + 212
+      world:fillRect(hx - 19, floorY, hx + 19, floorY + 3, IRON)
+      room.hatch = { x0 = hx - 19, x1 = hx + 19, y0 = floorY, y1 = floorY + 3, cx = hx, floorY = floorY, ceilY = y0 }
+    end
+    return room
   end
 
   -- Breadth-first search from the spawn to inside the shop over a coarse
@@ -430,7 +448,7 @@ function cavegen.generate(world, area, seed, tick)
         for ox = -r, r do
           local px, py = math.floor(x + ox), math.floor(y + oy)
           local id = world:get(px, py)
-          if ox * ox + oy * oy <= r * r and (id == ROCK or id == DIRT) then
+          if ox * ox + oy * oy <= r * r and (id == ROCKID or id == DIRTID) then
             world:setRaw(px, py, GOLDORE)
           end
         end
@@ -456,8 +474,11 @@ function cavegen.generate(world, area, seed, tick)
   carveEntrance(entranceX, entranceY)
   local shop = buildShop(shopX, shopFloor)
 
-  -- Bedrock shell at the sides and bottom (the surface's rock is above)
-  world:fillRect(X0, Y1 - BORDER + 1, X1, Y1, BEDROCK)
+  -- Bedrock shell at the sides, and at the bottom of the last area (the
+  -- surface's rock, or the previous area, is above)
+  if not area.hasNext then
+    world:fillRect(X0, Y1 - BORDER + 1, X1, Y1, BEDROCK)
+  end
   world:fillRect(X0, Y0 - BLEND, X0 + BORDER - 1, Y1, BEDROCK)
   world:fillRect(X1 - BORDER + 1, Y0 - BLEND, X1, Y1, BEDROCK)
 
@@ -479,7 +500,7 @@ function cavegen.generate(world, area, seed, tick)
     local inShop = x > shop.x - 16 and x < shop.x + shop.w + 16 and y > shop.y - 16
     return nearSpawn or inShop
   end
-  world:repaintRect(X0, Y0 - BLEND - 16, X1, Y1, tick)
+  world:repaintRect(X0, math.min(Y0 - BLEND - 16, (area.shaftTop or math.huge) - 16), X1, Y1, tick)
 
   -- Monsters: none near the entrance or in the shop. More of them, and
   -- tougher, the deeper you go.
@@ -499,7 +520,7 @@ function cavegen.generate(world, area, seed, tick)
         end
       end
       if not crowded and rng:random() < 0.35 + 0.65 * depth then
-        enemies[#enemies + 1] = { kind = kind, x = s[1], y = s[2], toughness = 1 + depth * 0.6 }
+        enemies[#enemies + 1] = { kind = kind, x = s[1], y = s[2], toughness = 1 + depth * 0.6 + (level - 1) * 0.6 }
       end
     end
   end
@@ -516,7 +537,8 @@ function cavegen.generate(world, area, seed, tick)
     crates = findFloorSpots(40, 16, avoid),
     ironCrates = findFloorSpots(12, 19, avoid),
     chests = findFloorSpots(12, 22, avoidForEnemies), -- weapon chests, away from the entrance and shop
-    glows = findFloorSpots(150, 6, avoid), -- glowing fungus clusters
+    glows = findFloorSpots(area.glowCount or 150, 6, avoid), -- glowing fungus clusters
+    level = level,
     enemies = enemies, -- { kind, x, y, toughness }: ghouls stand at y, the others hang from it
   }
 end

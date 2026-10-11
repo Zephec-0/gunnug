@@ -17,6 +17,9 @@ local materials = {
   BRICK = 7,
   STONEBRICK = 8,
   GOLDORE = 9,
+  IRON = 10,
+  SLATE = 11,
+  BLUECLAY = 12,
 }
 
 materials.defs = {
@@ -108,6 +111,36 @@ materials.defs = {
     variation = 0.06,
     flecks = { 0.95, 0.74, 0.22 }, -- gold glints scattered through it
     gold = { 1, 2 }, -- gold per speck (a tenth of the pixels dug out give one)
+  },
+  -- Iron plate of the shop's hatch: indestructible until its chain is shot
+  [10] = {
+    name = "iron",
+    solid = true,
+    hardness = math.huge,
+    color = { 0.24, 0.25, 0.30 },
+    topColor = { 0.40, 0.41, 0.48 },
+    variation = 0.03,
+    brick = true, -- riveted plating
+  },
+  -- Area 2 palette: dark grey-blue slate and blue clay
+  [11] = {
+    name = "slate",
+    solid = true,
+    hardness = 3,
+    density = 2.6,
+    color = { 0.19, 0.21, 0.29 },
+    topColor = { 0.30, 0.34, 0.47 },
+    variation = 0.05,
+    bands = 0.05,
+  },
+  [12] = {
+    name = "blue clay",
+    solid = true,
+    hardness = 1,
+    density = 1.6,
+    color = { 0.20, 0.28, 0.43 },
+    topColor = { 0.24, 0.46, 0.44 }, -- a cold green moss
+    variation = 0.07,
   },
 }
 

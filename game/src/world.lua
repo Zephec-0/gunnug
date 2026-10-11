@@ -51,7 +51,7 @@ function World.new(width, height)
         y = y0,
         w = w,
         h = h,
-        data = love.image.newImageData(w, h),
+        data = nil, -- ImageData, allocated when first written or drawn (see tileData)
         image = nil, -- created when first drawn
         dirty = true,
       }
@@ -60,11 +60,20 @@ function World.new(width, height)
   return self
 end
 
+-- A tile's pixels are only allocated once something paints or draws there,
+-- which saves memory in the big, mostly not-yet-generated world
+local function tileData(tile)
+  if not tile.data then
+    tile.data = love.image.newImageData(tile.w, tile.h)
+  end
+  return tile.data
+end
+
 -- Writes a colour into the tile image covering (x, y)
 function World:writePixel(x, y, r, g, b, a)
   local tx, ty = math.floor(x / TILE), math.floor(y / TILE)
   local tile = self.tiles[ty * self.tilesX + tx + 1]
-  tile.data:setPixel(x - tile.x, y - tile.y, r, g, b, a)
+  tileData(tile):setPixel(x - tile.x, y - tile.y, r, g, b, a)
   tile.dirty = true
 end
 
@@ -72,7 +81,7 @@ end
 function World:pixelColor(x, y)
   local tx, ty = math.floor(x / TILE), math.floor(y / TILE)
   local tile = self.tiles[ty * self.tilesX + tx + 1]
-  return tile.data:getPixel(x - tile.x, y - tile.y)
+  return tileData(tile):getPixel(x - tile.x, y - tile.y)
 end
 
 function World:inBounds(x, y)
@@ -308,7 +317,7 @@ function World:draw(viewX, viewY, viewW, viewH)
     local dx1, dy1 = tile.x + tile.w + right, tile.y + tile.h + bottom
     if dx1 > viewX and dx0 < viewX + viewW and dy1 > viewY and dy0 < viewY + viewH then
       if not tile.image then
-        tile.image = love.graphics.newImage(tile.data)
+        tile.image = love.graphics.newImage(tileData(tile))
         tile.image:setWrap("clamp", "clamp")
         tile.dirty = false
       elseif tile.dirty then

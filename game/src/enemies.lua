@@ -8,6 +8,7 @@
 -- push them. While active each has a kinematic physics stand-in, so falling
 -- objects land on them. Bullets and kicks hurt them; touching them or their
 -- globs hurts the hunter (Player:hurt).
+local audio = require("src.audio")
 local Body = require("src.body")
 local config = require("src.config")
 local effects = require("src.effects")
@@ -139,6 +140,7 @@ end
 
 local function die(e)
   e.dead = true
+  audio.play("enemy_die")
   removePhysics(e)
   local cx, cy = center(e)
   local gold = love.math.random(e.def.gold[1], e.def.gold[2])

@@ -5,6 +5,7 @@
 --
 -- The menu only reports which action was chosen; src.game carries it out:
 --   "play", "resume", "restart", "title", "quit"
+local audio = require("src.audio")
 local hud = require("src.hud")
 
 local menu = {}
@@ -66,8 +67,10 @@ function menu.keypressed(key)
   local n = #items()
   if key == "w" or key == "up" then
     selected = (selected - 2) % n + 1
+    audio.play("tick")
   elseif key == "s" or key == "down" then
     selected = selected % n + 1
+    audio.play("tick")
   elseif key == "return" or key == "kpenter" or key == "space" then
     return items()[selected][2]
   elseif key == "escape" and state == "pause" then

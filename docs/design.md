@@ -97,8 +97,12 @@ Until weapon pickups exist, every run starts with one of each implemented gun in
 ### 5.4 Era scope
 Old designs up to roughly **WW2-era** firearms (e.g. crossbows, blunderbusses, flintlocks, revolvers, lever-action rifles, double-barrel shotguns, Gatling and Maxim guns, bolt-action rifles, early submachine guns), styled to fit the dark-fantasy world. No modern tactical firearms. Specific weapon roster **[Later]**.
 
-### 5.5 Ammo types & attachments **[Later]**
-Placeholder — to be designed once the base guns feel right. Each gun has its own number of slots for them (revolver: 4), separate from its chamber count.
+### 5.5 Ammo types & attachments **[Roadmap step 3]**
+Each gun has its own number of slots for them (revolver 4, shotgun 3, machine gun 5), separate from its chamber count. **Decided: simple per-slot modifiers.** Every filled slot independently adds its modifier to the gun's stats or shots; order doesn't matter (no Noita-style ordered stacking, to keep it readable and easy to balance).
+- **Ammo** changes what a shot does (e.g. slug, explosive, incendiary, ricochet). **Decided: ammo types stack** — every ammo type in a slot applies to every shot, so a gun loaded with several gets all their effects at once (stat changes add up; behaviours like explosive and incendiary combine). Because order still doesn't matter, stacking is just "apply each fitted modifier". The ammo list will need combinations that stay sensible (e.g. two incompatible behaviours resolve by a simple rule such as the higher value winning), to be settled when designing the list.
+- **Attachments** change the gun's stats or behaviour (barrel length, extended magazine, recoil compensator, …).
+- Both are **data, not code**: a table of named modifiers over the existing stat block (damage, spread, recoil, impact force, chambers, fire delay, reload time, pellets, dig power).
+- No colour-coded rarity for now (a later pass can add it).
 
 ### 5.6 Item bar & weapon panel
 Noita-style, along the top-left of the screen:
@@ -158,8 +162,20 @@ The generated area (above) under the dark-fantasy palette: the light blends from
 - **Placement:** each generated area places its monsters at generation: none near the entrance or in the shop, at least 48 px apart, and **more and tougher deeper down** (spawn chance 35% at the top to 100% at the bottom; HP up to ×1.6). About 70 per area. Only monsters within ~520 px of the hunter are active.
 - **[Later]** more types (e.g. a heavy brute), loot drops, respawning.
 
-## 9. Economy & Shop **[Later]**
-Gold, buying weapons and ammo/attachments, shop inventory generation.
+## 9. Economy & Shop **[Roadmap steps 1 and 6]**
+- **Gold** is an item: it fountains out as small physics bits that the hunter scoops up by walking over them. **It resets every run** (no meta-progression for now).
+- **Sources:** enemy drops (small amounts, scaling with toughness), crates (often a little gold, so smashing them pays), and the dungeon itself (deposits buried in the rock that you dig out, plus rare hidden chests in caverns).
+- **Shop:** stocks a few generated weapons plus ammo and attachments, priced from their stats and slots, restocked per area; buying is a walk-up-and-confirm interaction showing stats and price.
+
+## 9a. Items, finding & generating weapons **[Roadmap steps 1, 4, 5, 6]**
+- **Pickups:** items exist in the world as physics objects (kickable, shootable), picked up by walking over them (gold, small items) or with an interact key (weapons).
+- **Finding weapons:** weapon chests in caverns and guarded spots, the occasional drop from tough enemies, and altars at the end of side routes — all while traversing the dungeon.
+- **Weapon generation:** a weapon is a base archetype (revolver, shotgun, machine gun, later semi-auto, rifle, crossbow) plus **rolled stat variance** (about ±10–20%) plus a chance of already-fitted ammo and attachments. The generator is seed-driven so chests, drops and the shop can all use it; adding a new archetype only means adding a definition.
+- **Fourth gun:** with all three weapon slots full, picking up another gun opens a **compare/choose prompt** side by side with the carried guns' stats; you pick which to replace (or cancel), and the replaced gun is dropped.
+
+## 9b. Menu & audio **[Roadmap steps 2 and 7]**
+- **Menu:** a title screen and a pause menu (Esc: resume, restart, quit; settings later). Esc stops quitting the game instantly.
+- **Audio:** no sound yet. Placeholder sounds are generated in code (shots per gun, hits, footsteps, pickups, ambient cave tone) so they can be swapped for real assets later.
 
 ---
 
@@ -176,5 +192,17 @@ Gold, buying weapons and ammo/attachments, shop inventory generation.
 
 After Milestone 1, add the shotgun, semi-auto, and automatic archetypes, then start designing ammo types and attachments. **Shotgun and automatic added 2026-10-11; semi-auto still to do.**
 
-## 11. Open Questions
+## 11. Roadmap
+Order of work, by what unlocks what (items/pickups → loot → shop; ammo/attachments → weapon generation → shop; menu is independent):
+
+1. **Pickup system + gold** — items as physics objects, scooping up gold; gold from enemies, crates and buried deposits; gold counter on the HUD.
+2. **Menu** — title screen and Esc pause menu.
+3. **Ammo types & attachments** — simple per-slot modifiers as data, fitted by dragging in the weapon panel (that UI already exists).
+4. **Weapon generation** — archetype + rolled variance + chance of fitted ammo/attachments; add the semi-auto archetype.
+5. **Finding weapons** — chests and drops in the dungeon, with the 4th-gun compare/choose prompt.
+6. **Shop** — generated stock, prices, buying.
+7. **Audio** — generated placeholder sounds.
+8. **Then:** healing (flasks/pickups), a boss and more enemy types, Area 2, a run summary on death.
+
+## 12. Open Questions
 - Overworld size and contents for the long-term version.

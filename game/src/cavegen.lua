@@ -280,7 +280,7 @@ function cavegen.generate(world, area, seed, tick)
   -- another area lies below) the hatch: an iron plate set into the floor near
   -- the right end, held shut by a chain the hunter has to shoot.
   local function buildShop(cx, floorY)
-    local w, h = 310, 86
+    local w, h = 620, 86
     local x0, y0 = math.floor(cx - w / 2), floorY - h
     local x1, y1 = x0 + w - 1, floorY - 1
     world:fillRect(x0 - 8, y0 - 8, x1 + 8, y1 + 8, BRICK)
@@ -462,7 +462,7 @@ function cavegen.generate(world, area, seed, tick)
   carveCaverns()
 
   local entranceX, entranceY = area.entranceX, area.entranceY
-  local shopX = X0 + 192 + rng:random() * (W - 384)
+  local shopX = X0 + 340 + rng:random() * (W - 680)
   local shopFloor = Y1 - BORDER - 48
   local tunnelEndY = shopFloor - 86 - 38
   -- One wide main route and narrower side routes; they wander independently,

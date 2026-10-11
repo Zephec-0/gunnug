@@ -261,6 +261,8 @@ local function candles(info)
   local s = info.shop
   return {
     { s.x + 48, s.y + 30, 4 },
+    { s.x + math.floor(s.w * 0.33), s.y + 30, 4 },
+    { s.x + math.floor(s.w * 0.62), s.y + 30, 4 },
     { s.x + s.w - 48, s.y + 30, 4 },
   }
 end

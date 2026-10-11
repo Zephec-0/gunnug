@@ -29,7 +29,7 @@ local shops = {} -- one per area: { room, world, floorY, stock, heal, hatch, loc
 
 local REACH = 14
 local SPACING = 20
-local ITEMS = 4
+local ITEMS = 8
 local HEAL_FRACTION = 0.1 -- of max health per purchase
 local HATCH_DELAY = 0.7 -- seconds between the chain breaking and the plate dropping
 
@@ -79,15 +79,17 @@ function shop.populate(room, world, level)
     add({ kind = "perk", name = "", price = 0, hidden = true }, room.x + 30 + (i - 1) * 25)
   end
 
-  -- One weapon, then the ammo types and attachments to its right
-  local gun = guns.generate(nil, nil, 0.3)
-  local fitted = 0
-  for slot = 1, gun.slotCount do
-    if gun.slots[slot] then
-      fitted = fitted + 1
+  -- Two weapons, then the ammo types and attachments to their right
+  for w = 1, 2 do
+    local gun = guns.generate(nil, nil, 0.3)
+    local fitted = 0
+    for slot = 1, gun.slotCount do
+      if gun.slots[slot] then
+        fitted = fitted + 1
+      end
     end
+    add({ kind = "weapon", gun = gun, name = gun.name, price = roundTo5(45 + 25 * fitted + 8 * math.max(0, gun.slotCount - gun.def.slots) + love.math.random(0, 20)) }, room.x + 155 + (w - 1) * 30)
   end
-  add({ kind = "weapon", gun = gun, name = gun.name, price = roundTo5(45 + 25 * fitted + 8 * math.max(0, gun.slotCount - gun.def.slots) + love.math.random(0, 20)) }, room.x + 155)
   local used = {}
   for i = 1, ITEMS do
     local item
@@ -96,7 +98,7 @@ function shop.populate(room, world, level)
     until not used[item.id]
     used[item.id] = true
     local range = items.rarities[item.rarity].price
-    add({ kind = "item", item = item, name = item.name, price = roundTo5(love.math.random(range[1], range[2])) }, room.x + 185 + (i - 1) * SPACING)
+    add({ kind = "item", item = item, name = item.name, price = roundTo5(love.math.random(range[1], range[2])) }, room.x + 235 + (i - 1) * SPACING)
   end
 
   local h = room.hatch
@@ -185,11 +187,11 @@ local function nearest(player)
   return bs, bk, be
 end
 
--- Healing is priced by how much health is missing: 10g when nearly full up to
--- 50g when nearly dead, for each 10% of max health
+-- Healing is priced by how much health is missing: 5g when nearly full up to
+-- 25g when nearly dead, for each 10% of max health
 local function healCost(player)
   local missing = (player.maxHp - player.hp) / player.maxHp
-  return roundTo5((10 + 40 * missing) * perks.prod("healPrice"))
+  return roundTo5((5 + 20 * missing) * perks.prod("healPrice"))
 end
 
 local function healAmount(player)
@@ -542,10 +544,8 @@ function shop.drawScreen(toScreen, font, player)
           local sx, sy = toScreen(e.x, s.floorY - (e.kind == "perk" and 22 or 14))
           if sx > -60 and sx < sw + 60 and sy > -20 and sy < sh + 20 then
             local price = priceOf(e)
-            local y
-            if e.kind == "perk" then
-              y = label("Free", sx, sy, { 0.6, 1, 0.65 })
-            else
+            local y = sy
+            if e.kind ~= "perk" then
               y = label(price .. "g", sx, sy, gold >= price and { 1, 0.86, 0.45 } or { 0.85, 0.4, 0.38 })
             end
             if e == nentry then

@@ -24,11 +24,11 @@ enemies.defs = {
   ghoul = {
     w = 8,
     h = 14,
-    hp = 30,
-    speed = 62, -- the hunter walks at 112, so he can outrun them
+    hp = 24,
+    speed = 43, -- the hunter walks at 112, so he can outrun them
     jump = 250, -- hops up ledges when blocked (about 46 px)
     lungeRange = 44,
-    lungeSpeed = 190,
+    lungeSpeed = 133,
     lungeLift = 150,
     lungeCooldown = 1.3,
     sight = 280, -- notices the hunter this close (with a clear line of sight)
@@ -43,8 +43,8 @@ enemies.defs = {
     w = 7,
     h = 5,
     hp = 8,
-    speed = 125,
-    accel = 420,
+    speed = 88,
+    accel = 294,
     sight = 210,
     forget = 520,
     damage = 6,
@@ -343,6 +343,12 @@ local function updateMotes(e, dt)
 end
 
 local function drawAura(e)
+  -- A very faint halo behind the sprite
+  local b = e.body
+  local a = (e.state == "sleep" and 0.013 or 0.022) * (0.85 + 0.15 * math.sin(love.timer.getTime() * 3 + e.phase))
+  love.graphics.setColor(AURA[1], AURA[2], AURA[3], a)
+  love.graphics.rectangle("fill", b.x - 1, b.y, b.w + 2, b.h)
+  love.graphics.rectangle("fill", b.x, b.y - 1, b.w, b.h + 2)
   for _, m in ipairs(e.motes or {}) do
     love.graphics.setColor(AURA[1], AURA[2], AURA[3], 0.7 * m.life / 0.8)
     love.graphics.rectangle("fill", math.floor(m.x), math.floor(m.y), 1, 1)
@@ -945,6 +951,8 @@ function enemies.addLights(lighting, view)
   for _, e in ipairs(list) do
     if onScreen(e, view) then
       local cx, cy = center(e)
+      -- The purple back-light, at a tenth of its old strength
+      lighting.add(cx, cy, 13, AURA[1], AURA[2], AURA[3], e.state == "sleep" and 0.03 or 0.045)
       if e.kind == "spitter" then
         lighting.add(cx, cy + 4, e.windup and 30 or 16, 0.5, 1, 0.35, 0.5)
       end

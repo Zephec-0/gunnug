@@ -173,6 +173,22 @@ function Player:shoot()
   for _, s in ipairs(shots) do
     bullets.spawn(sx, sy, s)
   end
+  -- Spent shell: pistols and machine guns spit it out at once, revolvers and
+  -- the double-barrel keep theirs until a reload
+  local cs = self.gun.def.casing
+  if cs and cs.eject == "shot" then
+    local len = self.gun.def.length
+    local f = self.facing
+    effects.casing(
+      self.muzzleX - math.cos(self.aimAngle) * len * 0.55,
+      self.muzzleY - math.sin(self.aimAngle) * len * 0.55 - 1,
+      -f * (30 + love.math.random() * 50) + self.body.vx * 0.4,
+      -(70 + love.math.random() * 70) + self.body.vy * 0.3,
+      cs.size,
+      nil,
+      cs.hull
+    )
+  end
   local quiet = st.sneak > 0 -- Suppressor
   effects.muzzleFlash(self.muzzleX, self.muzzleY, self.aimAngle, self.gun.def.flash * (quiet and 0.5 or 1))
   audio.play("shot_" .. (self.gun.def.model == "pistol" and "pistol" or self.gun.def.model), quiet and 0.35 or nil)

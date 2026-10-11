@@ -17,6 +17,10 @@ local START_ITEM_CHANCE = 0.5
 local Inventory = {}
 Inventory.__index = Inventory
 
+function inventory.reloadsHolstered(gun)
+  return perks.sum("bgReload") > 0 or gun:stats().bgReload > 0
+end
+
 function inventory.new()
   local self = setmetatable({ weapons = {}, items = {}, perks = {}, selected = 1, gold = 0 }, Inventory)
   perks.bind(self)
@@ -57,11 +61,25 @@ function Inventory:cycle(dir)
   end
 end
 
--- Every carried gun keeps reloading, held or not
+-- Only the held gun reloads. Switching away mid-reload cancels it (it starts
+-- over when you switch back), unless the gun can reload holstered (the Holster
+-- Loader attachment) or you have the Juggler perk.
 function Inventory:update(dt)
+  local held = self.weapons[self.selected]
+  if self.lastHeld and self.lastHeld ~= held then
+    if not inventory.reloadsHolstered(self.lastHeld) then
+      self.lastHeld:cancelReload()
+    end
+  end
+  self.lastHeld = held
   for i = 1, inventory.WEAPON_SLOTS do
-    if self.weapons[i] then
-      self.weapons[i]:update(dt)
+    local gun = self.weapons[i]
+    if gun then
+      if gun == held or inventory.reloadsHolstered(gun) then
+        gun:update(dt)
+      else
+        gun:updateHolstered(dt)
+      end
     end
   end
 end

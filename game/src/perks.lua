@@ -7,7 +7,7 @@
 -- for through perks.sum(key) (added up) and perks.prod(key) (multiplied):
 --   sum:  maxHp crit incendiary bounces pierce killHeal airJumps regen
 --         lastStand (damage bonus below 30% HP) momentum secondWind
---         deathBurst adrenaline drain
+--         deathBurst adrenaline drain bgReload
 --   prod: dmgTaken damage reload fireDelay spread speed jump gold shopPrice
 --         healPrice loot magnet slideFriction kickDamage
 local items = require("src.items")
@@ -216,6 +216,14 @@ perks.defs = {
     desc = "Enemies you kill explode, hurting others nearby (never you).",
     fx = { deathBurst = 1 },
   },
+  juggler = {
+    name = "Juggler",
+    short = "JG",
+    color = { 0.62, 0.85, 0.95 },
+    rarity = "rare",
+    desc = "Every gun keeps reloading while holstered, so you can swap weapons mid-reload.",
+    fx = { bgReload = 1 },
+  },
   kicker = {
     name = "Kicker",
     short = "KK",
@@ -273,7 +281,7 @@ perks.order = {
   "springheel", "fleet_foot", "slick_soles", "double_jump",
   "prospector", "haggler", "lucky_find", "magnetic_pockets",
   "sharp_eyes", "heavy_hitter", "quick_hands", "momentum", "pyromaniac", "ricochet_master", "needle_sight",
-  "death_burst", "kicker",
+  "death_burst", "juggler", "kicker",
   "glass_cannon", "devils_bargain", "greedy_hands", "berserker", "pact_of_pain",
 }
 

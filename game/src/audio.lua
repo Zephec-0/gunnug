@@ -77,6 +77,42 @@ local DEFS = {
     volume = 0.15,
     cooldown = 0.07,
   },
+  bat_screech = {
+    gen = function()
+      return synth(0.5, function(t, p)
+        -- A shrill chirp that climbs, wobbles and then cracks downward
+        local f = p < 0.55 and (1500 + p * 2400) or (2800 - (p - 0.55) * 4200)
+        local wobble = 1 + 0.25 * math.sin(t * 60)
+        return (math.sin(t * f * wobble * 6.2832) * 0.55 + noise() * 0.12) * math.sin(p * math.pi) ^ 0.5
+      end)
+    end,
+    volume = 0.45,
+  },
+  casing = {
+    gen = function()
+      return synth(0.06, function(t, p)
+        return (math.sin(t * 3300 * 6.2832) * 0.5 + math.sin(t * 5100 * 6.2832) * 0.3) * math.exp(-p * 9)
+      end)
+    end,
+    volume = 0.12,
+    cooldown = 0.05,
+  },
+  reload_click = {
+    gen = function()
+      return synth(0.07, function(t, p)
+        return (noise() * 0.4 + math.sin(t * 900 * 6.2832) * 0.5) * math.exp(-p * 10)
+      end)
+    end,
+    volume = 0.35,
+  },
+  reload_snap = {
+    gen = function()
+      return synth(0.1, function(t, p)
+        return (noise() * 0.5 + math.sin(t * 420 * 6.2832) * 0.6) * math.exp(-p * 12)
+      end)
+    end,
+    volume = 0.45,
+  },
   enemy_die = {
     gen = function()
       return synth(0.35, function(t, p)

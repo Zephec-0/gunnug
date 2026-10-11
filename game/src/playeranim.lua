@@ -4,7 +4,9 @@
 -- A long coat and its mantle follow the motion with simple secondary physics.
 --
 -- Positions are relative to the hitbox: cx = horizontal centre, fy = feet.
+local audio = require("src.audio")
 local config = require("src.config")
+local effects = require("src.effects")
 
 local cfg = config.player
 
@@ -32,6 +34,104 @@ local HOLDS = {
 }
 local TAIL_LINKS, TAIL_LINK = 4, 2.2
 
+local function clamp(v, lo, hi)
+  return math.max(lo, math.min(hi, v))
+end
+
+local function lerp(a, b, t)
+  return a + (b - a) * t
+end
+
+-- Reload animations, one per gun model, driven by the gun's reload progress
+-- (0 -> 1 over its reload time, so reload speed modifiers speed them up and
+-- slow them down). Keyframes ease from one to the next:
+--   p      progress at this keyframe
+--   tilt   muzzle raised by this many radians (negative: dipped)
+--   reach  extra distance of the grip from the shoulder
+--   kind   where the support hand goes: "gun" (a = along the barrel from the
+--          grip, b = down from it) or "belt" (a = in front of the hips, b = below them)
+--   carry  the hand is holding a fresh round / magazine
+-- Events fire once per reload as progress passes them.
+local RELOAD = {
+  -- Tip the muzzle up, tap out the shells, fetch rounds from the belt, thumb
+  -- them in and snap the cylinder shut
+  revolver = {
+    keys = {
+      { p = 0.00, tilt = 0.0, reach = 0.0, kind = "gun", a = -1.3, b = 0 },
+      { p = 0.12, tilt = 0.9, reach = -0.5, kind = "gun", a = 2.5, b = 1.0 },
+      { p = 0.30, tilt = 0.9, reach = -0.5, kind = "gun", a = 2.5, b = 1.5 },
+      { p = 0.42, tilt = 0.5, reach = 0.0, kind = "belt", a = 3, b = 0 },
+      { p = 0.60, tilt = 0.35, reach = 0.0, kind = "belt", a = 3, b = 0, carry = true },
+      { p = 0.80, tilt = 0.35, reach = 0.0, kind = "gun", a = 2.5, b = 1.0, carry = true },
+      { p = 0.90, tilt = 0.0, reach = 0.5, kind = "gun", a = 2.5, b = 1.0 },
+      { p = 1.00, tilt = 0.0, reach = 0.0, kind = "gun", a = -1.3, b = 0 },
+    },
+    events = { { 0.28, "eject" }, { 0.72, "click" }, { 0.90, "snap" } },
+  },
+  -- Break the barrels open, shells pop out, two fresh shells from the belt,
+  -- and snap it shut with a flick
+  shotgun = {
+    keys = {
+      { p = 0.00, tilt = 0.0, reach = 0.0, kind = "gun", a = 4.2, b = 0.8 },
+      { p = 0.12, tilt = -0.55, reach = -0.5, kind = "gun", a = 4.2, b = 0.8 },
+      { p = 0.30, tilt = -0.55, reach = -0.5, kind = "gun", a = 1.5, b = 1.0 },
+      { p = 0.42, tilt = -0.4, reach = 0.0, kind = "belt", a = 3, b = 0 },
+      { p = 0.62, tilt = -0.4, reach = 0.0, kind = "belt", a = 3, b = 0, carry = true },
+      { p = 0.76, tilt = -0.4, reach = 0.0, kind = "gun", a = 1.5, b = 1.0, carry = true },
+      { p = 0.88, tilt = 0.1, reach = 0.4, kind = "gun", a = 4.2, b = 0.8 },
+      { p = 1.00, tilt = 0.0, reach = 0.0, kind = "gun", a = 4.2, b = 0.8 },
+    },
+    events = { { 0.30, "eject" }, { 0.72, "click" }, { 0.88, "snap" } },
+  },
+  -- Muzzle up, a stripper clip fetched from the belt and pressed in from the
+  -- top of the receiver, then the slide racked
+  pistol = {
+    keys = {
+      { p = 0.00, tilt = 0.0, reach = 0.0, kind = "gun", a = -1.3, b = 0 },
+      { p = 0.15, tilt = 0.4, reach = -0.3, kind = "gun", a = -1.0, b = 0.5 },
+      { p = 0.30, tilt = 0.6, reach = -0.3, kind = "belt", a = 3, b = 0 },
+      { p = 0.55, tilt = 0.6, reach = 0.0, kind = "belt", a = 3, b = 0, carry = true },
+      { p = 0.72, tilt = 0.5, reach = 0.0, kind = "gun", a = 3.0, b = -1.2, carry = true },
+      { p = 0.85, tilt = 0.2, reach = 0.0, kind = "gun", a = 3.0, b = -0.5 },
+      { p = 0.93, tilt = 0.0, reach = 0.3, kind = "gun", a = 1.0, b = 0 },
+      { p = 1.00, tilt = 0.0, reach = 0.0, kind = "gun", a = -1.3, b = 0 },
+    },
+    events = { { 0.74, "click" }, { 0.93, "snap" } },
+  },
+  -- Drop the drum, a new one from the belt, slap it on, haul back the
+  -- charging handle
+  automatic = {
+    keys = {
+      { p = 0.00, tilt = 0.0, reach = 0.0, kind = "gun", a = 4.0, b = 0.8 },
+      { p = 0.12, tilt = 0.3, reach = -0.6, kind = "gun", a = 2.2, b = 2.2 },
+      { p = 0.25, tilt = 0.3, reach = -0.6, kind = "gun", a = 2.2, b = 3.0 },
+      { p = 0.40, tilt = 0.2, reach = 0.0, kind = "belt", a = 4, b = -1 },
+      { p = 0.60, tilt = 0.2, reach = 0.0, kind = "belt", a = 4, b = -1, carry = true },
+      { p = 0.75, tilt = 0.3, reach = 0.0, kind = "gun", a = 2.2, b = 2.2, carry = true },
+      { p = 0.88, tilt = 0.1, reach = -0.4, kind = "gun", a = -0.5, b = -0.7 },
+      { p = 0.95, tilt = 0.0, reach = 0.2, kind = "gun", a = 4.0, b = 0.8 },
+      { p = 1.00, tilt = 0.0, reach = 0.0, kind = "gun", a = 4.0, b = 0.8 },
+    },
+    events = { { 0.24, "drum" }, { 0.76, "click" }, { 0.93, "snap" } },
+  },
+}
+
+local function smooth(t)
+  return t * t * (3 - 2 * t)
+end
+
+-- The two keyframes around progress p and how far between them (eased)
+local function reloadKeys(model, p)
+  local keys = (RELOAD[model] or RELOAD.revolver).keys
+  for i = 1, #keys - 1 do
+    local k0, k1 = keys[i], keys[i + 1]
+    if p <= k1.p then
+      return k0, k1, smooth(clamp((p - k0.p) / (k1.p - k0.p), 0, 1))
+    end
+  end
+  local last = keys[#keys]
+  return last, last, 0
+end
 -- Dark, desaturated clothing with a few accents (grey mantle, eyes, silver)
 local COLORS = {
   coat = { 0.15, 0.13, 0.17 },
@@ -58,13 +158,6 @@ local COLORS = {
   grip = { 0.30, 0.17, 0.11 },
 }
 
-local function clamp(v, lo, hi)
-  return math.max(lo, math.min(hi, v))
-end
-
-local function lerp(a, b, t)
-  return a + (b - a) * t
-end
 
 function anim.new()
   return {
@@ -180,6 +273,60 @@ local function updateMantleTail(player, dt)
   end
 end
 
+-- Reload progress and its one-off events: shells dropping out, the drum
+-- falling away, the clicks of rounds going in and the action snapping shut
+function anim.updateReload(player)
+  local a, gun = player.anim, player.gun
+  if not gun or not gun:isReloading() or player.dead then
+    a.reloadP, a.reloadFired, a.reloadGun = nil, nil, nil
+    return
+  end
+  local p = gun:reloadProgress()
+  if a.reloadGun ~= gun or (a.reloadP and p < a.reloadP) then
+    a.reloadFired = {}
+    a.reloadGun = gun
+  end
+  a.reloadP = p
+  local model = gun.def.model
+  local set = RELOAD[model]
+  if not set then
+    return
+  end
+  local f = player.facing
+  local cx = player.body.x + player.body.w / 2
+  local _, _, _, _, neckX, neckY = torso(player)
+  for i, ev in ipairs(set.events) do
+    if p >= ev[1] and not a.reloadFired[i] then
+      a.reloadFired[i] = true
+      local what = ev[2]
+      if what == "eject" then
+        local cs = gun.def.casing
+        for _ = 1, gun.spent do
+          effects.casing(
+            neckX + f * (3 + love.math.random() * 2),
+            neckY + 4,
+            (model == "shotgun" and -f * (15 + love.math.random() * 25) or (love.math.random() - 0.5) * 40) + player.body.vx * 0.3,
+            model == "shotgun" and -(60 + love.math.random() * 50) or (10 + love.math.random() * 20),
+            cs and cs.size or 3,
+            nil,
+            cs and cs.hull
+          )
+        end
+        gun.spent = 0
+        audio.play("reload_click", 0.8, 0.8)
+      elseif what == "drum" then
+        effects.casing(neckX + f * 4, neckY + 6, f * 12 + player.body.vx * 0.3, 10, 4, { 0.22, 0.22, 0.27 })
+        audio.play("reload_click", 0.9, 0.6)
+      elseif what == "click" then
+        audio.play("reload_click")
+      elseif what == "snap" then
+        audio.play("reload_snap")
+        a.recoil = math.max(a.recoil, 0.25) -- a little jolt as it closes
+      end
+    end
+  end
+end
+
 function anim.update(player, dt)
   local a, b = player.anim, player.body
   a.time = a.time + dt
@@ -200,6 +347,7 @@ function anim.update(player, dt)
   end
   a.squash = math.max(0, a.squash - dt * 6)
   a.recoil = math.max(0, a.recoil - dt * 7)
+  anim.updateReload(player)
   a.wasGrounded = player.grounded
   a.lastVy = b.vy
 
@@ -524,15 +672,41 @@ function anim.draw(player)
   local hold = gunHold(player)
   local aim = player.aimAngle
   local dx, dy = math.cos(aim), math.sin(aim)
-  local gripX = sx + dx * (hold.reach - a.recoil * hold.pull)
-  local gripY = sy + dy * (hold.reach - a.recoil * hold.pull)
-  local gunAngle = aim - f * a.recoil * hold.tip
+  -- Reloading changes how the gun is held (see RELOAD above)
+  local k0, k1, kt
+  local tilt, reachAdd = 0, 0
+  if a.reloadP and player.gun then
+    k0, k1, kt = reloadKeys(player.gun.def.model, a.reloadP)
+    tilt = lerp(k0.tilt, k1.tilt, kt)
+    reachAdd = lerp(k0.reach, k1.reach, kt)
+  end
+  local gripX = sx + dx * (hold.reach - a.recoil * hold.pull + reachAdd)
+  local gripY = sy + dy * (hold.reach - a.recoil * hold.pull + reachAdd)
+  local gunAngle = aim - f * (a.recoil * hold.tip + tilt)
   -- The other hand: on the grip for a pistol, under the fore-end for long guns
   local gdx, gdy = math.cos(gunAngle), math.sin(gunAngle)
   local supX, supY = gripX - dx * 1.3, gripY - dy * 1.3
   if hold.support then
     supX = gripX + gdx * hold.support - gdy * f * 0.8
     supY = gripY + gdy * hold.support + gdx * f * 0.8
+  end
+
+  -- Reloading: the support hand follows the keyframes between the gun and the belt
+  local carryX, carryY
+  if k0 then
+    local pdx, pdy = -gdy * f, gdx * f
+    local function handAt(k)
+      if k.kind == "belt" then
+        return hipX + f * k.a, hipY + k.b
+      end
+      return gripX + gdx * k.a + pdx * k.b, gripY + gdy * k.a + pdy * k.b
+    end
+    local x0, y0 = handAt(k0)
+    local x1, y1 = handAt(k1)
+    supX, supY = lerp(x0, x1, kt), lerp(y0, y1, kt)
+    if k0.carry then
+      carryX, carryY = supX, supY
+    end
   end
 
   local fx1, fy1, fx2, fy2, bend = footTargets(player, cx, fy)
@@ -548,6 +722,12 @@ function anim.draw(player)
   drawHead(neckX, neckY, f)
   drawGun(player.gun, gripX, gripY, gunAngle, f)
   drawArm(sx + f * 0.6, sy, gripX, gripY, COLORS.coat)
+  if carryX then
+    -- A fresh round (or magazine) held in the hand
+    local name = player.gun and player.gun.def.model
+    pixel(carryX + f, carryY - 1, name == "shotgun" and { 0.72, 0.17, 0.13 } or { 0.85, 0.66, 0.25 })
+    pixel(carryX + f, carryY, name == "shotgun" and { 0.85, 0.66, 0.25 } or COLORS.gunMid)
+  end
 end
 
 return anim

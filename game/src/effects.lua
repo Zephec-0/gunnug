@@ -1,12 +1,17 @@
 -- Visual effects: pixel particles, muzzle flashes and floating damage numbers.
+local audio = require("src.audio")
+
 local effects = {}
 
 local particles = {}
 local flashes = {}
 local popups = {}
+local casings = {} -- spent shells lying about; each lasts 10 seconds
+local MAX_CASINGS = 250
+local CASING_LIFE = 10
 
 function effects.clear()
-  particles, flashes, popups = {}, {}, {}
+  particles, flashes, popups, casings = {}, {}, {}, {}
 end
 
 -- emissive particles (sparks, flashes) glow: they are drawn after the lighting
@@ -79,6 +84,28 @@ function effects.impact(x, y, dx, dy, debrisColor)
   end
 end
 
+-- A spent shell (2-4 pixels long) that tumbles, bounces off the terrain with a
+-- little tick, settles, and vanishes after ten seconds. hull: a coloured
+-- shotgun hull with a brass base instead of plain brass.
+function effects.casing(x, y, vx, vy, size, color, hull)
+  if #casings >= MAX_CASINGS then
+    table.remove(casings, 1)
+  end
+  casings[#casings + 1] = {
+    x = x,
+    y = y,
+    vx = vx,
+    vy = vy,
+    size = size or 2,
+    color = color or { 0.82, 0.64, 0.24 },
+    hull = hull,
+    life = CASING_LIFE,
+    spin = love.math.random() * 6,
+    bounces = 0,
+    landed = false,
+  }
+end
+
 function effects.popup(x, y, text, color)
   popups[#popups + 1] = {
     x = x + (love.math.random() - 0.5) * 10,
@@ -103,6 +130,37 @@ function effects.update(dt, world)
     end
     if p.life <= 0 then
       table.remove(particles, i)
+    end
+  end
+  for i = #casings, 1, -1 do
+    local c = casings[i]
+    c.life = c.life - dt
+    if not c.landed then
+      c.vy = math.min(c.vy + 560 * dt, 420)
+      c.spin = c.spin + dt * 22
+      local nx, ny = c.x + c.vx * dt, c.y + c.vy * dt
+      if world:isSolid(math.floor(nx), math.floor(c.y)) then
+        c.vx = -c.vx * 0.4
+        nx = c.x
+      end
+      if world:isSolid(math.floor(nx), math.floor(ny)) then
+        if c.vy > 45 and c.bounces < 3 then
+          c.vy = -c.vy * 0.38
+          c.vx = c.vx * 0.6
+          c.bounces = c.bounces + 1
+          if c.bounces == 1 then
+            audio.play("casing", 0.8 + love.math.random() * 0.5)
+          end
+        else
+          c.landed = true
+          c.vx, c.vy = 0, 0
+        end
+        ny = c.y
+      end
+      c.x, c.y = nx, ny
+    end
+    if c.life <= 0 then
+      table.remove(casings, i)
     end
   end
   for i = #flashes, 1, -1 do
@@ -134,6 +192,25 @@ end
 -- Lit normally (dust, debris, smoke). Low-res canvas, world space.
 function effects.drawWorld()
   drawParticles(false)
+  for _, c in ipairs(casings) do
+    local long = c.size
+    local thick = c.size >= 4 and 2 or 1
+    local w, h = long, thick
+    if not c.landed and math.floor(c.spin) % 2 == 1 then
+      w, h = thick, long -- tumbling end over end
+    end
+    local alpha = math.min(1, c.life / 1.2) -- fades out over the last stretch
+    local x, y = math.floor(c.x), math.floor(c.y) - h + 1
+    local col = c.hull or c.color
+    love.graphics.setColor(col[1], col[2], col[3], alpha)
+    love.graphics.rectangle("fill", x, y, w, h)
+    if c.hull then
+      love.graphics.setColor(c.color[1], c.color[2], c.color[3], alpha) -- brass base
+      love.graphics.rectangle("fill", x, y, w > h and 1 or w, w > h and h or 1)
+    end
+    love.graphics.setColor(1, 1, 0.85, 0.5 * alpha) -- glint
+    love.graphics.rectangle("fill", x + (w > 1 and 1 or 0), y, 1, 1)
+  end
 end
 
 -- Drawn after the lighting so they glow: muzzle flashes and sparks

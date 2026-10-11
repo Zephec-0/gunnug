@@ -21,6 +21,7 @@ guns.defs = {
     digPower = 1, -- vs. material hardness: dirt 1, sandstone 2, rock 3
     slots = 4, -- ammo type / attachment slots (separate from chambers)
     model = "revolver", -- how the hunter holds and draws it (playeranim.lua)
+    casing = { size = 3, eject = "reload" }, -- spent shells stay in the cylinder until a reload
     length = 8.8, -- grip to muzzle, in pixels
     kick = 1, -- strength of the cosmetic recoil kick in the hands
     flash = 1, -- muzzle flash size
@@ -56,6 +57,7 @@ guns.defs = {
     slots = 3,
     slotBias = -1, -- generated shotguns average a slot fewer (many pellets per shot)
     model = "shotgun",
+    casing = { size = 4, eject = "reload", hull = { 0.72, 0.17, 0.13 } }, -- both hulls pop out when it breaks open
     length = 12.5,
     kick = 1.4,
     flash = 1.8,
@@ -87,6 +89,7 @@ guns.defs = {
     digPower = 1,
     slots = 4,
     model = "pistol",
+    casing = { size = 2, eject = "shot" },
     length = 10,
     kick = 0.6,
     flash = 0.9,
@@ -121,6 +124,7 @@ guns.defs = {
     slots = 4,
     slotBias = -1, -- a hose of bullets: average one slot fewer
     model = "automatic",
+    casing = { size = 2, eject = "shot" },
     length = 11.5,
     kick = 0.45,
     flash = 0.7,
@@ -159,6 +163,7 @@ function guns.new(name, slotCount)
     fresh = true, -- freshly reloaded: Primer Coil's double-damage shot is ready
     drawn = false, -- just switched to: Quickdraw Holster's shot is ready
     shotCount = 0, -- Mortar Breech fires every fifth shot big
+    spent = 0, -- spent shells still in the gun (revolver, double-barrel)
   }, Gun)
   return self
 end
@@ -178,7 +183,7 @@ local ADDED = {
   "boomerang", "ghost", "execute", "glow", "sneak",
   "bloodCost", "misfire",
   "burst", "rear", "opener", "quickdraw", "mortar",
-  "laser", "bayonet", "overheat", "jets", "steady", "vulnerable",
+  "laser", "bayonet", "overheat", "jets", "steady", "vulnerable", "bgReload",
 }
 -- Ammo with any of these tints its bullets with the item's colour
 local TINTING = {
@@ -345,9 +350,24 @@ function Gun:maxChambers()
   return self:stats().chambers
 end
 
+-- A gun in the holster: its timers cool off but any reload is paused
+function Gun:updateHolstered(dt)
+  self.fireTimer = math.max(0, self.fireTimer - dt)
+  self.heat = math.max(0, self.heat - 4 * dt)
+end
+
+-- Switching away mid-reload throws the reload away: it starts over next time
+function Gun:cancelReload()
+  self.reloadTimer = 0
+  self.burstLeft = 0
+end
+
 function Gun:update(dt)
   self.fireTimer = math.max(0, self.fireTimer - dt)
   self.heat = math.max(0, self.heat - 4 * dt)
+  if self.chambers <= 0 and self.reloadTimer <= 0 then
+    self:reload() -- an empty gun goes straight back to reloading
+  end
   if self.reloadTimer > 0 then
     self.reloadTimer = self.reloadTimer - dt
     if self.reloadTimer <= 0 then
@@ -406,6 +426,9 @@ function Gun:fire(angle, ctx)
   local def, st = self.def, self:stats()
   self.chambers = self.chambers - 1
   self.shotCount = self.shotCount + 1
+  if def.casing and def.casing.eject == "reload" then
+    self.spent = math.min(self.spent + 1, def.chambers)
+  end
 
   local delay = st.fireDelay / (ctx.fireRate or 1)
   local mult = ctx.damageMult or 1

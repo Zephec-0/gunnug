@@ -18,6 +18,7 @@
 --     burst rear opener quickdraw mortar       (how the gun fires)
 --     laser bayonet overheat jets steady       (gun / hunter behaviour)
 --     vulnerable                               (curse: damage taken +20% each)
+--     bgReload                                 (keeps reloading while holstered)
 --
 -- Rarity: "common", "rare" or "cursed" (powerful, with a real downside).
 -- An item is a table { kind = "ammo" | "attachment", id, name, short, color,
@@ -497,6 +498,15 @@ items.defs = {
     desc = "Standing still (or crouched and slow) makes your shots almost perfectly accurate.",
     mods = { steady = 1 },
   },
+  holsterloader = {
+    kind = "attachment",
+    name = "Holster Loader",
+    short = "HL",
+    color = { 0.55, 0.62, 0.78 },
+    rarity = "rare",
+    desc = "This gun keeps reloading while it is holstered. (Other guns lose their reload when you switch away.)",
+    mods = { bgReload = 1 },
+  },
   deadmans = {
     kind = "attachment",
     name = "Dead Man's Mag",
@@ -528,7 +538,7 @@ items.order = {
   "longbarrel", "extmag", "compensator", "speedloader", "hairtrigger", "choke", "charge",
   "burst", "backblast", "primer", "suppressor", "laser", "bayonet", "overclock", "magnet", "lantern",
   "jets", "mortar", "scavenger", "quickdraw", "glassbarrel", "scope", "stock", "penetrator",
-  "stabilizer", "deadmans", "reckless",
+  "stabilizer", "holsterloader", "deadmans", "reckless",
 }
 
 function items.new(id)

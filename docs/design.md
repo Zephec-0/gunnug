@@ -232,6 +232,17 @@ A run starts with a single **Revolver** that has rolled like a generated weapon:
 
 The shop room is 310px wide (was 240). Left to right: three free perk pedestals, the healing pedestal, the weapon, four ammo/attachment pedestals, and the hatch at the far right.
 
+### 5.11 Reloading, reload animations and casings
+
+- **Reload animations** are per gun model and keyed to reload progress, so reload-speed modifiers speed them up and slow them down: the revolver tips up, ejects its shells, takes rounds from the belt and snaps the cylinder shut; the double-barrel breaks open, drops two hulls, reloads from the belt and flicks shut; the Broomhandle gets a clip pressed in from the top and its slide racked; the machine gun drops its drum, slaps on a new one and hauls the charging handle.
+- **Casings** (2-4 px) fly out on every shot from pistols and machine guns. Revolvers and the double-barrel keep spent shells until the reload ejects them. Casings tumble, bounce with a tick, and disappear after 10 seconds (max 250 at once).
+- **Reloads don't carry over:** only the held gun reloads. Switching away mid-reload cancels it (it restarts when you switch back). Exceptions: the **Holster Loader** attachment (that gun keeps reloading holstered) and the **Juggler** perk (all guns do).
+
+### 8a. Enemy animation
+
+- **Ghoul** (10x18): grey, ghost-pale and hunched. It shuffles with its arms trailing and dragging behind it, kicking up dust. To attack it rears back (arms raised behind its head, jaw open) for 0.4s, then lunges and flings both arms forward.
+- **Bat** (10x7): a bigger bat with ears, finger-boned wings and fangs. Once it has line of sight and is within 130px it locks on: it hangs still with its wings spread and shaking, screeches for 0.55s, then dives in a straight line at where the hunter stood. A bite sends it flying off; hitting rock or missing leaves it dazed/recovering. Without line of sight it just flutters closer and never dives.
+
 ## 6. World & Terrain
 
 - **Pixel terrain, destructible, static materials.** Bullets and explosions carve holes in terrain. Detached chunks/debris may fall. No fluids, gases, or fire spreading in this milestone.

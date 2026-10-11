@@ -22,15 +22,17 @@ local enemies = {}
 -- Tuning. Speeds in px/s, damage in HP, times in seconds.
 enemies.defs = {
   ghoul = {
-    w = 8,
-    h = 14,
+    w = 10,
+    h = 18,
     hp = 24,
     speed = 43, -- the hunter walks at 112, so he can outrun them
     jump = 250, -- hops up ledges when blocked (about 46 px)
-    lungeRange = 44,
+    lungeRange = 48,
     lungeSpeed = 133,
     lungeLift = 150,
     lungeCooldown = 1.3,
+    windup = 0.4, -- rears back this long before flinging its arms forward
+    strike = 0.45, -- how long the arms stay flung out
     sight = 280, -- notices the hunter this close (with a clear line of sight)
     forget = 460, -- gives up the chase this far away
     damage = 12,
@@ -40,8 +42,8 @@ enemies.defs = {
     weight = 2.5, -- how much objects' momentum moves it (speed gained = momentum / weight)
   },
   bat = {
-    w = 7,
-    h = 5,
+    w = 10,
+    h = 7,
     hp = 8,
     speed = 88,
     accel = 294,
@@ -50,6 +52,11 @@ enemies.defs = {
     damage = 6,
     gold = { 1, 3 },
     retreat = 0.8, -- flies off this long after biting
+    chargeRange = 130, -- locks on when it can see the hunter this close
+    lockTime = 0.55, -- hangs still and screeches this long before charging
+    chargeSpeed = 210,
+    chargeTime = 0.7, -- a straight-line dive this long at most
+    chargeCooldown = 1.4,
     knockback = 0.7,
     weight = 0.6,
   },
@@ -474,17 +481,29 @@ local function updateGhoul(e, dt, world, player, px, py)
     e.state = "idle"
   end
 
+  e.strikeT = math.max(0, (e.strikeT or 0) - dt)
   local want = 0
   if e.stun > 0 then
     want = nil -- knocked back: no control
+    e.windT = nil
   elseif e.state == "chase" then
     want = px < cx - 2 and -1 or (px > cx + 2 and 1 or 0)
     e.facing = want ~= 0 and want or e.facing
-    if e.grounded and e.cooldown <= 0 and dist < def.lungeRange and math.abs(py - cy) < 24 then
-      b.vx = e.facing * def.lungeSpeed
-      b.vy = -def.lungeLift
-      e.cooldown = def.lungeCooldown
-      e.grounded = false
+    if e.windT then
+      -- Rearing back: stands its ground, then flings itself and its arms forward
+      want = 0
+      e.windT = e.windT - dt
+      if e.windT <= 0 then
+        e.windT = nil
+        e.strikeT = def.strike
+        b.vx = e.facing * def.lungeSpeed
+        b.vy = -def.lungeLift
+        e.grounded = false
+        audio.play("hit", 0.5, 0.6)
+      end
+    elseif e.grounded and e.cooldown <= 0 and dist < def.lungeRange and math.abs(py - cy) < 24 then
+      e.windT = def.windup
+      e.cooldown = def.lungeCooldown + def.windup
     end
   else
     -- Idle: shuffle a few steps now and then
@@ -529,18 +548,26 @@ local function updateGhoul(e, dt, world, player, px, py)
   if e.grounded and b.vy >= 0 then
     Body.snapDown(b, collide, 4)
   end
-  e.phase = e.phase + dt * (math.abs(b.vx) / 9 + 1)
+  e.phase = e.phase + dt * (math.abs(b.vx) / 7 + 0.8)
+  -- Dragging hands kick up a little dust
+  if e.grounded and math.abs(b.vx) > 8 and love.math.random() < dt * 8 then
+    effects.particle(cx - e.facing * (5 + love.math.random() * 3), b.y + b.h - 1, -e.facing * 6, -8 - love.math.random() * 10, 0.4, { 0.42, 0.40, 0.40 }, 60)
+  end
 end
 
--- Bat: hangs asleep until it sees the hunter, then flutters at him, bites,
--- and veers off before coming back
+-- Bat: hangs asleep until it sees the hunter and flutters in. Once it has a
+-- clear line of sight and is close enough it locks on: it hangs still and
+-- screeches, then dives at where the hunter stood in a dead straight line.
+-- A bite sends it flying off; a miss leaves it recovering for a moment.
 local function updateBat(e, dt, world, player, px, py)
   local def, b = e.def, e.body
   local cx, cy = center(e)
   local dist = math.sqrt((px - cx) ^ 2 + (py - cy) ^ 2)
-  e.phase = e.phase + dt * 18
+  e.attackCd = math.max(0, (e.attackCd or 0) - dt)
+  local state = e.state
+  e.phase = e.phase + dt * (state == "lock" and 7 or (state == "charge" and 3 or 18))
 
-  if e.state == "sleep" then
+  if state == "sleep" then
     if e.seesPlayer and dist < def.sight then
       e.state = "chase"
     else
@@ -553,34 +580,83 @@ local function updateBat(e, dt, world, player, px, py)
     e.state = "chase"
   end
 
+  local collide = collider(e, world)
   local tx, ty = 0, 0
+  local d = math.max(1, dist)
+  local steer = true -- false while the dive fixes its own velocity
   if e.state == "chase" then
-    local d = math.max(1, dist)
     tx, ty = (px - cx) / d * def.speed, (py - 4 - cy) / d * def.speed
+    if e.seesPlayer and dist < def.chargeRange and e.attackCd <= 0 and e.stun <= 0 then
+      e.state = "lock"
+      e.timer = def.lockTime
+      audio.play("bat_screech")
+    end
+  elseif e.state == "lock" then
+    -- Hangs in the air, wings wide, eyes on the hunter
+    e.timer = e.timer - dt
+    e.facing = px >= cx and 1 or -1
+    if not e.seesPlayer then
+      e.state = "chase" -- lost sight: no dive
+      e.attackCd = 0.4
+    elseif e.timer <= 0 then
+      e.state = "charge"
+      e.timer = def.chargeTime
+      b.vx, b.vy = (px - cx) / d * def.chargeSpeed, (py - 2 - cy) / d * def.chargeSpeed
+    end
+  elseif e.state == "charge" then
+    steer = false
+    e.timer = e.timer - dt
+    if love.math.random() < dt * 40 then
+      effects.particle(cx, cy, -b.vx * 0.05, -b.vy * 0.05, 0.25, { 0.35, 0.22, 0.45 }, 0)
+    end
+    if e.timer <= 0 then
+      e.state = "recover"
+      e.timer = 0.7
+      e.attackCd = def.chargeCooldown
+    end
+  elseif e.state == "recover" then
+    e.timer = e.timer - dt
+    if e.timer <= 0 then
+      e.state = "chase"
+    end
   elseif e.state == "retreat" then
-    local d = math.max(1, dist)
     tx, ty = -(px - cx) / d * def.speed, -def.speed * 0.8
     e.timer = e.timer - dt
     if e.timer <= 0 then
       e.state = "chase"
     end
   end
-  -- Fluttery: a wobble on top of the steering
-  ty = ty + math.sin(e.phase * 0.35) * 40
-  if e.stun <= 0 then
-    local step = def.accel * dt
-    b.vx = b.vx < tx and math.min(b.vx + step, tx) or math.max(b.vx - step, tx)
-    b.vy = b.vy < ty and math.min(b.vy + step, ty) or math.max(b.vy - step, ty)
+  if steer then
+    -- Fluttery: a wobble on top of the steering (none while hanging to screech)
+    if e.state ~= "lock" then
+      ty = ty + math.sin(e.phase * 0.35) * 40
+    end
+    if e.stun <= 0 then
+      local step = (e.state == "lock" and 700 or def.accel) * dt
+      b.vx = b.vx < tx and math.min(b.vx + step, tx) or math.max(b.vx - step, tx)
+      b.vy = b.vy < ty and math.min(b.vy + step, ty) or math.max(b.vy - step, ty)
+    end
+    if tx ~= 0 then
+      e.facing = tx > 0 and 1 or -1
+    end
+  else
+    e.facing = b.vx >= 0 and 1 or -1
   end
-  if tx ~= 0 then
-    e.facing = tx > 0 and 1 or -1
-  end
-  local collide = collider(e, world)
+  local hitWall = false
   if Body.moveX(b, collide, b.vx * dt, 0) then
     b.vx = -b.vx * 0.5
+    hitWall = true
   end
   if Body.moveY(b, collide, b.vy * dt) then
     b.vy = -b.vy * 0.5
+    hitWall = true
+  end
+  if hitWall and e.state == "charge" then
+    -- Smacked into rock: dazed for a moment
+    e.state = "recover"
+    e.timer = 1.0
+    e.attackCd = def.chargeCooldown
+    e.stun = 0.3
   end
 end
 
@@ -747,6 +823,7 @@ function enemies.update(dt, world, player)
           if e.def.damage and player:hurt(e.def.damage, center(e)) and e.kind == "bat" then
             e.state = "retreat"
             e.timer = e.def.retreat
+            e.attackCd = e.def.chargeCooldown
           end
         end
       end
@@ -794,72 +871,229 @@ local function px(x, y, w, h)
 end
 
 local GHOUL = {
-  skin = { 0.52, 0.50, 0.47 },
-  skinDark = { 0.36, 0.34, 0.33 },
-  rags = { 0.20, 0.17, 0.17 },
+  skin = { 0.62, 0.64, 0.66 },
+  skinDark = { 0.40, 0.42, 0.46 },
+  skinLight = { 0.76, 0.78, 0.80 },
+  rags = { 0.27, 0.28, 0.32 },
+  ragsDark = { 0.17, 0.18, 0.21 },
+  eye = { 0.78, 0.95, 1.0 },
 }
 
--- A hunched, long-armed scavenger, pale as ash
-local function drawGhoul(e)
+-- A line of single pixels from (x0, y0) to (x1, y1)
+local function limb(x0, y0, x1, y1)
+  local n = math.max(1, math.ceil(math.max(math.abs(x1 - x0), math.abs(y1 - y0))))
+  for i = 0, n do
+    local t = i / n
+    px(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)
+  end
+end
+
+local function lerp(a, b, t)
+  return a + (b - a) * t
+end
+
+-- Where everything on the ghoul is this frame, shared by the body and its
+-- glowing eyes. It shambles hunched over with its arms trailing behind it,
+-- rears back to attack, and flings both arms forward as it lunges.
+local function ghoulPose(e)
   local b, f = e.body, e.facing
+  local def = e.def
+  local t = e.phase
+  local moving = e.grounded and math.abs(b.vx) > 8
+  local wind = e.windT and (1 - e.windT / def.windup) or 0 -- 0 -> 1 while rearing back
+  local strike = (e.strikeT or 0) / def.strike -- 1 -> 0 after the lunge
+  local mid = b.x + b.w / 2
+  local pose = { f = f, wind = wind, strike = strike, moving = moving }
+  local bob = moving and math.abs(math.sin(t)) * 1.0 or math.sin(t * 0.5) * 0.4
+  local lean = 2.2 - 3.2 * wind + 2.2 * strike
+  pose.pelvis = { mid - f * 1, b.y + 11 + bob * 0.3 }
+  pose.shoulder = { mid + f * lean, b.y + 6.5 + bob * 0.6 + wind * 1.2 }
+  pose.head = { pose.shoulder[1] + f * (2 + strike - wind), pose.shoulder[2] - 3 + math.sin(t * 0.7) * 0.5 + wind * 0.5 }
+  -- Feet shuffle along the ground, lifting only a little
+  local ground = b.y + b.h - 1
+  pose.feet = {}
+  for i = 1, 2 do
+    local ph = t + (i - 1) * math.pi
+    local swing = moving and math.sin(ph) * 2.6 or (i == 1 and 1.2 or -1.0)
+    local lift = (moving and math.cos(ph) > 0) and math.cos(ph) * 1.8 or 0
+    pose.feet[i] = { mid + f * swing, ground - lift }
+  end
+  -- Arms: trailing and dragging behind; raised behind the head when rearing
+  -- back; thrown forward in the strike
+  local sx, sy = pose.shoulder[1], pose.shoulder[2] + 1
+  pose.hands = {}
+  for i = 1, 2 do
+    local drag = (moving and math.sin(t + i) * 1.2 or 0)
+    local rest = { sx - f * (5 + i * 1.6 + drag), ground - (i - 1) }
+    local back = { sx - f * (4 + wind * 2 + i), sy - 3 - wind * 3 + i * 0.6 }
+    local fwd = { sx + f * (4 + 6 * (1 - (1 - strike) ^ 2) + i), sy + 0.5 + i * 1.2 - strike }
+    local h = { lerp(rest[1], back[1], wind), lerp(rest[2], back[2], wind) }
+    h = { lerp(h[1], fwd[1], strike), lerp(h[2], fwd[2], strike) }
+    pose.hands[i] = h
+  end
+  return pose
+end
+
+-- A hunched, grey, ghost-pale scavenger that drags its long arms behind it
+local function drawGhoul(e)
+  local pose = ghoulPose(e)
+  local f = pose.f
+  local white = e.flash > 0
+  local function color(c)
+    love.graphics.setColor(white and { 1, 1, 1 } or c)
+  end
+  local sx, sy = pose.shoulder[1], pose.shoulder[2]
+  local hx, hy = pose.head[1], pose.head[2]
+  local pelvis = pose.pelvis
+
+  -- Back arm, then legs, behind the torso
+  color(GHOUL.skinDark)
+  local backHand = pose.hands[2]
+  limb(sx - f, sy + 1, (sx + backHand[1]) / 2 - f, (sy + backHand[2]) / 2 + 2)
+  limb((sx + backHand[1]) / 2 - f, (sy + backHand[2]) / 2 + 2, backHand[1], backHand[2])
+  for i = 2, 1, -1 do
+    local foot = pose.feet[i]
+    color(i == 1 and GHOUL.skin or GHOUL.skinDark)
+    local kneeX, kneeY = (pelvis[1] + foot[1]) / 2 + f * 1.5, (pelvis[2] + foot[2]) / 2
+    limb(pelvis[1], pelvis[2], kneeX, kneeY)
+    limb(kneeX, kneeY, foot[1], foot[2])
+    px(foot[1], foot[2], 1, 1)
+    px(foot[1] + f, foot[2])
+  end
+
+  -- Torso in tattered rags: a thick line from hips to shoulders, ragged hem
+  color(GHOUL.rags)
+  limb(pelvis[1] - 1, pelvis[2], sx - 1, sy + 1)
+  limb(pelvis[1], pelvis[2], sx, sy + 1)
+  limb(pelvis[1] + 1, pelvis[2], sx + 1, sy + 1)
+  color(GHOUL.ragsDark)
+  for i = -1, 1 do
+    px(pelvis[1] + i, pelvis[2] + 1 + ((i + math.floor(e.phase * 0.5)) % 2))
+  end
+  limb(pelvis[1] + f, pelvis[2], sx + f, sy + 2)
+  -- Bare shoulders and the hump of the spine, ribs showing
+  color(GHOUL.skin)
+  px(sx - f * 2, sy - 1, 2, 2)
+  px(sx - 1, sy, 3, 1)
+  color(GHOUL.skinLight)
+  px(sx - f * 2, sy - 1)
+  color(GHOUL.skinDark)
+  px(sx + f, sy + 2)
+  px(sx, sy + 3)
+
+  -- Head, thrust forward and low; the jaw hangs open when it attacks
+  color(GHOUL.skin)
+  px(hx - 2, hy, 4, 3)
+  color(GHOUL.skinLight)
+  px(hx - 2, hy, 4, 1)
+  color(GHOUL.ragsDark)
+  px(hx + (f > 0 and 0 or -2), hy + 1, 2, 1) -- hollow eye sockets
+  local open = math.max(pose.wind, pose.strike)
+  px(hx - 1 + (f > 0 and 1 or 0), hy + 3, 2, open > 0.3 and 2 or 1)
+  color(GHOUL.skinDark)
+  px(hx - 2, hy + 2)
+
+  -- Front arm over the torso
+  color(GHOUL.skin)
+  local hand = pose.hands[1]
+  local ex, ey = (sx + hand[1]) / 2 - f * 0.5, (sy + hand[2]) / 2 + 2 * (1 - pose.strike)
+  limb(sx, sy + 1, ex, ey)
+  limb(ex, ey, hand[1], hand[2])
+  -- Long fingers
+  color(GHOUL.skinLight)
+  px(hand[1] + (pose.strike > 0.2 and f or -f), hand[2])
+  px(hand[1] + (pose.strike > 0.2 and f or -f), hand[2] + 1)
+end
+
+local function drawGhoulEyes(e)
+  local pose = ghoulPose(e)
+  local hx, hy = pose.head[1], pose.head[2]
+  local glare = math.max(pose.wind, pose.strike)
+  love.graphics.setColor(GHOUL.eye[1], GHOUL.eye[2], GHOUL.eye[3], 0.7 + 0.3 * glare)
+  px(hx + (pose.f > 0 and 0 or -2), hy + 1, glare > 0.3 and 2 or 1, 1)
+end
+
+-- A ragged bat: furry body, ears, and two wings with finger bones and a
+-- membrane. Hangs folded when asleep, spreads and shakes while locking on,
+-- and folds back into a dart for the dive.
+local BAT = {
+  fur = { 0.20, 0.15, 0.20 },
+  furLight = { 0.32, 0.25, 0.32 },
+  wing = { 0.14, 0.10, 0.15 },
+  membrane = { 0.26, 0.17, 0.24 },
+}
+
+local function drawBat(e)
+  local b = e.body
   local white = e.flash > 0
   local function color(c)
     love.graphics.setColor(white and { 1, 1, 1 } or c)
   end
   local x, y = b.x, b.y
-  local mid = x + 4
-  local step = e.grounded and math.sin(e.phase) or 0.6
-  -- Legs: bent, scuttling
-  color(GHOUL.skinDark)
-  px(mid - 2 + step * 1.5, y + 10, 1, 4)
-  px(mid + 1 - step * 1.5, y + 10, 1, 4)
-  -- Hunched back and torso in rags
-  color(GHOUL.rags)
-  px(mid - 3, y + 5, 6, 6)
-  color(GHOUL.skin)
-  px(mid - 3 - f, y + 4, 5, 2) -- the hump of the back
-  px(mid + f * 2, y + 6, 2, 3)
-  -- Head thrust forward and low
-  color(GHOUL.skin)
-  px(mid + f * 3 - 1, y + 3, 3, 3)
-  -- Long arms reaching ahead, swinging
-  color(GHOUL.skinDark)
-  local reach = e.state == "chase" and 1 or 0
-  px(mid + f * (2 + reach), y + 7 + step, 1, 4)
-  px(mid + f * (4 + reach), y + 9 - step, 1, 3)
-end
-
-local function drawGhoulEyes(e)
-  local b, f = e.body, e.facing
-  local mid = b.x + 4
-  love.graphics.setColor(1, 0.25, 0.15)
-  px(mid + f * 3 + (f > 0 and 1 or -1), b.y + 4)
-end
-
--- A ragged bat: body and two flapping wings
-local function drawBat(e)
-  local b = e.body
-  local white = e.flash > 0
-  love.graphics.setColor(white and { 1, 1, 1 } or { 0.18, 0.14, 0.17 })
-  local x, y = b.x, b.y
+  local mid = x + b.w / 2
   if e.state == "sleep" then
-    -- Hanging upside down, wings folded
-    px(x + 2, y, 3, 5)
-    px(x + 3, y - 1, 1, 1)
+    -- Hanging upside down, wings wrapped around like a cloak
+    color(BAT.wing)
+    px(mid - 3, y + 1, 6, 5)
+    px(mid - 2, y + 6)
+    px(mid + 1, y + 6)
+    color(BAT.membrane)
+    px(mid - 2, y + 2, 1, 3)
+    px(mid + 1, y + 2, 1, 3)
+    color(BAT.fur)
+    px(mid - 1, y, 2, 3)
+    px(mid - 2, y - 1)
+    px(mid + 1, y - 1)
     return
   end
-  px(x + 2, y + 1, 3, 3)
-  local flap = math.sin(e.phase) > 0
-  if flap then
-    px(x, y, 2, 1)
-    px(x + 5, y, 2, 1)
-    px(x - 1, y - 1, 1, 1)
-    px(x + 7, y - 1, 1, 1)
-  else
-    px(x, y + 3, 2, 1)
-    px(x + 5, y + 3, 2, 1)
-    px(x - 1, y + 4, 1, 1)
-    px(x + 7, y + 4, 1, 1)
+  local lock = e.state == "lock"
+  local dive = e.state == "charge"
+  local shake = lock and (math.sin(love.timer.getTime() * 70) * 0.8) or 0
+  local flap = math.sin(e.phase)
+  local f = e.facing
+  local cy = y + 3.5
+  mid = mid + shake
+  for side = -1, 1, 2 do
+    -- Wing: shoulder, elbow, tip; the tip sweeps with the flap (wings wide
+    -- and nearly still while locking on, swept back in the dive)
+    local sh = { mid + side * 1.5, cy - 0.5 }
+    local el, tip
+    if dive then
+      el = { mid + side * 3, cy + 1 }
+      tip = { mid + side * 3.5 - f * 0, cy + 4 }
+    elseif lock then
+      el = { mid + side * 4.5, cy - 1.5 + flap * 0.5 }
+      tip = { mid + side * 8, cy - 0.5 + flap * 0.8 }
+    else
+      el = { mid + side * 4, cy - 1 - flap * 1.5 }
+      tip = { mid + side * 7.5, cy + 0.5 + flap * 3.5 }
+    end
+    -- membrane first, then the arm and finger bones over it
+    color(BAT.membrane)
+    limb(tip[1], tip[2], mid + side * 1.5, cy + 2.5)
+    limb(el[1], el[2] + 1, mid + side * 1, cy + 2.5)
+    limb(tip[1] - side, tip[2], el[1], el[2] + 1)
+    color(BAT.wing)
+    limb(sh[1], sh[2], el[1], el[2])
+    limb(el[1], el[2], tip[1], tip[2])
+    px(tip[1], tip[2] + 1)
+  end
+  -- Body and head
+  color(BAT.fur)
+  px(mid - 1.5, cy - 1.5, 3, 4)
+  color(BAT.furLight)
+  px(mid - 1, cy - 1, 1, 2)
+  color(BAT.fur)
+  px(mid - 1.5, cy - 3.5, 3, 2)
+  px(mid - 2, cy - 4.5) -- ears
+  px(mid + 1, cy - 4.5)
+  -- Open mouth with fangs while screeching and diving
+  if lock or dive then
+    love.graphics.setColor(0.55, 0.08, 0.1)
+    px(mid - 1, cy - 2, 2, 1)
+    love.graphics.setColor(0.92, 0.9, 0.85)
+    px(mid - 1, cy - 1)
+    px(mid, cy - 1)
   end
 end
 
@@ -868,9 +1102,19 @@ local function drawBatEyes(e)
   if e.state == "sleep" then
     return
   end
-  love.graphics.setColor(1, 0.35, 0.25)
-  px(b.x + 2, b.y + 2)
-  px(b.x + 4, b.y + 2)
+  local mid = b.x + b.w / 2
+  local cy = b.y + 3.5
+  local angry = e.state == "lock" or e.state == "charge"
+  if angry then
+    mid = mid + (e.state == "lock" and math.sin(love.timer.getTime() * 70) * 0.8 or 0)
+    love.graphics.setColor(1, 0.15, 0.1)
+    px(mid - 2, cy - 3, 2, 1)
+    px(mid, cy - 3, 2, 1)
+  else
+    love.graphics.setColor(1, 0.35, 0.25)
+    px(mid - 1, cy - 3)
+    px(mid + 1, cy - 3)
+  end
 end
 
 -- A fleshy sac hanging from the rock by tendrils; it swells before spitting

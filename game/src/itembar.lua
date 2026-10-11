@@ -178,7 +178,7 @@ local EFFECT_LABELS = {
   { "vamp", "Vampiric" }, { "greed", "Gilded" }, { "burst", "Burst" }, { "rear", "Backblast" }, { "mortar", "Mortar" },
   { "overheat", "Overclock" }, { "refill", "Scavenger" }, { "jets", "Jets" }, { "bayonet", "Bayonet" },
   { "opener", "Primer" }, { "quickdraw", "Quickdraw" }, { "sneak", "Suppressed" }, { "laser", "Laser" },
-  { "steady", "Steady" }, { "glow", "Glowing" }, { "bloodCost", "Blood" }, { "misfire", "Unstable" },
+  { "steady", "Steady" }, { "bgReload", "Holster reload" }, { "glow", "Glowing" }, { "bloodCost", "Blood" }, { "misfire", "Unstable" },
 }
 
 -- The gun's effective stats (fitted ammo and attachments applied)

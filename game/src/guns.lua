@@ -12,10 +12,10 @@ guns.defs = {
     spread = 2, -- degrees, total cone
     damage = 10,
     pellets = 1,
-    bulletSpeed = 650,
-    recoil = 115, -- velocity impulse (px/s) applied opposite the shot
-    impactForce = 160, -- impulse a bullet gives physics objects (deliberately exaggerated)
-    digRadius = 2.5, -- crater size in terrain (pixels)
+    bulletSpeed = 1040,
+    recoil = 184, -- velocity impulse (px/s) applied opposite the shot
+    impactForce = 256, -- impulse a bullet gives physics objects (deliberately exaggerated)
+    digRadius = 4, -- crater size in terrain (pixels)
     digPower = 1, -- vs. material hardness: dirt 1, sandstone 2, rock 3
     slots = 4, -- ammo type / attachment slots (separate from chambers)
     -- Inventory icon: L light steel, # dark steel, c cylinder, w wood grip

@@ -4,7 +4,7 @@
 
 ## 1. Concept
 
-A 2D roguelite dungeon crawler built on the bones of **Noita**: pixel-simulated, destructible terrain and a deep, buildable weapon system. Noita's wizard, wands, and spells are replaced with a gunslinger, firearms, and ammunition/attachments drawn from the **Western era up to (but not including) WW1**.
+A **dark fantasy** 2D roguelite dungeon crawler built on the bones of **Noita**: pixel-simulated, destructible terrain and a deep, buildable weapon system. Noita's wizard, wands, and spells are replaced with a **monster hunter** in the mould of Van Helsing, wielding firearms (and later other weapons) with ammunition and attachments, spanning **old designs up to roughly WW2-era**. Tone: the grim gothic world of *Warhammer: Vermintide*, rendered in the art style of *Dead Cells*.
 
 - **Engine:** LÖVE 11.5 (via the bootstrap-love2d-project template)
 - **Controls:** Mouse aim + WASD
@@ -12,10 +12,13 @@ A 2D roguelite dungeon crawler built on the bones of **Noita**: pixel-simulated,
 
 ## 2. Art Direction
 
-- Pixel art in the spirit of Noita, but **more vibrant** — saturated palette, strong contrast between terrain materials, punchy muzzle flashes and impacts.
-- **Rendering:** the game draws to a low-resolution canvas of **400×225** (zoomed in 20% from the original 480×270) that fills the window. Non-whole-number scales (e.g. 4.8× at 1920×1080) use "sharp bilinear" scaling: a crisp whole-number upscale followed by a smooth fit, so every pixel stays the same size. One game pixel = one terrain pixel.
+- **Dark fantasy, Dead Cells-style pixel art — desolate rather than gothic:** muted, weathered bases (dusty sand, red sandstone, slate, dark earth) that stay readable rather than pitch dark, with a few **vivid accents** — glowing eyes, lantern and campfire flames, teal cave fungus, silver fittings — and punchy, glowing muzzle flashes and sparks. No vampire/graveyard imagery.
+- **Lighting:** each scene has an ambient light level; a light map with soft radial lights (the hunter's own light, candles, lanterns, the moon, muzzle flashes, bullets, glowing fungus) is multiplied over the scene. Flames, eyes, sparks and bullets are drawn afterwards as **emissive** so they glow even in darkness.
+- **Terrain shading:** terrain is at full brightness at its edges and darkens with distance from open air (lit rims around dark masses); digging re-shades automatically.
+- **Rendering:** the game draws to a low-resolution canvas of **640×360**, which maps exactly **3:1 onto 1920×1080** — every game pixel is a crisp 3×3 block, with no blurring of moving objects. (The view shows the same amount of world as the earlier 400×225 zoom, at 1.6× the pixel density.) Other window sizes that aren't a whole multiple use "sharp bilinear" scaling: a crisp whole-number upscale followed by a smooth fit. Moving props are drawn at whole-pixel positions so they step cleanly instead of resampling. One game pixel = one terrain pixel. Screen-space UI (HUD, item bar, text) has its own scale and is unaffected by pixel density.
+- **Rescaling rule:** all world values are in game pixels. To change pixel density again, multiply lengths, speeds, accelerations and forces by the factor; masses and times stay the same; pixel-count limits scale by the factor squared. The Box2D metre scales too, so physics behaves identically.
 - **Camera:** keeps the player centred (leaning slightly toward the aim) and is not clamped to the level; past a level's edge, the edge terrain continues.
-- **Character:** a lanky gunslinger (hat, poncho, jeans) drawn as 1-pixel limbs on a procedural skeleton rather than sprite frames: legs walk via inverse kinematics, both hands grip the gun and follow the aim, the gun kicks on firing, legs tuck when rising and dangle when falling, the kick extends a leg, and landings dip the body.
+- **Character:** a lanky, slim **Van Helsing-style hunter**, drawn as pixel limbs on a procedural skeleton rather than sprite frames. His head is mostly a tall, wide-brimmed hat worn low, the brim pulled down to two glowing eyes peering from the shadow beneath; he wears a slim long dark coat with a crimson lining and a **light-grey shoulder mantle** (part of the coat, its loose end trailing in the wind), dark trousers and buckled boots, and carries an engraved dark-steel revolver. Legs walk via inverse kinematics, both hands grip the gun and follow the aim, the gun kicks on firing, legs tuck when rising and dangle when falling, the kick extends a leg, landings dip the body, and he has crouch and slide poses. The coat tails and mantle tail follow the motion with simple secondary physics.
 
 ## 3. Game Structure
 
@@ -32,12 +35,18 @@ Overworld (hand-built, same every run)
 ## 4. Player
 
 ### 4.1 Movement
-Modelled on Noita: walk, jump, air control, gravity, collision against pixel terrain (including walking up small slopes/steps). The player's hitbox is 5×12 px, and the player feels **80% of world gravity** (its own gravity scale, like physics objects have) with strong air control, so it stays manoeuvrable in the air.
+Modelled on Noita: walk, jump, air control, gravity, collision against pixel terrain (including walking up small slopes/steps). The player's hitbox is 8×19 px, and the player feels **80% of world gravity** (its own gravity scale, like physics objects have) with strong air control, so it stays manoeuvrable in the air.
 
 **Levitation is replaced by recoil jumping.** Firing a weapon pushes the player in the direction opposite the shot. Firing downward launches the player upward; this is the primary means of gaining height and crossing gaps. Each weapon has its own recoil strength, so weapon choice affects mobility (e.g. the shotgun is a strong "jump" gun).
 
 - Recoil pushes in **all directions** opposite the shot, but is **mainly an airborne mechanic**: while standing on the ground, recoil is significantly reduced.
 - Recoil jumping has **no extra limit** — it is bounded only by the gun's chambers and reload time.
+
+### 4.1a Crouching & sliding (Ctrl)
+- **Crouch:** pressing Ctrl while still crouches (hitbox 8×12, so the hunter fits under low gaps); holding it while moving is a slow crouch-walk.
+- **Slide:** pressing Ctrl while moving (or landing with it held while moving) starts a slide that keeps momentum — a small speed boost (×1.2, not repeatable within 0.4 s), no steering, low friction — and becomes a crouch-walk once slow. Kicks up dust.
+- **Slopes:** while sliding, gravity along the slope speeds the slide up downhill and slows it uphill (capped at 380 px/s); crouching on a steep slope (rise/run ≥ 0.4) starts a slide downhill on its own, and a slide doesn't stop on a steep slope just for being slow.
+- Releasing Ctrl stands back up, but only when there's headroom (terrain only; loose objects resting on the hunter are shoved off). **Slide-jump:** jumping out of a slide (or within 0.12 s of one ending) springs out of it — ×1.15 jump height and a burst of extra horizontal speed (×1.3 + 40 px/s, capped at 380) that **fades while airborne** (half gone in ~0.28 s; any remainder is removed on landing), so it carries ~25% further and 50% higher than a running jump but chaining slide-jumps can't build speed. The slide-entry boost applies only to a fresh Ctrl press on the ground, not to landing into a slide; holding Ctrl in the air keeps him tucked.
 
 ### 4.2 Kick
 Kept from Noita. A short-range kick (**F**) that shoves loose objects (and later enemies) in the facing direction.
@@ -77,7 +86,7 @@ Starting tuning values — to be adjusted by feel.
 | Automatic | Hand-cranked / early machine gun | 40 | 0.06 s | 3.0 s | 6° | 4 | Low per shot, sustained | Long reload |
 
 ### 5.4 Era scope
-Weapons from the Western period up to pre-WW1 (e.g. revolvers, lever-action rifles, double-barrel shotguns, derringers, Gatling and Maxim guns). No modern firearms. Specific weapon roster **[Later]**.
+Old designs up to roughly **WW2-era** firearms (e.g. crossbows, blunderbusses, flintlocks, revolvers, lever-action rifles, double-barrel shotguns, Gatling and Maxim guns, bolt-action rifles, early submachine guns), styled to fit the dark-fantasy world. No modern tactical firearms. Specific weapon roster **[Later]**.
 
 ### 5.5 Ammo types & attachments **[Later]**
 Placeholder — to be designed once the base guns feel right. Each gun has its own number of slots for them (revolver: 4), separate from its chamber count.
@@ -108,16 +117,19 @@ Loose objects (crates now; later barrels, debris, dynamite, physics-based projec
   - blocks objects falling onto them.
 
 ### 6b. Destruction rules
-- A bullet digs a small crater (revolver: radius 2.5 px, power 1). Each pixel in range is removed with probability *power / hardness*: dirt and sand (1) break readily, sandstone and wood (2) take a couple of hits, rock (3) chips slowly. Bedrock and brick never break.
-- Terrain that gets cut loose (no longer connected to bedrock/brick) **falls as physics debris**: it becomes a rigid body carrying its own pixels, with mass from its materials. Tiny pieces (< 6 px) crumble to particles; loose pieces larger than 400 px stay put (keeps large floating landmasses stable and the check cheap). Up to 60 debris bodies exist at once.
+- A bullet digs a small crater (revolver: radius 4 px, power 1). Each pixel in range is removed with probability *power / hardness*: dirt and sand (1) break readily, sandstone and wood (2) take a couple of hits, rock (3) chips slowly. Bedrock and brick never break.
+- Terrain that gets cut loose (no longer connected to bedrock/brick) **falls as physics debris**: it becomes a rigid body carrying its own pixels, with mass from its materials. Tiny pieces (< 15 px) crumble to particles; loose pieces larger than 1024 px stay put (keeps large floating landmasses stable and the check cheap). Up to 60 debris bodies exist at once.
 
 ## 7. Procedural Generation
 - Each area is generated at the start of the run/area: caves and tunnels carved through terrain, a guaranteed traversable path from the entrance to the **shop room** at the end.
 - The path must be reachable with walking + jumping + recoil jumping.
-- **Area 1 ("The Old Mine")**: 512×1152 px, a **descending** cave. Dirt pockets in rock (more dirt near the top), organic caves (cellular automata), a main tunnel that winds downward but never climbs, a timber-ledged entrance chamber at the top, and the brick shop room at the bottom. Every generated area is checked with a reachability search; failures retry with a new seed, and as a last resort a straight tunnel is carved, so generation can never fail. Seeds are shown on the area banner.
+- **Area 1 ("The Catacombs")**: 820×1840 px, a **descending** cave. Dirt pockets in rock (more dirt near the top), organic caves (cellular automata), a main tunnel that winds downward but never climbs, a timber-ledged entrance chamber at the top, and the brick shop room at the bottom. Every generated area is checked with a reachability search; failures retry with a new seed, and as a last resort a straight tunnel is carved, so generation can never fail. Seeds are shown on the area banner.
 
-### 7a. Overworld ("The Badlands")
-Hand-built desert canyon, same every run: dunes of sand over banded sandstone, canyon walls at each end, two mesas and a natural arch (recoil-jump targets), cacti, a sky with a sun and parallax mesa silhouettes, and a small shooting range at the start. The **old mine** on the right is a timber headframe over a shaft; dropping to the bottom of the shaft enters the dungeon.
+### 7a. Overworld ("The Barrens")
+Hand-built and the same every run: a **desolate desert at dusk** — dusty sand over banded red sandstone, canyon walls at each end, a violet-to-ember evening sky with a low setting sun, a few early stars, drifting dust haze, and parallax mesa silhouettes. Along the way: a practice range, dead trees, **crumbling ancient ruins** (broken stone pillars, a lintel fragment, a low wall remnant, a fallen column) around a smoking **campfire**, a mesa and a natural sandstone arch. On the right a weathered timber **mine headframe** with a hanging lantern stands over the shaft; dropping to its bottom enters the catacombs. The ruins use breakable stone brick. Warm evening ambient light, not night.
+
+### 7b. The Catacombs
+The generated area (above) under the dark-fantasy palette: dim but readable ambient light that gets gloomier with depth, clusters of glowing teal fungus scattered across the cave floors (they light the way), and a candlelit stone shop room with wall sconces and candles on the counter.
 
 ## 8. Targets & Enemies
 - **Current milestone:** no enemies. **Test dummies / targets** are placed for checking damage numbers and hit detection.

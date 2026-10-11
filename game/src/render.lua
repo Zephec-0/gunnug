@@ -59,6 +59,11 @@ function render.endWorld()
   love.graphics.draw(upscaled, render.offsetX, render.offsetY, 0, s, s)
 end
 
+-- Size of one UI unit in window pixels, independent of the world pixel density
+function render.uiScale()
+  return render.scale * config.UI_SCALE
+end
+
 -- Window pixels -> canvas pixels
 function render.toVirtual(sx, sy)
   return (sx - render.offsetX) / render.scale, (sy - render.offsetY) / render.scale

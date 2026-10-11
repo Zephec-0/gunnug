@@ -86,12 +86,20 @@ function bullets.update(dt, world)
   end
 end
 
+-- Drawn after the lighting (bullets glow)
 function bullets.draw()
   for _, b in ipairs(list) do
     love.graphics.setColor(1, 0.75, 0.25, 0.8)
     love.graphics.line(b.prevX, b.prevY, b.x, b.y)
     love.graphics.setColor(1, 1, 0.85)
     love.graphics.rectangle("fill", math.floor(b.x), math.floor(b.y), 1, 1)
+  end
+end
+
+-- Each bullet carries a small warm light
+function bullets.addLights(lighting)
+  for _, b in ipairs(list) do
+    lighting.add(b.x, b.y, 22, 1, 0.75, 0.4, 0.8)
   end
 end
 

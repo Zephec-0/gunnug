@@ -60,20 +60,48 @@ function World:fillRect(x0, y0, x1, y1, id)
   end
 end
 
--- Runtime write: updates the cell and recolours it and its neighbours
+-- Terrain is shaded by how far each pixel is from open air: full brightness at
+-- the edges, darker inside (lit rims around dark masses).
+local SHADE_DEPTH = 14 -- pixels until full darkness
+local SHADE_AMOUNT = 0.4 -- how much darker the deep interior gets
+
+local function shadeFactor(depth)
+  return 1 - math.min(depth - 1, SHADE_DEPTH) / SHADE_DEPTH * SHADE_AMOUNT
+end
+
+-- Distance (in pixels, 1 = touching air) to the nearest air straight up,
+-- down, left or right, capped just past SHADE_DEPTH
+function World:depthAt(x, y)
+  local best = SHADE_DEPTH + 1
+  for d = 1, best - 1 do
+    if not self:isSolid(x, y - d) or not self:isSolid(x, y + d) or not self:isSolid(x - d, y) or not self:isSolid(x + d, y) then
+      return d
+    end
+  end
+  return best
+end
+
+-- Runtime write: updates the cell and re-shades everything it can affect
 function World:set(x, y, id)
   if not self:inBounds(x, y) then
     return
   end
   self.cells[y * self.width + x + 1] = id
-  for dy = -1, 1 do
-    for dx = -1, 1 do
-      self:repaint(x + dx, y + dy)
+  self:repaintRegion(x, y, x, y)
+end
+
+-- Recolours the box plus the margin whose shading the box can influence.
+-- Use after changing terrain with setRaw.
+function World:repaintRegion(x0, y0, x1, y1)
+  local m = SHADE_DEPTH + 1
+  for y = math.max(0, y0 - m), math.min(self.height - 1, y1 + m) do
+    for x = math.max(0, x0 - m), math.min(self.width - 1, x1 + m) do
+      self:repaint(x, y)
     end
   end
 end
 
-function World:colorAt(x, y)
+function World:colorAt(x, y, depth)
   local def = defs[self:get(x, y)]
   if not def.solid then
     return 0, 0, 0, 0
@@ -90,12 +118,13 @@ function World:colorAt(x, y)
     v = v - 0.12
   end
   if def.brick then
-    local row = math.floor(y / 4)
-    if y % 4 == 0 or (x + (row % 2) * 4) % 8 == 0 then
+    local row = math.floor(y / 5)
+    if y % 5 == 0 or (x + (row % 2) * 5) % 10 == 0 then
       v = v - 0.18 -- mortar
     end
   end
-  return base[1] + v, base[2] + v, base[3] + v, 1
+  local s = shadeFactor(depth or self:depthAt(x, y))
+  return (base[1] + v) * s, (base[2] + v) * s, (base[3] + v) * s, 1
 end
 
 function World:repaint(x, y)
@@ -105,15 +134,54 @@ function World:repaint(x, y)
   end
 end
 
+-- Full repaint. Depths come from four sweeps (down, up, right, left) instead
+-- of per-pixel searches, which keeps this fast on large levels.
 function World:repaintAll()
-  for y = 0, self.height - 1 do
-    for x = 0, self.width - 1 do
-      self.imageData:setPixel(x, y, self:colorAt(x, y))
+  local w, h, cells = self.width, self.height, self.cells
+  local cap = SHADE_DEPTH + 1
+  local depth = {}
+  for x = 0, w - 1 do
+    local run = cap -- outside the level counts as solid
+    for y = 0, h - 1 do
+      local i = y * w + x + 1
+      run = solid[cells[i]] and math.min(run + 1, cap) or 0
+      depth[i] = run
+    end
+    run = cap
+    for y = h - 1, 0, -1 do
+      local i = y * w + x + 1
+      run = solid[cells[i]] and math.min(run + 1, cap) or 0
+      if run < depth[i] then
+        depth[i] = run
+      end
+    end
+  end
+  for y = 0, h - 1 do
+    local row = y * w + 1
+    local run = cap
+    for x = 0, w - 1 do
+      local i = row + x
+      run = solid[cells[i]] and math.min(run + 1, cap) or 0
+      if run < depth[i] then
+        depth[i] = run
+      end
+    end
+    run = cap
+    for x = w - 1, 0, -1 do
+      local i = row + x
+      run = solid[cells[i]] and math.min(run + 1, cap) or 0
+      if run < depth[i] then
+        depth[i] = run
+      end
+    end
+  end
+  for y = 0, h - 1 do
+    for x = 0, w - 1 do
+      self.imageData:setPixel(x, y, self:colorAt(x, y, depth[y * w + x + 1]))
     end
   end
   self.dirty = true
 end
-
 -- First solid pixel at or below fromY in column x
 function World:findGround(x, fromY)
   for y = fromY, self.height - 1 do
@@ -122,6 +190,16 @@ function World:findGround(x, fromY)
     end
   end
   return self.height
+end
+
+-- Highest ground under a span of columns (x .. x + w - 1): where something
+-- of that width can stand without overlapping the terrain
+function World:findGroundUnder(x, w, fromY)
+  local best = self.height
+  for cx = x, x + w - 1 do
+    best = math.min(best, self:findGround(cx, fromY))
+  end
+  return best
 end
 
 function World:refresh()
@@ -134,7 +212,7 @@ end
 -- Drawn with a margin around the level: the image's edge pixels are stretched
 -- outward (clamp wrapping), so bedrock borders continue as solid rock and open
 -- sky continues as sky when the camera looks past the level's edge.
-local EDGE_MARGIN = 400
+local EDGE_MARGIN = 480
 
 function World:draw()
   if not self.edgeQuad then

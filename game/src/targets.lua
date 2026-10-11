@@ -13,7 +13,7 @@ end
 
 -- x is the horizontal centre, groundY the first solid pixel beneath it
 function targets.addDummy(x, groundY)
-  local w, h = 9, 15
+  local w, h = 14, 24
   local t = { x = x - math.floor(w / 2), y = groundY - h, w = w, h = h, flash = 0, total = 0 }
   local body = love.physics.newBody(physics.world, t.x + w / 2, t.y + h / 2, "static")
   love.physics.newFixture(body, love.physics.newRectangleShape(w, h))
@@ -55,18 +55,24 @@ end
 
 local function drawDummy(t)
   local cx = t.x + math.floor(t.w / 2)
-  -- Post
-  love.graphics.setColor(0.55, 0.33, 0.16)
-  love.graphics.rectangle("fill", cx - 1, t.y + 7, 2, t.h - 7)
-  love.graphics.rectangle("fill", cx - 3, t.y + t.h - 1, 6, 1)
-  -- Bullseye
+  local cy = t.y + 7 -- bullseye centre
+  -- Post with a darker edge and a foot
+  love.graphics.setColor(0.36, 0.26, 0.18)
+  love.graphics.rectangle("fill", cx - 1, cy + 5, 3, t.h - 12)
+  love.graphics.setColor(0.25, 0.18, 0.12)
+  love.graphics.rectangle("fill", cx + 1, cy + 5, 1, t.h - 12)
+  love.graphics.rectangle("fill", cx - 4, t.y + t.h - 1, 9, 1)
+  -- Bullseye: red, white, red rings with a dark rim
   local white = t.flash > 0
-  love.graphics.setColor(white and { 1, 1, 1 } or { 0.92, 0.18, 0.22 })
-  love.graphics.circle("fill", cx, t.y + 4, 4.5)
-  love.graphics.setColor(white and { 1, 1, 1 } or { 0.98, 0.95, 0.85 })
-  love.graphics.circle("fill", cx, t.y + 4, 3)
-  love.graphics.setColor(white and { 1, 1, 1 } or { 0.92, 0.18, 0.22 })
-  love.graphics.rectangle("fill", cx - 1, t.y + 3, 2, 2)
+  local function ring(r, color)
+    love.graphics.setColor(white and { 1, 1, 1 } or color)
+    love.graphics.circle("fill", cx + 0.5, cy + 0.5, r)
+  end
+  ring(7, { 0.24, 0.05, 0.07 })
+  ring(6.2, { 0.60, 0.10, 0.13 })
+  ring(4.6, { 0.78, 0.74, 0.62 })
+  ring(3.0, { 0.60, 0.10, 0.13 })
+  ring(1.4, { 0.78, 0.74, 0.62 })
 end
 
 function targets.draw()

@@ -62,6 +62,13 @@ function Player.new(x, y, world, inv)
   self.jumping = false -- true while rising from a jump (so releasing jump can cut it)
   self.kickCooldown = 0
   self.kickTimer = 0
+  self.crouched = false
+  self.sliding = false
+  self.slideBoostTimer = 0
+  self.wasGroundedLastFrame = true
+  self.springBonus = 0 -- extra speed from a slide-jump, fading while airborne
+  self.springDir = 1
+  self.slideGrace = 0 -- a jump this soon after a slide still springs
   self.anim = playeranim.new()
   self:updateMuzzle()
   return self
@@ -92,8 +99,8 @@ function Player:kick()
   self.kickTimer = cfg.kickDuration
   local b = self.body
   local x = self.facing > 0 and b.x + b.w or b.x - cfg.kickRange
-  targets.kick(x, b.y + 4, cfg.kickRange, b.h - 4, cfg.kickDamage)
-  props.kick(x, b.y + 4, cfg.kickRange, b.h - 4, self.facing, cfg.kickForce, cfg.kickLift, cfg.kickDamage)
+  targets.kick(x, b.y + 6, cfg.kickRange, b.h - 6, cfg.kickDamage)
+  props.kick(x, b.y + 6, cfg.kickRange, b.h - 6, self.facing, cfg.kickForce, cfg.kickLift, cfg.kickDamage)
 end
 
 -- Velocity along an axis after an airborne recoil kick: at least the kick's
@@ -140,6 +147,81 @@ function Player:shoot()
   playeranim.onShoot(self)
 end
 
+-- Resizes the hitbox (and its physics stand-in), keeping the feet in place
+function Player:setHeight(h)
+  local b = self.body
+  b.y = b.y + (b.h - h)
+  b.h = h
+  for _, f in ipairs(self.physBody:getFixtures()) do
+    f:destroy()
+  end
+  love.physics.newFixture(self.physBody, love.physics.newRectangleShape(b.w, h))
+end
+
+-- Only terrain can keep the player crouched: loose objects (a crate resting on
+-- a crouched player) are simply shoved aside by standing up
+function Player:canStand()
+  local b = self.body
+  return not Body.terrainOverlaps(self.world, b.x, b.y + b.h - cfg.height, b.w, cfg.height)
+end
+
+-- Slope of the terrain under the feet, as rise per pixel toward +x: positive
+-- means the ground drops away to the right. Clamped so ledges don't read as cliffs.
+function Player:groundSlope()
+  local b = self.body
+  local feet = b.y + b.h
+  local function groundAt(x)
+    for y = feet - 6, feet + 10 do
+      if self.world:isSolid(x, y) then
+        return y
+      end
+    end
+    return feet + 10
+  end
+  local cx = math.floor(b.x + b.w / 2)
+  local slope = (groundAt(cx + 5) - groundAt(cx - 5)) / 10
+  return math.max(-1.5, math.min(1.5, slope))
+end
+
+-- Crouch on Ctrl; stand back up when it's released and there's headroom.
+-- Starting a crouch while moving (or landing in one) turns it into a slide.
+function Player:updateCrouch(dt, crouchHeld)
+  local b = self.body
+  local wasCrouched = self.crouched
+  if crouchHeld and not self.crouched then
+    self.crouched = true
+    self:setHeight(cfg.crouchHeight)
+  elseif not crouchHeld and self.crouched and self:canStand() then
+    self.crouched = false
+    self.sliding = false
+    self:setHeight(cfg.height)
+  end
+
+  self.slideBoostTimer = math.max(0, self.slideBoostTimer - dt)
+  local startedCrouch = self.crouched and (not wasCrouched or not self.wasGroundedLastFrame)
+  if self.crouched and self.grounded and startedCrouch and math.abs(b.vx) >= cfg.slideMinSpeed then
+    self.sliding = true
+    -- Only a fresh Ctrl press on the ground gets the entry boost; landing
+    -- into a slide just keeps its momentum
+    if self.slideBoostTimer <= 0 and not wasCrouched and self.wasGroundedLastFrame then
+      local boosted = math.min(math.abs(b.vx) * cfg.slideBoost, cfg.slideMaxSpeed)
+      b.vx = sign(b.vx) * math.max(math.abs(b.vx), boosted)
+      self.slideBoostTimer = cfg.slideBoostCooldown
+    end
+  end
+  -- Crouching on a steep downhill slides on its own; a slide only stops
+  -- for being slow when the ground isn't steep enough to keep it going
+  local steep = self.grounded and math.abs(self:groundSlope()) >= cfg.slideStartSlope
+  if self.crouched and steep then
+    self.sliding = true
+  end
+  if self.sliding and (not self.crouched or (math.abs(b.vx) < cfg.slideEndSpeed and not steep)) then
+    self.sliding = false
+  end
+  self.slideGrace = self.sliding and 0.12 or math.max(0, self.slideGrace - dt)
+  self.wasGroundedLastFrame = self.grounded
+end
+
 -- Grounded state, plus the prop underfoot (nil when standing on terrain)
 function Player:checkGround()
   local b = self.body
@@ -174,20 +256,59 @@ function Player:update(dt, aimX, aimY)
   if love.keyboard.isDown("d") then
     input = input + 1
   end
+  self:updateCrouch(dt, love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl"))
+
+  local maxSpeed = (self.crouched and self.grounded) and cfg.crouchSpeed or cfg.walkSpeed
   local friction = self.grounded and cfg.groundFriction or cfg.airFriction
-  if input ~= 0 and not (sign(b.vx) == input and math.abs(b.vx) > cfg.walkSpeed) then
+  if self.sliding and self.grounded then
+    -- Sliding ignores steering and coasts on its momentum. Gravity along the
+    -- slope speeds it up going downhill and slows it going uphill.
+    local slope = self:groundSlope()
+    local along = config.gravity * cfg.gravityScale * slope / math.sqrt(1 + slope * slope)
+    local before = math.abs(b.vx)
+    b.vx = b.vx + along * cfg.slideSlopeAccel * dt
+    b.vx = approach(b.vx, 0, cfg.slideFriction * dt)
+    if math.abs(b.vx) > cfg.slideTopSpeed and math.abs(b.vx) > before then
+      b.vx = sign(b.vx) * math.max(before, cfg.slideTopSpeed)
+    end
+    if love.math.random() < 0.5 then
+      local c = 0.35 + love.math.random() * 0.15
+      effects.particle(b.x + b.w / 2 - sign(b.vx) * 3, b.y + b.h - 1, -b.vx * 0.2, -10 - love.math.random() * 25, 0.4, { c, c * 0.9, c * 1.05 }, 120)
+    end
+  elseif input ~= 0 and not (sign(b.vx) == input and math.abs(b.vx) > maxSpeed) then
     local accel = self.grounded and cfg.groundAccel or cfg.airAccel
-    b.vx = approach(b.vx, input * cfg.walkSpeed, accel * dt)
+    b.vx = approach(b.vx, input * maxSpeed, accel * dt)
   elseif input ~= 0 then
-    b.vx = approach(b.vx, input * cfg.walkSpeed, friction * dt)
+    b.vx = approach(b.vx, input * maxSpeed, friction * dt)
   else
     b.vx = approach(b.vx, 0, friction * dt)
   end
 
-  -- Jumping
+  -- Jumping. Jumping out of a slide springs higher and further.
   local jumped = false
   if self.jumpBufferTimer > 0 and self.coyoteTimer > 0 then
-    b.vy = -cfg.jumpSpeed
+    if self.crouched and self:canStand() then
+      self.crouched = false
+      self:setHeight(cfg.height)
+    end
+    if self.sliding or self.slideGrace > 0 then
+      self.slideGrace = 0
+      local dir = b.vx ~= 0 and sign(b.vx) or self.facing
+      local before = math.abs(b.vx)
+      local sprung = math.max(before, math.min(before * cfg.slideJumpBoost + cfg.slideJumpBonus, cfg.slideJumpMaxSpeed))
+      b.vx = dir * sprung
+      -- The extra speed is a temporary bonus that fades in the air
+      self.springBonus = sprung - before
+      self.springDir = dir
+      b.vy = -cfg.jumpSpeed * cfg.slideJumpHeight
+      for _ = 1, 10 do
+        local c = 0.4 + love.math.random() * 0.15
+        effects.particle(b.x + b.w / 2 + (love.math.random() - 0.5) * 8, b.y + b.h - 1, -dir * (20 + love.math.random() * 50), -10 - love.math.random() * 40, 0.5, { c, c * 0.9, c * 0.85 }, 200)
+      end
+    else
+      b.vy = -cfg.jumpSpeed
+    end
+    self.sliding = false
     self.jumping = true
     self.jumpBufferTimer = 0
     self.coyoteTimer = 0
@@ -199,6 +320,15 @@ function Player:update(dt, aimX, aimY)
   if self.jumping and not jumpHeld and b.vy < 0 then
     b.vy = b.vy * cfg.jumpCutMultiplier
     self.jumping = false
+  end
+
+  -- A slide-jump's extra speed bleeds away while airborne
+  if self.springBonus > 0 and not self.grounded then
+    local lost = self.springBonus * (1 - math.exp(-cfg.slideJumpBonusDecay * dt))
+    self.springBonus = self.springBonus - lost
+    if sign(b.vx) == self.springDir then
+      b.vx = b.vx - self.springDir * math.min(lost, math.abs(b.vx))
+    end
   end
 
   -- Gravity
@@ -241,6 +371,14 @@ function Player:update(dt, aimX, aimY)
     Body.snapDown(b, self.collide, cfg.stepHeight)
   end
   self:checkGround()
+  if self.grounded and not jumped and self.springBonus > 0 then
+    -- Whatever is left of a slide-jump's bonus is lost on landing, so
+    -- chaining slide-jumps can't build up speed
+    if sign(b.vx) == self.springDir then
+      b.vx = b.vx - self.springDir * math.min(self.springBonus, math.abs(b.vx))
+    end
+    self.springBonus = 0
+  end
 
   -- The player's weight presses on whatever prop they stand on
   if self.groundProp then
@@ -257,7 +395,7 @@ function Player:syncPhysics(dt)
   local b = self.body
   local tx, ty = b.x + b.w / 2, b.y + b.h / 2
   local px, py = self.physBody:getPosition()
-  if math.abs(tx - px) + math.abs(ty - py) > 12 then -- teleported, not walked
+  if math.abs(tx - px) + math.abs(ty - py) > 19 then -- teleported, not walked
     self.physBody:setPosition(tx, ty)
     self.physBody:setLinearVelocity(0, 0)
   else
@@ -274,6 +412,18 @@ function Player:ride(dt)
   local b = self.body
   local vx = prop.body:getLinearVelocityFromWorldPoint(b.x + b.w / 2, b.y + b.h)
   Body.moveX(b, self.collide, vx * dt, cfg.stepHeight)
+end
+
+-- Light carried with the hunter, plus the faint glow of his eyes
+function Player:addLights(lighting)
+  local cx, cy = self:center()
+  lighting.add(cx, cy, 150, 1, 0.86, 0.66, 0.75)
+  local ex, ey = playeranim.eyes(self)
+  lighting.add(ex, ey, 9, 1, 0.8, 0.4, 0.7)
+end
+
+function Player:drawEmissive()
+  playeranim.drawEyes(self)
 end
 
 function Player:draw()

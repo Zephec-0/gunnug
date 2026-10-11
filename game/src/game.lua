@@ -6,7 +6,10 @@
 --   build(opts) -> world, spawnX, spawnY
 --   populate(world)               place targets/props (after physics exists)
 -- and optionally:
---   update(dt, player, game)      triggers, e.g. game.enter("mine")
+--   update(dt, player, game, effects)  triggers (e.g. game.enter("catacombs")), ambient effects
+--   ambient                       light level colour (default: fully lit)
+--   addLights(lighting, camX, camY) light sources (lanterns, candles, moon)
+--   drawEmissive()                world-space glows drawn after the lighting
 --   drawBackground(camX, camY)    on the low-res canvas, behind everything
 --   drawDecor()                   world-space decorations behind the player
 --   drawScreen(toScreen, font)    full-resolution text such as signs
@@ -17,6 +20,7 @@ local effects = require("src.effects")
 local hud = require("src.hud")
 local inventory = require("src.inventory")
 local itembar = require("src.itembar")
+local lighting = require("src.lighting")
 local physics = require("src.physics")
 local Player = require("src.player")
 local props = require("src.props")
@@ -25,7 +29,7 @@ local targets = require("src.targets")
 
 local scenes = {
   overworld = require("src.scenes.overworld"),
-  mine = require("src.scenes.mine"),
+  catacombs = require("src.scenes.catacombs"),
   testroom = require("src.scenes.testroom"),
 }
 
@@ -69,6 +73,7 @@ end
 
 function game.load()
   render.load()
+  lighting.load()
   love.mouse.setVisible(false)
   inv = inventory.new()
   load("overworld")
@@ -111,7 +116,7 @@ function game.update(dt)
   hud.update(dt)
 
   if scene.update then
-    scene.update(dt, player, game)
+    scene.update(dt, player, game, effects)
   end
 
   local px, py = player:center()
@@ -120,7 +125,7 @@ end
 
 local function drawLoading()
   love.graphics.clear(0, 0, 0)
-  local f = hud.font(render.scale)
+  local f = hud.font(render.uiScale())
   local text = "Descending..."
   love.graphics.setFont(f)
   love.graphics.setColor(1, 0.86, 0.45)
@@ -136,6 +141,16 @@ function game.draw()
   end
   local camX, camY = camera.offset()
 
+  -- Light map for this frame (scene ambient + every light source)
+  lighting.begin(scene.ambient)
+  player:addLights(lighting)
+  bullets.addLights(lighting)
+  effects.addLights(lighting)
+  if scene.addLights then
+    scene.addLights(lighting, camX, camY)
+  end
+  lighting.render(camX, camY)
+
   render.beginWorld()
   if scene.drawBackground then
     scene.drawBackground(camX, camY)
@@ -149,8 +164,20 @@ function game.draw()
   targets.draw()
   props.draw()
   player:draw()
-  bullets.draw()
   effects.drawWorld()
+  love.graphics.pop()
+
+  lighting.apply()
+
+  -- Emissive pass: glows that ignore the darkness
+  love.graphics.push()
+  love.graphics.translate(-camX, -camY)
+  if scene.drawEmissive then
+    scene.drawEmissive()
+  end
+  player:drawEmissive()
+  bullets.draw()
+  effects.drawEmissive()
   if showPhysics then
     physics.drawDebug()
   end
@@ -168,13 +195,13 @@ function game.draw()
   local function toScreen(x, y)
     return render.toScreen(x - camX, y - camY)
   end
-  local font = hud.font(render.scale)
+  local font = hud.font(render.uiScale())
   if scene.drawScreen then
     scene.drawScreen(toScreen, font)
   end
   effects.drawScreen(toScreen, font)
-  hud.draw(player, render.scale)
-  itembar.draw(inv, render.scale)
+  hud.draw(player, render.uiScale())
+  itembar.draw(inv, render.uiScale())
   love.graphics.setColor(1, 1, 1)
 end
 
@@ -203,7 +230,7 @@ function game.keypressed(key)
   elseif key == "f9" then
     game.enter("testroom")
   elseif key == "f10" then
-    game.enter("mine")
+    game.enter("catacombs")
   elseif key == "f2" then
     showPhysics = not showPhysics
   else

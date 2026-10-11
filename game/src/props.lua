@@ -11,37 +11,62 @@ local list = {}
 
 local MAX_DEBRIS = 60 -- oldest terrain debris is removed beyond this
 
+-- Prop art is drawn with whole-pixel rectangles from the top-left of the box
+-- (x = -floor(w/2)), so every edge lands exactly on the pixel grid.
+local function frame(x, y, w, h, t)
+  love.graphics.rectangle("fill", x, y, w, t)
+  love.graphics.rectangle("fill", x, y + h - t, w, t)
+  love.graphics.rectangle("fill", x, y, t, h)
+  love.graphics.rectangle("fill", x + w - t, y, t, h)
+end
+
 local function drawCrate(p)
   local w, h = p.width, p.height
-  local x, y = -w / 2, -h / 2
-  love.graphics.setColor(0.86, 0.58, 0.26)
+  local x, y = -math.floor(w / 2), -math.floor(h / 2)
+  love.graphics.setColor(0.52, 0.37, 0.24)
   love.graphics.rectangle("fill", x, y, w, h)
-  love.graphics.setColor(0.52, 0.30, 0.12)
-  love.graphics.rectangle("line", x + 0.5, y + 0.5, w - 1, h - 1)
-  love.graphics.line(x + 1, y + 1, x + w - 1, y + h - 1)
+  -- Plank seams
+  love.graphics.setColor(0.40, 0.28, 0.18)
+  love.graphics.rectangle("fill", x, y + math.floor(h / 3), w, 1)
+  love.graphics.rectangle("fill", x, y + math.floor(2 * h / 3), w, 1)
+  -- Diagonal brace, one pixel per step
+  love.graphics.setColor(0.32, 0.22, 0.14)
+  for i = 2, w - 3 do
+    love.graphics.rectangle("fill", x + i, y + math.floor(i * (h - 1) / (w - 1)), 1, 1)
+  end
+  love.graphics.setColor(0.22, 0.15, 0.10)
+  frame(x, y, w, h, 1)
 end
 
 local function drawIronCrate(p)
   local w, h = p.width, p.height
-  local x, y = -w / 2, -h / 2
-  love.graphics.setColor(0.42, 0.44, 0.52)
+  local x, y = -math.floor(w / 2), -math.floor(h / 2)
+  love.graphics.setColor(0.30, 0.31, 0.36)
   love.graphics.rectangle("fill", x, y, w, h)
-  love.graphics.setColor(0.24, 0.24, 0.30)
-  love.graphics.rectangle("line", x + 0.5, y + 0.5, w - 1, h - 1)
-  love.graphics.setColor(0.75, 0.62, 0.30)
-  love.graphics.rectangle("fill", x + 1, y + h / 2 - 1, w - 2, 2)
+  love.graphics.setColor(0.41, 0.42, 0.48)
+  love.graphics.rectangle("fill", x + 2, y + 2, w - 4, 1) -- top highlight
+  -- Brass band across the middle
+  love.graphics.setColor(0.56, 0.44, 0.24)
+  love.graphics.rectangle("fill", x + 1, y + math.floor(h / 2) - 1, w - 2, 2)
+  love.graphics.setColor(0.14, 0.14, 0.17)
+  frame(x, y, w, h, 1)
+  -- Corner rivets
+  love.graphics.setColor(0.58, 0.60, 0.66)
+  for _, c in ipairs({ { 2, 2 }, { w - 3, 2 }, { 2, h - 3 }, { w - 3, h - 3 } }) do
+    love.graphics.rectangle("fill", x + c[1], y + c[2], 1, 1)
+  end
 end
 
 -- Terrain debris carries an image of the pixels it was cut from
 local function drawDebris(p)
   love.graphics.setColor(1, 1, 1)
-  love.graphics.draw(p.image, -p.width / 2, -p.height / 2)
+  love.graphics.draw(p.image, -math.floor(p.width / 2), -math.floor(p.height / 2))
 end
 
 props.defs = {
   crate = {
-    width = 8,
-    height = 8,
+    width = 13,
+    height = 13,
     mass = 1,
     gravityScale = 0.4,
     friction = 0.4,
@@ -52,8 +77,8 @@ props.defs = {
     draw = drawCrate,
   },
   ironCrate = {
-    width = 10,
-    height = 10,
+    width = 16,
+    height = 16,
     mass = 4,
     gravityScale = 0.6,
     friction = 0.7,
@@ -283,11 +308,13 @@ end
 function props.draw()
   for _, p in ipairs(list) do
     love.graphics.push()
-    love.graphics.translate(p.body:getX(), p.body:getY())
+    -- Whole-pixel position: a sliding crate moves in clean pixel steps
+    -- instead of resampling its pixels every frame
+    love.graphics.translate(math.floor(p.body:getX() + 0.5), math.floor(p.body:getY() + 0.5))
     love.graphics.rotate(p.body:getAngle())
     if p.flash > 0 and p.def.showDamage then
       love.graphics.setColor(1, 1, 1)
-      love.graphics.rectangle("fill", -p.width / 2, -p.height / 2, p.width, p.height)
+      love.graphics.rectangle("fill", -math.floor(p.width / 2), -math.floor(p.height / 2), p.width, p.height)
     else
       p.def.draw(p)
     end

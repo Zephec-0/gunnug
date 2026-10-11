@@ -14,20 +14,20 @@ local anchored = materials.anchored
 
 -- Loose pieces bigger than this stay put. Keeps the connectivity search cheap
 -- and stops large floating landmasses from dropping out of the level.
-local MAX_FALLING_PIXELS = 400
+local MAX_FALLING_PIXELS = 1024
 -- Loose pieces smaller than this just crumble into particles
-local MIN_DEBRIS_PIXELS = 6
+local MIN_DEBRIS_PIXELS = 15
 
 local function crumble(world, x, y, id)
   local c = defs[id].color
   effects.particle(
     x + 0.5,
     y + 0.5,
-    (love.math.random() - 0.5) * 40,
-    -love.math.random() * 30,
+    (love.math.random() - 0.5) * 64,
+    -love.math.random() * 48,
     0.5 + love.math.random() * 0.4,
     { c[1], c[2], c[3] },
-    300
+    480
   )
 end
 
@@ -35,10 +35,11 @@ end
 local function clearPixels(world, pixels)
   local x0, y0, x1, y1 = math.huge, math.huge, -math.huge, -math.huge
   for _, p in ipairs(pixels) do
-    world:set(p[1], p[2], AIR)
+    world:setRaw(p[1], p[2], AIR)
     x0, y0 = math.min(x0, p[1]), math.min(y0, p[2])
     x1, y1 = math.max(x1, p[1]), math.max(y1, p[2])
   end
+  world:repaintRegion(x0, y0, x1, y1) -- recolour and re-shade around the hole once
   physics.rebuildRegion(x0, y0, x1, y1)
 end
 
@@ -192,8 +193,8 @@ function destruction.dig(world, cx, cy, radius, power, dx, dy)
           if love.math.random() < 0.6 then
             local c = def.color
             local a = math.atan2(-(dy or 0), -(dx or 0)) + (love.math.random() - 0.5) * 2.2
-            local s = 30 + love.math.random() * 70
-            effects.particle(x + 0.5, y + 0.5, math.cos(a) * s, math.sin(a) * s, 0.7, { c[1], c[2], c[3] }, 350)
+            local s = 48 + love.math.random() * 112
+            effects.particle(x + 0.5, y + 0.5, math.cos(a) * s, math.sin(a) * s, 0.7, { c[1], c[2], c[3] }, 560)
           end
         end
       end

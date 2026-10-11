@@ -49,7 +49,7 @@ function hud.draw(player, scale)
   love.graphics.setColor(1, 1, 1, 0.6)
   local small = font(math.max(10, math.floor(scale * 3)))
   shadowText(
-    "A/D move   W/Space jump   LMB shoot (aim down mid-air to recoil jump)   F kick   Tab weapons   1-3 switch   "
+    "A/D move   W/Space jump   Ctrl crouch/slide   LMB shoot (aim down mid-air to recoil jump)   F kick   Tab weapons   1-3 switch   "
       .. "R restart   F9 test room   F10 new cave   F2 physics   F3 stats",
     margin,
     love.graphics.getHeight() - margin - small:getHeight(),
@@ -124,11 +124,16 @@ end
 
 function hud.drawCrosshair(vx, vy)
   local x, y = math.floor(vx), math.floor(vy)
+  love.graphics.setColor(0, 0, 0, 0.5)
+  love.graphics.rectangle("fill", x - 5, y + 1, 3, 1)
+  love.graphics.rectangle("fill", x + 3, y + 1, 3, 1)
+  love.graphics.rectangle("fill", x + 1, y - 5, 1, 3)
+  love.graphics.rectangle("fill", x + 1, y + 3, 1, 3)
   love.graphics.setColor(1, 1, 1, 0.9)
-  love.graphics.rectangle("fill", x - 3, y, 2, 1)
-  love.graphics.rectangle("fill", x + 2, y, 2, 1)
-  love.graphics.rectangle("fill", x, y - 3, 1, 2)
-  love.graphics.rectangle("fill", x, y + 2, 1, 2)
+  love.graphics.rectangle("fill", x - 5, y, 3, 1)
+  love.graphics.rectangle("fill", x + 3, y, 3, 1)
+  love.graphics.rectangle("fill", x, y - 5, 1, 3)
+  love.graphics.rectangle("fill", x, y + 3, 1, 3)
 end
 
 return hud

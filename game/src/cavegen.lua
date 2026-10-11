@@ -10,9 +10,9 @@ local WOOD, BRICK = materials.WOOD, materials.BRICK
 
 local cavegen = {}
 
-local WIDTH, HEIGHT = 512, 1152
-local BORDER = 8
-local CELL = 6 -- cellular-automata cave grid resolution, in pixels
+local WIDTH, HEIGHT = 820, 1840
+local BORDER = 13
+local CELL = 10 -- cellular-automata cave grid resolution, in pixels
 
 local PLAYER_W, PLAYER_H = config.player.width, config.player.height
 
@@ -33,7 +33,7 @@ local function fillBase(world, seed)
   for y = 0, HEIGHT - 1 do
     local depth = y / HEIGHT
     for x = 0, WIDTH - 1 do
-      local n = love.math.noise(x * 0.018, y * 0.018, seed)
+      local n = love.math.noise(x * 0.011, y * 0.011, seed)
       world:setRaw(x, y, n > 0.38 + depth * 0.35 and DIRT or ROCK)
     end
   end
@@ -82,7 +82,7 @@ local function carveCaves(world, rng, seed)
       local tx = fx - gx
       local top = cell(gx, gy) * (1 - tx) + cell(gx + 1, gy) * tx
       local bottom = cell(gx, gy + 1) * (1 - tx) + cell(gx + 1, gy + 1) * tx
-      local v = top * (1 - ty) + bottom * ty + (love.math.noise(x * 0.15, y * 0.15, seed + 7) - 0.5) * 0.35
+      local v = top * (1 - ty) + bottom * ty + (love.math.noise(x * 0.094, y * 0.094, seed + 7) - 0.5) * 0.35
       if v > 0.5 then
         world:setRaw(x, y, AIR)
       end
@@ -95,9 +95,9 @@ end
 local function carveMainTunnel(world, rng, seed, fromX, fromY, toX, toY)
   local points = { { fromX, fromY } }
   local y = fromY
-  while y < toY - 140 do
-    y = y + 100 + rng:random() * 60
-    points[#points + 1] = { 70 + rng:random() * (WIDTH - 140), y }
+  while y < toY - 224 do
+    y = y + 160 + rng:random() * 96
+    points[#points + 1] = { 112 + rng:random() * (WIDTH - 224), y }
   end
   points[#points + 1] = { toX, toY }
 
@@ -105,53 +105,53 @@ local function carveMainTunnel(world, rng, seed, fromX, fromY, toX, toY)
     local ax, ay = points[i][1], points[i][2]
     local bx, by = points[i + 1][1], points[i + 1][2]
     local len = math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2)
-    for s = 0, len, 2 do
+    for s = 0, len, 3 do
       local t = s / len
       local cx, cy = ax + (bx - ax) * t, ay + (by - ay) * t
       -- Sideways wander only, so the tunnel still never climbs
-      cx = cx + (love.math.noise(cy * 0.025, seed + 9) - 0.5) * 40
-      local r = 11 + love.math.noise(cx * 0.03, cy * 0.03, seed + 3) * 6
+      cx = cx + (love.math.noise(cy * 0.016, seed + 9) - 0.5) * 64
+      local r = 18 + love.math.noise(cx * 0.019, cy * 0.019, seed + 3) * 10
       carveCircle(world, cx, cy, r)
     end
   end
 end
 
-local ENTRANCE_GAP = 16 -- half-width of the opening down into the main tunnel
+local ENTRANCE_GAP = 26 -- half-width of the opening down into the main tunnel
 
 local function carveEntrance(world, x, y)
   -- Chamber the player arrives in. Timber ledges either side, with a gap in
   -- the middle where the main tunnel drops away.
   -- Domed roof over a flat-floored lower half
-  for yy = y - 26, y + 14 do
-    for xx = x - 38, x + 38 do
-      local dx, dy = (xx - x) / 38, (yy - y) / 26
+  for yy = y - 42, y + 22 do
+    for xx = x - 61, x + 61 do
+      local dx, dy = (xx - x) / 61, (yy - y) / 42
       if yy >= y or dx * dx + dy * dy <= 1 then
         world:setRaw(xx, yy, AIR)
       end
     end
   end
-  world:fillRect(x - 40, y + 15, x - ENTRANCE_GAP, y + 17, WOOD)
-  world:fillRect(x + ENTRANCE_GAP, y + 15, x + 40, y + 17, WOOD)
-  world:fillRect(x - ENTRANCE_GAP + 1, y + 15, x + ENTRANCE_GAP - 1, y + 24, AIR)
+  world:fillRect(x - 64, y + 23, x - ENTRANCE_GAP, y + 27, WOOD)
+  world:fillRect(x + ENTRANCE_GAP, y + 23, x + 64, y + 27, WOOD)
+  world:fillRect(x - ENTRANCE_GAP + 1, y + 23, x + ENTRANCE_GAP - 1, y + 38, AIR)
   -- Shaft above leading up toward the surface (sealed by bedrock at the top)
-  world:fillRect(x - 10, BORDER, x + 10, y - 20, AIR)
-  for yy = BORDER, y - 20 do
-    world:setRaw(x - 11, yy, WOOD)
-    world:setRaw(x + 11, yy, WOOD)
+  world:fillRect(x - 16, BORDER, x + 16, y - 32, AIR)
+  for yy = BORDER, y - 32 do
+    world:fillRect(x - 19, yy, x - 17, yy, WOOD)
+    world:fillRect(x + 17, yy, x + 19, yy, WOOD)
   end
 end
 
 -- Builds the brick shop room. Returns its interior rectangle.
 local function buildShop(world, cx, floorY)
-  local w, h = 150, 54
+  local w, h = 240, 86
   local x0, y0 = math.floor(cx - w / 2), floorY - h
   local x1, y1 = x0 + w - 1, floorY - 1
-  world:fillRect(x0 - 5, y0 - 5, x1 + 5, y1 + 5, BRICK)
+  world:fillRect(x0 - 8, y0 - 8, x1 + 8, y1 + 8, BRICK)
   world:fillRect(x0, y0, x1, y1, AIR)
   -- Opening in the ceiling, with a short drop shaft up to where the tunnel ends
-  world:fillRect(math.floor(cx) - 13, y0 - 34, math.floor(cx) + 13, y0 - 1, AIR)
+  world:fillRect(math.floor(cx) - 21, y0 - 54, math.floor(cx) + 21, y0 - 1, AIR)
   -- Wooden counter
-  world:fillRect(x0 + 18, y1 - 9, x0 + 52, y1, WOOD)
+  world:fillRect(x0 + 29, y1 - 14, x0 + 83, y1, WOOD)
   return { x = x0, y = y0, w = w, h = h }
 end
 
@@ -186,7 +186,7 @@ end
 -- to inside the shop. A safety net on top of the always-descending tunnel.
 local function isReachable(world, sx, sy, goal)
   local fits = solidTable(world)
-  local STEP = 3
+  local STEP = 5
   local visited = {}
   local queue = { { sx, sy } }
   visited[sy * WIDTH + sx] = true
@@ -218,20 +218,20 @@ local function findFloorSpots(world, rng, count, clearance, avoid)
     if #spots >= count then
       break
     end
-    local x = math.floor(BORDER + 4 + rng:random() * (WIDTH - 2 * BORDER - 8))
-    local y = math.floor(BORDER + 60 + rng:random() * (HEIGHT - 200))
+    local x = math.floor(BORDER + 6 + rng:random() * (WIDTH - 2 * BORDER - 12))
+    local y = math.floor(BORDER + 96 + rng:random() * (HEIGHT - 320))
     if not world:isSolid(x, y) then
       local ground = world:findGround(x, y)
       -- Room above (allowing for a slightly sloped floor) and support below
       local open = true
-      for oy = 3, clearance + 2 do
-        for ox = -3, 3 do
+      for oy = 5, clearance + 3 do
+        for ox = -5, 5 do
           if world:isSolid(x + ox, ground - oy) then
             open = false
           end
         end
       end
-      local supported = world:isSolid(x - 3, ground + 2) and world:isSolid(x + 3, ground + 2)
+      local supported = world:isSolid(x - 5, ground + 3) and world:isSolid(x + 5, ground + 3)
       if open and supported and ground < HEIGHT - BORDER and not avoid(x, ground) then
         spots[#spots + 1] = { x, ground }
       end
@@ -257,10 +257,10 @@ function cavegen.generate(seed)
     fillBase(world, noiseSeed)
     carveCaves(world, rng, noiseSeed)
 
-    local entranceX, entranceY = WIDTH / 2, 60
-    local shopX = 120 + rng:random() * (WIDTH - 240)
-    local shopFloor = HEIGHT - BORDER - 30
-    local tunnelEndY = shopFloor - 54 - 24
+    local entranceX, entranceY = math.floor(WIDTH / 2), 96
+    local shopX = 192 + rng:random() * (WIDTH - 384)
+    local shopFloor = HEIGHT - BORDER - 48
+    local tunnelEndY = shopFloor - 86 - 38
     carveMainTunnel(world, rng, noiseSeed, entranceX, entranceY, shopX, tunnelEndY)
     carveEntrance(world, entranceX, entranceY)
     local shop = buildShop(world, shopX, shopFloor)
@@ -272,23 +272,23 @@ function cavegen.generate(seed)
     world:fillRect(WIDTH - BORDER, 0, WIDTH - 1, HEIGHT - 1, BEDROCK)
 
     -- Spawn on the left timber ledge of the entrance chamber
-    local spawnX = math.floor(entranceX - ENTRANCE_GAP - 14)
-    local spawnY = world:findGround(spawnX + 2, entranceY) - PLAYER_H
+    local spawnX = math.floor(entranceX - ENTRANCE_GAP - 22)
+    local spawnY = world:findGroundUnder(spawnX, PLAYER_W, entranceY) - PLAYER_H
 
     local reachable = isReachable(world, spawnX, spawnY, shop)
     if not reachable and attempt == MAX_ATTEMPTS then
       local len = math.sqrt((shopX - entranceX) ^ 2 + (tunnelEndY - entranceY) ^ 2)
-      for d = 0, len, 2 do
+      for d = 0, len, 3 do
         local t = d / len
-        carveCircle(world, entranceX + (shopX - entranceX) * t, entranceY + (tunnelEndY - entranceY) * t, 12)
+        carveCircle(world, entranceX + (shopX - entranceX) * t, entranceY + (tunnelEndY - entranceY) * t, 19)
       end
       reachable = true
     end
 
     if reachable then
       local function avoid(x, y)
-        local nearSpawn = math.abs(x - entranceX) < 50 and y < entranceY + 40
-        local inShop = x > shop.x - 10 and x < shop.x + shop.w + 10 and y > shop.y - 10
+        local nearSpawn = math.abs(x - entranceX) < 80 and y < entranceY + 64
+        local inShop = x > shop.x - 16 and x < shop.x + shop.w + 16 and y > shop.y - 16
         return nearSpawn or inShop
       end
       world:repaintAll()
@@ -299,8 +299,9 @@ function cavegen.generate(seed)
           spawnX = spawnX,
           spawnY = spawnY,
           shop = shop,
-          crates = findFloorSpots(world, rng, 14, 10, avoid),
-          ironCrates = findFloorSpots(world, rng, 4, 12, avoid),
+          crates = findFloorSpots(world, rng, 14, 16, avoid),
+          ironCrates = findFloorSpots(world, rng, 4, 19, avoid),
+          glows = findFloorSpots(world, rng, 40, 6, avoid), -- glowing fungus clusters
         }
     end
   end

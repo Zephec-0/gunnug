@@ -1,6 +1,7 @@
--- Procedural, limb-based animation for the gunslinger (Noita-style): instead
--- of sprite frames, a lanky skeleton (hips, knees, feet, shoulders, elbows) is
--- posed every frame and drawn as 1-pixel limbs on the low-res canvas.
+-- Procedural, limb-based animation for the hunter (a Van Helsing figure):
+-- instead of sprite frames, a lanky skeleton (hips, knees, feet, shoulders,
+-- elbows) is posed every frame and drawn as pixel limbs on the low-res canvas.
+-- A long coat and its mantle follow the motion with simple secondary physics.
 --
 -- Positions are relative to the hitbox: cx = horizontal centre, fy = feet.
 local config = require("src.config")
@@ -10,27 +11,40 @@ local cfg = config.player
 local anim = {}
 
 -- Limb lengths in pixels
-local THIGH, SHIN = 3.3, 3.3
-local UPPER_ARM, FOREARM = 2.4, 2.4
-local HIP_HEIGHT = 6.2 -- hip above the feet when standing
-local TORSO = 4 -- hip to neck
-local REACH = 3.6 -- how far in front of the shoulder the hands hold the gun
-local GUN_LENGTH = 5.5
+local THIGH, SHIN = 5.3, 5.3
+local UPPER_ARM, FOREARM = 3.8, 3.8
+local HIP_HEIGHT = 9.9 -- hip above the feet when standing
+local CROUCH_HIP = 5.6
+local SLIDE_HIP = 4.2
+local TORSO = 6.4 -- hip to neck
+local REACH = 5.8 -- how far in front of the shoulder the hands hold the gun
+local GUN_LENGTH = 8.8
+local TAIL_LINKS, TAIL_LINK = 4, 2.2
 
+-- Dark, desaturated clothing with a few accents (grey mantle, eyes, silver)
 local COLORS = {
-  skin = { 0.96, 0.75, 0.58 },
-  poncho = { 0.92, 0.32, 0.18 },
-  ponchoDark = { 0.66, 0.20, 0.12 },
-  trim = { 1.0, 0.76, 0.26 },
-  jeans = { 0.26, 0.38, 0.70 },
-  jeansDark = { 0.17, 0.25, 0.50 },
-  boots = { 0.34, 0.20, 0.10 },
-  bootsDark = { 0.24, 0.14, 0.07 },
-  hat = { 0.50, 0.31, 0.15 },
-  hatBand = { 0.26, 0.15, 0.08 },
-  eye = { 0.10, 0.08, 0.10 },
-  gun = { 0.26, 0.26, 0.32 },
-  gunLight = { 0.72, 0.74, 0.82 },
+  coat = { 0.15, 0.13, 0.17 },
+  coatLight = { 0.27, 0.23, 0.30 },
+  coatDark = { 0.09, 0.08, 0.11 },
+  lining = { 0.46, 0.07, 0.11 },
+  mantle = { 0.64, 0.63, 0.62 },
+  mantleLight = { 0.78, 0.77, 0.75 },
+  mantleDark = { 0.44, 0.43, 0.45 },
+  trousers = { 0.20, 0.19, 0.24 },
+  trousersDark = { 0.13, 0.12, 0.16 },
+  boots = { 0.09, 0.07, 0.08 },
+  bootsDark = { 0.06, 0.05, 0.06 },
+  buckle = { 0.70, 0.72, 0.78 },
+  glove = { 0.10, 0.08, 0.09 },
+  hat = { 0.11, 0.09, 0.11 },
+  hatLight = { 0.22, 0.19, 0.23 },
+  hatBand = { 0.30, 0.24, 0.18 },
+  shadow = { 0.03, 0.02, 0.04 }, -- under the brim
+  eye = { 1.0, 0.86, 0.48 }, -- glowing
+  gun = { 0.17, 0.17, 0.21 },
+  gunMid = { 0.36, 0.36, 0.42 },
+  silver = { 0.80, 0.82, 0.88 },
+  grip = { 0.30, 0.17, 0.11 },
 }
 
 local function clamp(v, lo, hi)
@@ -47,6 +61,9 @@ function anim.new()
     time = 0,
     squash = 0, -- landing dip, 1 -> 0
     recoil = 0, -- gun kick, 1 -> 0
+    coatX = 0, -- coat-tail trailing offset (spring-smoothed)
+    coatY = 0,
+    mantleTail = nil, -- chain of points, created on first update
     lastX = nil,
     lastVy = 0,
     wasGrounded = true,
@@ -57,49 +74,40 @@ function anim.onShoot(player)
   player.anim.recoil = 1
 end
 
-function anim.update(player, dt)
-  local a, b = player.anim, player.body
-  a.time = a.time + dt
-  if a.lastX and player.grounded then
-    a.phase = a.phase + math.abs(b.x - a.lastX) * 0.42
-  end
-  a.lastX = b.x
-  a.walking = player.grounded and math.abs(b.vx) > 8
-
-  -- Ease the legs back together when standing still
-  if not a.walking and player.grounded then
-    local rest = math.floor(a.phase / math.pi + 0.5) * math.pi
-    a.phase = lerp(a.phase, rest, 1 - math.exp(-12 * dt))
-  end
-
-  if player.grounded and not a.wasGrounded and a.lastVy > 90 then
-    a.squash = clamp(a.lastVy / 220, 0.4, 1)
-  end
-  a.squash = math.max(0, a.squash - dt * 6)
-  a.recoil = math.max(0, a.recoil - dt * 7)
-  a.wasGrounded = player.grounded
-  a.lastVy = b.vy
-end
-
--- Body landmarks shared by drawing and by the gun/muzzle position
+-- Body landmarks shared by drawing, the gun/muzzle position and lighting
 local function torso(player)
   local a, b = player.anim, player.body
   local cx, fy = b.x + b.w / 2, b.y + b.h
-  local dip = a.squash * 1.6
-  if a.walking then
-    dip = dip + (1 - math.abs(math.cos(a.phase))) * 0.7
-  elseif player.grounded then
-    dip = dip + (math.sin(a.time * 2.2) * 0.5 + 0.5) * 0.35 -- breathing
+  local hip = HIP_HEIGHT
+  if player.sliding then
+    hip = SLIDE_HIP
+  elseif player.crouched then
+    hip = CROUCH_HIP
   end
-  local lean = clamp(b.vx / cfg.walkSpeed, -1.2, 1.2) * 0.9
-  local hipX, hipY = cx, fy - HIP_HEIGHT + dip
-  local neckX, neckY = hipX + lean, hipY - TORSO
+  local dip = a.squash * 2.6
+  if a.walking then
+    dip = dip + (1 - math.abs(math.cos(a.phase))) * (player.crouched and 0.6 or 1.1)
+  elseif player.grounded and not player.crouched then
+    dip = dip + (math.sin(a.time * 2.2) * 0.5 + 0.5) * 0.56 -- breathing
+  end
+  local lean = clamp(b.vx / cfg.walkSpeed, -1.2, 1.2) * 1.4
+  local torsoLen = TORSO
+  if player.sliding then
+    -- Lean back against the direction of travel
+    lean = -(b.vx >= 0 and 1 or -1) * 3.2
+    torsoLen = TORSO - 0.8
+  elseif player.crouched then
+    lean = lean * 0.5 + player.facing * 1.4
+    torsoLen = TORSO - 0.6
+  end
+  local hipX, hipY = cx, fy - hip + dip
+  local neckX, neckY = hipX + lean, hipY - torsoLen
   return cx, fy, hipX, hipY, neckX, neckY
 end
 
 function anim.shoulder(player)
   local _, _, _, _, neckX, neckY = torso(player)
-  return neckX, neckY + 0.8
+  return neckX, neckY + 1.3
 end
 
 -- Where the bullet leaves the barrel (ignores the cosmetic recoil kick)
@@ -107,6 +115,77 @@ function anim.muzzle(player)
   local sx, sy = anim.shoulder(player)
   local dx, dy = math.cos(player.aimAngle), math.sin(player.aimAngle)
   return sx + dx * (REACH + GUN_LENGTH), sy + dy * (REACH + GUN_LENGTH)
+end
+
+-- Mantle tail: a short verlet chain of cloth hanging from the back of the mantle
+local function updateMantleTail(player, dt)
+  local a, b = player.anim, player.body
+  local _, _, _, _, neckX, neckY = torso(player)
+  local ax, ay = neckX - player.facing * 2.0, neckY + 3.5
+  if not a.mantleTail then
+    a.mantleTail = {}
+    for i = 1, TAIL_LINKS do
+      a.mantleTail[i] = { x = ax - player.facing * i * TAIL_LINK, y = ay, px = ax - player.facing * i * TAIL_LINK, py = ay }
+    end
+  end
+  local s = a.mantleTail
+  s[1].x, s[1].y, s[1].px, s[1].py = ax, ay, ax, ay
+  -- Air drag pulls the cloth toward "behind" the motion; a little flutter
+  local windX = -b.vx * 0.9 + math.sin(a.time * 7) * 14
+  local windY = -b.vy * 0.4
+  for i = 2, TAIL_LINKS do
+    local p = s[i]
+    local vx, vy = (p.x - p.px) * 0.92, (p.y - p.py) * 0.92
+    p.px, p.py = p.x, p.y
+    p.x = p.x + vx + windX * 0.012 * dt * 60
+    p.y = p.y + vy + (50 + windY) * dt * dt * 60
+  end
+  for _ = 1, 3 do
+    for i = 2, TAIL_LINKS do
+      local p, q = s[i], s[i - 1]
+      local dx, dy = p.x - q.x, p.y - q.y
+      local d = math.sqrt(dx * dx + dy * dy)
+      if d > 0 then
+        local k = (d - TAIL_LINK) / d
+        if i == 2 then
+          p.x, p.y = p.x - dx * k, p.y - dy * k
+        else
+          p.x, p.y = p.x - dx * k * 0.5, p.y - dy * k * 0.5
+          q.x, q.y = q.x + dx * k * 0.5, q.y + dy * k * 0.5
+        end
+      end
+    end
+  end
+end
+
+function anim.update(player, dt)
+  local a, b = player.anim, player.body
+  a.time = a.time + dt
+  if a.lastX and player.grounded and not player.sliding then
+    a.phase = a.phase + math.abs(b.x - a.lastX) * (player.crouched and 0.38 or 0.26)
+  end
+  a.lastX = b.x
+  a.walking = player.grounded and not player.sliding and math.abs(b.vx) > 13
+
+  -- Ease the legs back together when standing still
+  if not a.walking and player.grounded then
+    local rest = math.floor(a.phase / math.pi + 0.5) * math.pi
+    a.phase = lerp(a.phase, rest, 1 - math.exp(-12 * dt))
+  end
+
+  if player.grounded and not a.wasGrounded and a.lastVy > 144 then
+    a.squash = clamp(a.lastVy / 352, 0.4, 1)
+  end
+  a.squash = math.max(0, a.squash - dt * 6)
+  a.recoil = math.max(0, a.recoil - dt * 7)
+  a.wasGrounded = player.grounded
+  a.lastVy = b.vy
+
+  -- Coat tails trail behind the motion and lift when falling
+  local t = 1 - math.exp(-10 * dt)
+  a.coatX = lerp(a.coatX, clamp(-b.vx * 0.04, -7, 7), t)
+  a.coatY = lerp(a.coatY, clamp(-b.vy * 0.025, -6, 2), t)
+  updateMantleTail(player, dt)
 end
 
 -- Two-bone inverse kinematics: returns the joint (knee/elbow) position.
@@ -130,10 +209,17 @@ local function reachToward(ax, ay, tx, ty, length)
   return tx, ty
 end
 
--- Crisp 1-pixel limb segment, snapped to pixel centres
-local function segment(x1, y1, x2, y2, color)
+-- Crisp limb segment snapped to pixel centres. A width of 2 adds a second
+-- line one pixel behind (toward -facing), for thicker limbs.
+local function segment(x1, y1, x2, y2, color, width, facing)
   love.graphics.setColor(color)
-  love.graphics.line(math.floor(x1) + 0.5, math.floor(y1) + 0.5, math.floor(x2) + 0.5, math.floor(y2) + 0.5)
+  local ax, ay = math.floor(x1) + 0.5, math.floor(y1) + 0.5
+  local bx, by = math.floor(x2) + 0.5, math.floor(y2) + 0.5
+  love.graphics.line(ax, ay, bx, by)
+  if width == 2 then
+    local o = -(facing or 1)
+    love.graphics.line(ax + o, ay, bx + o, by)
+  end
 end
 
 local function pixel(x, y, color)
@@ -141,42 +227,59 @@ local function pixel(x, y, color)
   love.graphics.rectangle("fill", math.floor(x), math.floor(y), 1, 1)
 end
 
--- Foot targets for both legs (front, back) for the current state
+-- Foot targets for both legs (front, back) for the current state, plus the
+-- direction knees should bend
 local function footTargets(player, cx, fy)
   local a, b, f = player.anim, player.body, player.facing
   local fx1, fy1, fx2, fy2
-  if player.grounded then
+  local bend = f
+  if player.sliding then
+    -- Lead leg stretched out along the ground, trailing leg folded under
+    local dir = b.vx >= 0 and 1 or -1
+    bend = dir
+    fx1, fy1 = cx + dir * 8.5, fy
+    fx2, fy2 = cx - dir * 0.5, fy
+  elseif player.grounded then
     if a.walking then
       local dir = b.vx >= 0 and 1 or -1
-      local stride, lift = 2.7, 1.8
+      local stride = player.crouched and 3.0 or 4.3
+      local lift = player.crouched and 1.6 or 2.9
       fx1 = cx + math.sin(a.phase) * stride * dir
       fy1 = fy - math.max(0, math.cos(a.phase)) * lift
       fx2 = cx + math.sin(a.phase + math.pi) * stride * dir
       fy2 = fy - math.max(0, math.cos(a.phase + math.pi)) * lift
+    elseif player.crouched then
+      fx1, fy1 = cx + f * 3.2, fy
+      fx2, fy2 = cx - f * 2.4, fy
     else
-      fx1, fy1 = cx + f * 1.3, fy
-      fx2, fy2 = cx - f * 1.1, fy
+      fx1, fy1 = cx + f * 2.1, fy
+      fx2, fy2 = cx - f * 1.8, fy
     end
   else
     -- Rising: knees tucked. Falling: legs dangle.
-    local t = clamp((b.vy + 60) / 140, 0, 1)
-    fx1, fy1 = cx + f * lerp(1.8, 0.8, t), fy - lerp(2.8, 0.3, t)
-    fx2, fy2 = cx - f * lerp(0.4, 1.2, t), fy - lerp(1.6, 0, t)
+    local t = clamp((b.vy + 96) / 224, 0, 1)
+    fx1, fy1 = cx + f * lerp(2.9, 1.3, t), fy - lerp(4.5, 0.5, t)
+    fx2, fy2 = cx - f * lerp(0.6, 1.9, t), fy - lerp(2.6, 0, t)
   end
   if player.kickTimer > 0 then
     local t = math.sin(player.kickTimer / cfg.kickDuration * math.pi)
-    fx1 = lerp(fx1, cx + f * 6.5, t)
-    fy1 = lerp(fy1, fy - 4.5, t)
+    fx1 = lerp(fx1, cx + f * 10.4, t)
+    fy1 = lerp(fy1, fy - 7.2, t)
   end
-  return fx1, fy1, fx2, fy2
+  return fx1, fy1, fx2, fy2, bend
 end
 
-local function drawLeg(hipX, hipY, footX, footY, facing, jeans, boots)
+local function drawLeg(hipX, hipY, footX, footY, bend, trousers, boots)
   footX, footY = reachToward(hipX, hipY, footX, footY, THIGH + SHIN - 0.01)
-  local kneeX, kneeY = solveIK(hipX, hipY, footX, footY, THIGH, SHIN, -facing)
-  segment(hipX, hipY, kneeX, kneeY, jeans)
-  segment(kneeX, kneeY, footX, footY, jeans)
-  segment(footX, footY, footX + facing, footY, boots)
+  local kneeX, kneeY = solveIK(hipX, hipY, footX, footY, THIGH, SHIN, -bend)
+  segment(hipX, hipY, kneeX, kneeY, trousers, 2, bend)
+  segment(kneeX, kneeY, footX, footY, trousers, 2, bend)
+  -- Boot: heel to toe, with a silver buckle
+  segment(footX - bend, footY, footX + bend * 2, footY, boots)
+  segment(footX - bend, footY - 1, footX, footY - 1, boots)
+  if boots == COLORS.boots then
+    pixel(footX, footY - 1, COLORS.buckle)
+  end
 end
 
 -- Arm from shoulder to hand; elbow folds downward
@@ -190,52 +293,179 @@ local function drawArm(sx, sy, hx, hy, color)
   end
   segment(sx, sy, ex, ey, color)
   segment(ex, ey, hx, hy, color)
+  pixel(hx, hy, COLORS.glove)
+end
+
+local function fillPolygon(points, color)
+  love.graphics.setColor(color)
+  local ok, triangles = pcall(love.math.triangulate, points)
+  if ok then
+    for _, tri in ipairs(triangles) do
+      love.graphics.polygon("fill", tri)
+    end
+  end
+end
+
+-- Long, slim coat from the shoulders to the knees; the back tail trails behind
+local function drawCoat(player, fy, hipX, hipY, neckX, neckY)
+  local a, f = player.anim, player.facing
+  local hemY = math.min(hipY + 5.5, fy - 1)
+  local flutter = math.sin(a.time * 11) * math.min(1, math.abs(player.body.vx) / 80) * 0.8
+  local tailX = hipX - f * 2.8 + a.coatX
+  local tailY = hemY + a.coatY + flutter
+  if player.crouched or player.sliding then
+    tailY = math.min(tailY, fy - 0.5) -- drapes on the ground
+  end
+  local outline = {
+    neckX + f * 1.2, neckY + 0.5,
+    hipX + f * 1.6, hipY - 0.5,
+    hipX + f * 2.0 + a.coatX * 0.35, hemY - 0.5,
+    tailX, tailY,
+    hipX - f * 2.4, hipY,
+    neckX - f * 1.8, neckY + 2.5,
+    neckX - f * 1.0, neckY + 0.5,
+  }
+  -- Polygons must be listed in a consistent winding; mirror order when facing left
+  if f < 0 then
+    local reversed = {}
+    for i = #outline - 1, 1, -2 do
+      reversed[#reversed + 1] = outline[i]
+      reversed[#reversed + 1] = outline[i + 1]
+    end
+    outline = reversed
+  end
+  fillPolygon(outline, COLORS.coat)
+  -- Crimson lining glimpsed at the open front, and a lit leading edge
+  segment(hipX + f * 1.6, hipY, hipX + f * 2.0 + a.coatX * 0.35, hemY - 1, COLORS.lining)
+  segment(neckX + f * 1.2, neckY + 1, hipX + f * 1.4, hipY - 1, COLORS.coatLight)
+  segment(hipX - f * 2.4, hipY, tailX, tailY, COLORS.coatDark)
+  -- Belt with a silver buckle
+  for i = -1, 1 do
+    pixel(hipX + i * f, hipY - 1, COLORS.coatDark)
+  end
+  pixel(hipX + f, hipY - 1, COLORS.buckle)
+end
+
+-- Light-grey mantle over the shoulders, part of the coat; its loose end is the
+-- cloth chain that trails in the wind (drawn behind the body)
+local function drawMantleTail(player)
+  local s = player.anim.mantleTail
+  if not s then
+    return
+  end
+  for i = 1, #s - 1 do
+    local color = i <= 2 and COLORS.mantle or COLORS.mantleDark
+    segment(s[i].x, s[i].y, s[i + 1].x, s[i + 1].y, color)
+  end
+end
+
+local function drawMantle(player, neckX, neckY)
+  local a, f = player.anim, player.facing
+  local back = math.max(-2.5, math.min(2.5, a.coatX * 0.3))
+  local shape = {
+    neckX - f * 1.4, neckY - 0.5,
+    neckX + f * 1.3, neckY,
+    neckX + f * 2.0, neckY + 3.0,
+    neckX - f * 2.3 + back, neckY + 4.0,
+  }
+  if f < 0 then
+    shape = { shape[7], shape[8], shape[5], shape[6], shape[3], shape[4], shape[1], shape[2] }
+  end
+  fillPolygon(shape, COLORS.mantle)
+  segment(neckX + f * 2.0, neckY + 3.0, neckX - f * 2.3 + back, neckY + 4.0, COLORS.mantleDark) -- hem
+  segment(neckX - f * 1.0, neckY, neckX + f * 1.0, neckY, COLORS.mantleLight) -- lit top
+end
+
+-- Mostly hat, riding low: a tall crown and a wide drooping brim pulled down
+-- to the eyes, the face lost in shadow except for the two glowing eyes
+local function headOrigin(neckX, neckY, f)
+  return math.floor(neckX + f * 0.6), math.floor(neckY - 4)
+end
+
+local function drawHead(neckX, neckY, f)
+  local hx, hy = headOrigin(neckX, neckY, f)
+  local left = f > 0 and hx - 2 or hx -- 3-wide face column
+  love.graphics.setColor(COLORS.shadow)
+  love.graphics.rectangle("fill", left, hy, 3, 3)
+  -- High coat collar around the jaw
+  love.graphics.setColor(COLORS.coat)
+  love.graphics.rectangle("fill", left - f, hy + 1, 1, 3)
+  love.graphics.rectangle("fill", f > 0 and left or left + 2, hy + 2, 1, 2)
+  -- Eyes just under the brim
+  pixel(hx, hy + 1, COLORS.eye)
+  pixel(hx - f * 2, hy + 1, COLORS.eye)
+  -- Brim: wide, drooping more at the front, lit along the top
+  love.graphics.setColor(COLORS.hat)
+  love.graphics.rectangle("fill", left - 4, hy, 11, 1)
+  love.graphics.rectangle("fill", f > 0 and left + 7 or left - 5, hy + 1, 1, 1)
+  love.graphics.rectangle("fill", f > 0 and left - 5 or left + 7, hy, 1, 1)
+  love.graphics.setColor(COLORS.hatLight)
+  love.graphics.rectangle("fill", left - 3, hy - 1, 9, 1)
+  -- Crown: tall, slightly tapered, with a band and a silver buckle
+  love.graphics.setColor(COLORS.hat)
+  love.graphics.rectangle("fill", left - 1, hy - 5, 5, 4)
+  love.graphics.rectangle("fill", left, hy - 6, 3, 1)
+  love.graphics.setColor(COLORS.hatBand)
+  love.graphics.rectangle("fill", left - 1, hy - 2, 5, 1)
+  pixel(f > 0 and left + 2 or left, hy - 2, COLORS.buckle)
+  love.graphics.setColor(COLORS.hatLight)
+  love.graphics.rectangle("fill", f > 0 and left + 3 or left - 1, hy - 5, 1, 3)
+end
+
+local function drawGun(gripX, gripY, angle, f)
+  local dx, dy = math.cos(angle), math.sin(angle)
+  -- Grip angles down and back from the hand, perpendicular to the barrel
+  local px, py = -dy * f, dx * f
+  segment(gripX, gripY, gripX + px * 2.5 - dx * 1.5, gripY + py * 2.5 - dy * 1.5, COLORS.grip)
+  segment(gripX, gripY, gripX + dx * GUN_LENGTH, gripY + dy * GUN_LENGTH, COLORS.gun)
+  -- Cylinder, silver engraving along the barrel, and the muzzle
+  pixel(gripX + dx * 2 + px * 0.9, gripY + dy * 2 + py * 0.9, COLORS.gunMid)
+  pixel(gripX + dx * 3 + px * 0.9, gripY + dy * 3 + py * 0.9, COLORS.gunMid)
+  pixel(gripX + dx * 5, gripY + dy * 5, COLORS.silver)
+  pixel(gripX + dx * GUN_LENGTH, gripY + dy * GUN_LENGTH, COLORS.silver)
+end
+
+-- Eye position under the brim (the lighting adds a faint glow there)
+function anim.eyes(player)
+  local _, _, _, _, neckX, neckY = torso(player)
+  local hx, hy = headOrigin(neckX, neckY, player.facing)
+  return hx + 0.5, hy + 1.5
+end
+
+-- The eyes again, after the lighting, so they glow even in the dark
+function anim.drawEyes(player)
+  local _, _, _, _, neckX, neckY = torso(player)
+  local f = player.facing
+  local hx, hy = headOrigin(neckX, neckY, f)
+  pixel(hx, hy + 1, COLORS.eye)
+  pixel(hx - f * 2, hy + 1, COLORS.eye)
 end
 
 function anim.draw(player)
   local a, f = player.anim, player.facing
   local cx, fy, hipX, hipY, neckX, neckY = torso(player)
-  local sx, sy = neckX, neckY + 0.8
+  local sx, sy = neckX, neckY + 1.3
 
   -- Gun pose: hands at the grip, pulled back and tipped up by recoil
   local aim = player.aimAngle
   local dx, dy = math.cos(aim), math.sin(aim)
-  local gripX = sx + dx * (REACH - a.recoil * 1.6)
-  local gripY = sy + dy * (REACH - a.recoil * 1.6)
+  local gripX = sx + dx * (REACH - a.recoil * 2.6)
+  local gripY = sy + dy * (REACH - a.recoil * 2.6)
   local gunAngle = aim - f * a.recoil * 0.45
-  local gdx, gdy = math.cos(gunAngle), math.sin(gunAngle)
 
-  local fx1, fy1, fx2, fy2 = footTargets(player, cx, fy)
+  local fx1, fy1, fx2, fy2, bend = footTargets(player, cx, fy)
 
-  -- Back limbs first, in darker shades
-  drawArm(sx - f * 0.5, sy, gripX - dx * 0.8, gripY - dy * 0.8, COLORS.ponchoDark)
-  drawLeg(hipX - f * 0.5, hipY, fx2, fy2, f, COLORS.jeansDark, COLORS.bootsDark)
-
-  -- Torso: two pixels wide, poncho with a trim line at the waist
-  segment(hipX, hipY, neckX, neckY, COLORS.poncho)
-  segment(hipX - f, hipY, neckX - f, neckY + 1, COLORS.poncho)
-  pixel(hipX, hipY - 1, COLORS.trim)
-  pixel(hipX - f, hipY - 1, COLORS.trim)
-
-  drawLeg(hipX + f * 0.5, hipY, fx1, fy1, f, COLORS.jeans, COLORS.boots)
-
-  -- Head: narrow face with an eye on the facing side, under a wide-brimmed hat
-  local hx, hy = math.floor(neckX + f * 0.4), math.floor(neckY - 3)
-  love.graphics.setColor(COLORS.skin)
-  love.graphics.rectangle("fill", f > 0 and hx - 1 or hx, hy, 2, 3)
-  pixel(hx, hy + 1, COLORS.eye) -- hx is always the face's front column
-  love.graphics.setColor(COLORS.hat)
-  love.graphics.rectangle("fill", hx - 3, hy - 1, 7, 1) -- brim
-  love.graphics.rectangle("fill", hx - 1 - (f > 0 and 1 or 0), hy - 3, 3, 2) -- crown
-  pixel(hx - 1 - (f > 0 and 1 or 0), hy - 2, COLORS.hatBand)
-  pixel(hx + 1 - (f > 0 and 1 or 0), hy - 2, COLORS.hatBand)
-
-  -- Revolver, then the front arm over it
-  segment(gripX, gripY, gripX + gdx * GUN_LENGTH, gripY + gdy * GUN_LENGTH, COLORS.gun)
-  pixel(gripX + gdx * GUN_LENGTH, gripY + gdy * GUN_LENGTH, COLORS.gunLight)
-  pixel(gripX - gdy * f * 1.2, gripY + gdx * f * 1.2, COLORS.gun) -- grip
-  drawArm(sx + f * 0.5, sy, gripX, gripY, COLORS.poncho)
-  pixel(gripX, gripY, COLORS.skin)
+  -- Back to front: mantle tail, back arm, legs, coat over the thighs, mantle,
+  -- head, gun, front arm
+  drawMantleTail(player)
+  drawArm(sx - f * 0.6, sy, gripX - dx * 1.3, gripY - dy * 1.3, COLORS.coatDark)
+  drawLeg(hipX - f * 0.6, hipY, fx2, fy2, bend, COLORS.trousersDark, COLORS.bootsDark)
+  drawLeg(hipX + f * 0.6, hipY, fx1, fy1, bend, COLORS.trousers, COLORS.boots)
+  drawCoat(player, fy, hipX, hipY, neckX, neckY)
+  drawMantle(player, neckX, neckY)
+  drawHead(neckX, neckY, f)
+  drawGun(gripX, gripY, gunAngle, f)
+  drawArm(sx + f * 0.6, sy, gripX, gripY, COLORS.coat)
 end
 
 return anim

@@ -26,7 +26,7 @@ local PLAYER_W, PLAYER_H = config.player.width, config.player.height
 -- Generates a cave in world. area: { x0, y0, x1, y1, entranceX, entranceY }
 -- (inclusive pixel bounds; the surface's rock lies above y0). tick: optional,
 -- called regularly so a coroutine can yield. Returns a description:
---   { seed, area, spawnX, spawnY, shop = {x, y, w, h}, crates, ironCrates, glows, enemies }
+--   { seed, area, spawnX, spawnY, shop = {x, y, w, h}, crates, ironCrates, chests, glows, enemies }
 -- (spots are { x, groundY }). Never fails: if the reachability check can't
 -- find a way down, a straight emergency tunnel is carved.
 function cavegen.generate(world, area, seed, tick)
@@ -515,6 +515,7 @@ function cavegen.generate(world, area, seed, tick)
     shop = shop,
     crates = findFloorSpots(40, 16, avoid),
     ironCrates = findFloorSpots(12, 19, avoid),
+    chests = findFloorSpots(12, 22, avoidForEnemies), -- weapon chests, away from the entrance and shop
     glows = findFloorSpots(150, 6, avoid), -- glowing fungus clusters
     enemies = enemies, -- { kind, x, y, toughness }: ghouls stand at y, the others hang from it
   }

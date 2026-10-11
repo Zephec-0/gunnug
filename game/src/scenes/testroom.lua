@@ -2,7 +2,9 @@
 -- Layout (left to right): floating platform, ramp, steps, a pillar that needs
 -- recoil to clear, and a high ledge only reachable by recoil jumping.
 local config = require("src.config")
+local chests = require("src.chests")
 local enemies = require("src.enemies")
+local guns = require("src.guns")
 local items = require("src.items")
 local pickups = require("src.pickups")
 local materials = require("src.materials")
@@ -112,6 +114,10 @@ function testroom.populate(world)
     local x = 40 + (i - 1) * 8
     pickups.dropItem(x, world:findGround(x, BORDER + 160) - 6, items.new(id))
   end
+
+  -- A chest and a ready-made weapon on the floor to try finding weapons with
+  chests.spawn(150, world:findGround(150, BORDER + 160), 0.5)
+  pickups.dropWeapon(190, world:findGround(190, BORDER + 160) - 8, guns.generate(), 0, 0)
 
   -- One of each monster to practise on: a ghoul on the floor past the
   -- pillar, and a bat and a spitter hanging under the high ledge

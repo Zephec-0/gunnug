@@ -231,8 +231,9 @@ local ROLL_STATS = {
 local FIT_CHANCE = 0.22 -- chance each slot of a generated gun is already filled
 local ARCHETYPE_ORDER = { "revolver", "shotgun", "semiauto", "automatic" }
 
--- rng: a love.math RandomGenerator (default: the global one)
-function guns.generate(archetype, rng)
+-- rng: a love.math RandomGenerator (default: the global one);
+-- fitChance: chance each slot already holds an item (default FIT_CHANCE)
+function guns.generate(archetype, rng, fitChance)
   local items = require("src.items")
   local random = rng and function(...) return rng:random(...) end or love.math.random
   archetype = archetype or ARCHETYPE_ORDER[random(1, #ARCHETYPE_ORDER)]
@@ -275,7 +276,7 @@ function guns.generate(archetype, rng)
   -- Pre-fitted ammo and attachments, never the same one twice
   local used = {}
   for slot = 1, gun.def.slots do
-    if random() < FIT_CHANCE then
+    if random() < (fitChance or FIT_CHANCE) then
       local item = items.new(items.order[random(1, #items.order)])
       if not used[item.id] then
         used[item.id] = true

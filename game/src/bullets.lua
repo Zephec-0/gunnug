@@ -9,6 +9,9 @@ local targets = require("src.targets")
 
 local bullets = {}
 
+-- Set by src.game: the hunter, who explosions can hurt
+bullets.player = nil
+
 local list = {}
 local MAX_LIFE = 1.5
 
@@ -46,10 +49,22 @@ end
 -- makes it bigger and stronger.
 local function explode(b, world, x, y)
   local count, scale = b.explosive.count, b.explosive.scale
-  local radius = (14 + 5 * (count - 1)) * (scale < 1 and 0.75 or 1)
+  -- A wide blast that hurts, but only a small bite out of the terrain (so
+  -- explosives aren't a tunnelling tool)
+  local radius = (26 + 6 * (count - 1)) * (scale < 1 and 0.75 or 1)
   local damage = (10 + 4 * (count - 1)) * scale
-  destruction.dig(world, x, y, radius * 0.8, 3, b.dx, b.dy)
+  destruction.dig(world, x, y, math.max(3, radius * 0.25), 1.5, b.dx, b.dy)
   effects.explosion(x, y, radius)
+  -- The hunter is caught in it too
+  local player = bullets.player
+  if player and not player.dead then
+    local px, py = player:center()
+    local dx, dy = px - x, py - y
+    local dist = math.sqrt(dx * dx + dy * dy)
+    if dist < radius + 6 then
+      player:hurt(math.max(1, math.floor(damage * (1 - 0.6 * dist / (radius + 6)) + 0.5)), x, y)
+    end
+  end
   enemies.damageArea(x, y, radius, math.max(1, math.floor(damage + 0.5)), 260 * scale)
   for _, p in ipairs(props.all()) do
     local px, py = p.body:getPosition()

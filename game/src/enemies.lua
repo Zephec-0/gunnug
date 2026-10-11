@@ -144,6 +144,7 @@ local function die(e)
   local gold = love.math.random(e.def.gold[1], e.def.gold[2])
   pickups.dropGold(cx, cy, math.floor(gold * e.toughness + 0.5))
   pickups.maybeDropItem(cx, cy, ITEM_DROP_CHANCE)
+  -- (Monsters never drop weapons: those come from chests and the shop.)
   local colors = {
     ghoul = { { 0.42, 0.10, 0.10 }, { 0.55, 0.52, 0.48 } },
     bat = { { 0.40, 0.08, 0.10 }, { 0.20, 0.17, 0.20 } },
@@ -210,6 +211,45 @@ function enemies.ignite(e, dps, time)
     e.burn.left = math.max(e.burn.left, time)
   else
     e.burn = { dps = dps, left = time, tick = 0.5 }
+  end
+end
+
+-- A faint purple glow behind every monster, so they stand out in the dark:
+-- a soft halo plus a few motes that drift up from it (drawn behind the sprite)
+local AURA = { 0.62, 0.36, 0.95 }
+
+local function updateMotes(e, dt)
+  local b = e.body
+  e.motes = e.motes or {}
+  if #e.motes < 6 and love.math.random() < dt * 9 then
+    e.motes[#e.motes + 1] = {
+      x = b.x - 1 + love.math.random() * (b.w + 2),
+      y = b.y - 1 + love.math.random() * (b.h + 2),
+      vx = (love.math.random() - 0.5) * 8,
+      vy = -4 - love.math.random() * 8,
+      life = 0.8,
+    }
+  end
+  for i = #e.motes, 1, -1 do
+    local m = e.motes[i]
+    m.life = m.life - dt
+    m.x, m.y = m.x + m.vx * dt, m.y + m.vy * dt
+    if m.life <= 0 then
+      table.remove(e.motes, i)
+    end
+  end
+end
+
+local function drawAura(e)
+  local b = e.body
+  local t = love.timer.getTime()
+  local a = (e.state == "sleep" and 0.13 or 0.22) * (0.85 + 0.15 * math.sin(t * 3 + e.phase))
+  love.graphics.setColor(AURA[1], AURA[2], AURA[3], a)
+  love.graphics.rectangle("fill", b.x - 1, b.y, b.w + 2, b.h)
+  love.graphics.rectangle("fill", b.x, b.y - 1, b.w, b.h + 2)
+  for _, m in ipairs(e.motes or {}) do
+    love.graphics.setColor(AURA[1], AURA[2], AURA[3], 0.7 * m.life / 0.8)
+    love.graphics.rectangle("fill", math.floor(m.x), math.floor(m.y), 1, 1)
   end
 end
 
@@ -570,6 +610,7 @@ function enemies.update(dt, world, player)
         UPDATE[e.kind](e, dt, world, player, px, py)
         propImpacts(e, dt)
         updateBurn(e, dt)
+        updateMotes(e, dt)
         -- Touching the hunter hurts him
         local b = e.body
         if not player.dead and e.state ~= "sleep" and overlaps(b.x, b.y, b.w, b.h, pb.x, pb.y, pb.w, pb.h) then
@@ -737,6 +778,7 @@ end
 function enemies.draw(view)
   for _, e in ipairs(list) do
     if onScreen(e, view) then
+      drawAura(e)
       DRAW[e.kind](e)
     end
   end
@@ -763,9 +805,13 @@ function enemies.addLights(lighting, view)
     lighting.add(g.x, g.y, 26, 0.5, 1, 0.35, 0.7)
   end
   for _, e in ipairs(list) do
-    if e.kind == "spitter" and onScreen(e, view) then
+    if onScreen(e, view) then
       local cx, cy = center(e)
-      lighting.add(cx, cy + 4, e.windup and 30 or 16, 0.5, 1, 0.35, 0.5)
+      -- The purple back-light
+      lighting.add(cx, cy, 13, AURA[1], AURA[2], AURA[3], e.state == "sleep" and 0.3 or 0.45)
+      if e.kind == "spitter" then
+        lighting.add(cx, cy + 4, e.windup and 30 or 16, 0.5, 1, 0.35, 0.5)
+      end
     end
   end
 end

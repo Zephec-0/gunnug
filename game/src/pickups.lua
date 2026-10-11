@@ -11,6 +11,9 @@
 -- Box2D bodies.
 local config = require("src.config")
 local effects = require("src.effects")
+local guns = require("src.guns")
+local inventory = require("src.inventory")
+local itembar = require("src.itembar")
 local items = require("src.items")
 
 local pickups = {}
@@ -53,6 +56,43 @@ function pickups.dropItem(x, y, item, vx, vy)
   }
 end
 
+-- Drops a weapon (a gun from src.guns, fitted items and all) at (x, y). Picked
+-- up with E: into a free weapon slot, or via the compare prompt (src.compare,
+-- through pickups.onWeaponFull) when all slots are full.
+function pickups.dropWeapon(x, y, gun, vx, vy)
+  list[#list + 1] = {
+    kind = "weapon",
+    gun = gun,
+    value = 0,
+    x = x,
+    y = y,
+    vx = vx or (love.math.random() - 0.5) * 60,
+    vy = vy or (-80 - love.math.random() * 40),
+    age = 0,
+    sparkle = love.math.random() * 6,
+  }
+end
+
+-- Chance-based drop of a generated weapon
+function pickups.maybeDropWeapon(x, y, chance, fitChance)
+  if love.math.random() < chance then
+    pickups.dropWeapon(x, y, guns.generate(nil, nil, fitChance))
+  end
+end
+
+-- Set by src.game: called with the weapon pickup when the hunter tries to
+-- pick it up but all weapon slots are full
+pickups.onWeaponFull = nil
+
+function pickups.remove(p)
+  for i, q in ipairs(list) do
+    if q == p then
+      table.remove(list, i)
+      return
+    end
+  end
+end
+
 -- Chance-based drop of a random item
 function pickups.maybeDropItem(x, y, chance)
   if love.math.random() < chance then
@@ -87,10 +127,23 @@ function pickups.dropGold(x, y, amount)
   end
 end
 
--- Returns false if it can't be picked up (no room for an item)
+-- Returns false if it can't be picked up (no room for an item; a weapon
+-- with all slots full goes to the compare prompt instead)
 local function collect(p, player)
   local inv = player.inventory
-  if p.kind == "item" then
+  if p.kind == "weapon" then
+    for i = 1, inventory.WEAPON_SLOTS do
+      if not inv.weapons[i] then
+        inv.weapons[i] = p.gun
+        effects.popup(p.x, p.y - 6, p.gun.name, { 1, 0.9, 0.6 })
+        return true
+      end
+    end
+    if pickups.onWeaponFull then
+      pickups.onWeaponFull(p)
+    end
+    return false
+  elseif p.kind == "item" then
     if not inv:addItem(p.item) then
       return false
     end
@@ -171,7 +224,7 @@ function pickups.nearestItem(player)
   local px, py = player:center()
   local best, bestDist = nil, ITEM_REACH
   for _, p in ipairs(list) do
-    if p.kind == "item" then
+    if p.kind == "item" or p.kind == "weapon" then
       local d = math.sqrt((p.x - px) ^ 2 + (p.y - py) ^ 2)
       if d < bestDist then
         best, bestDist = p, d
@@ -188,15 +241,12 @@ function pickups.interact(player)
     return false
   end
   if collect(p, player) then
-    for i, q in ipairs(list) do
-      if q == p then
-        table.remove(list, i)
-        break
-      end
-    end
+    pickups.remove(p)
     return true
   end
-  effects.popup(p.x, p.y - 8, "No room", { 1, 0.5, 0.4 })
+  if p.kind == "item" then
+    effects.popup(p.x, p.y - 8, "No room", { 1, 0.5, 0.4 })
+  end
   return false
 end
 
@@ -210,12 +260,12 @@ function pickups.drawScreen(toScreen, font, player)
     return
   end
   local sx, sy = toScreen(p.x, p.y - 12)
-  local text = "[E] " .. p.item.name
+  local text = "[E] " .. (p.item and p.item.name or p.gun.name)
   love.graphics.setFont(font)
   local x, y = math.floor(sx - font:getWidth(text) / 2), math.floor(sy - font:getHeight())
   love.graphics.setColor(0, 0, 0, 0.85)
   love.graphics.print(text, x + 2, y + 2)
-  local c = p.item.color
+  local c = p.item and p.item.color or { 1, 0.85, 0.5 }
   love.graphics.setColor(math.min(1, c[1] + 0.3), math.min(1, c[2] + 0.3), math.min(1, c[3] + 0.3))
   love.graphics.print(text, x, y)
 end
@@ -230,7 +280,13 @@ function pickups.drawEmissive(view)
   for _, p in ipairs(list) do
     local left = (p.kind == "gold" and p.landedAt) and (DESPAWN_TIME - (p.age - p.landedAt)) or math.huge
     local blinkOff = left < FADE_TIME and math.floor(left * 10) % 2 == 0
-    if p.kind == "item" and onScreen(p, view) then
+    if p.kind == "weapon" and onScreen(p, view) then
+      -- The gun's own icon, with a faint pulse so it stands out
+      local icon = itembar.weaponIcon(p.gun.def)
+      local pulse = 0.85 + 0.15 * math.sin(t * 4 + p.sparkle)
+      love.graphics.setColor(pulse, pulse, pulse)
+      love.graphics.draw(icon, math.floor(p.x - icon:getWidth() / 2), math.floor(p.y - icon:getHeight()))
+    elseif p.kind == "item" and onScreen(p, view) then
       -- A little glowing crate in the item's colour
       local x, y = math.floor(p.x) - 2, math.floor(p.y) - 4
       local c = p.item.color
@@ -259,7 +315,9 @@ end
 function pickups.addLights(lighting, view)
   for _, p in ipairs(list) do
     if onScreen(p, view) then
-      if p.kind == "item" then
+      if p.kind == "weapon" then
+        lighting.add(p.x, p.y - 4, 30, 1, 0.85, 0.5, 0.6)
+      elseif p.kind == "item" then
         local c = p.item.color
         lighting.add(p.x, p.y - 2, 22, c[1], c[2], c[3], 0.6)
       else

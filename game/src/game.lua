@@ -15,6 +15,8 @@
 --   drawScreen(toScreen, font)    full-resolution text such as signs
 local bullets = require("src.bullets")
 local camera = require("src.camera")
+local chests = require("src.chests")
+local compare = require("src.compare")
 local config = require("src.config")
 local effects = require("src.effects")
 local enemies = require("src.enemies")
@@ -29,6 +31,7 @@ local pickups = require("src.pickups")
 local Player = require("src.player")
 local props = require("src.props")
 local render = require("src.render")
+local shop = require("src.shop")
 local targets = require("src.targets")
 
 -- The overworld scene is the whole world (surface and catacombs); the test
@@ -59,11 +62,15 @@ local function load(name, opts)
   effects.clear()
   enemies.clear()
   pickups.clear()
+  chests.clear()
+  shop.clear()
+  compare.close()
   local spawnX, spawnY
   world, spawnX, spawnY = scene.build(opts)
   physics.init(world)
   scene.populate(world)
   player = Player.new(spawnX, spawnY, world, inv)
+  bullets.player = player
   camera.snap(player:center())
   hud.showBanner(scene.title, scene.subtitle)
   fade = 1
@@ -83,6 +90,23 @@ function game.load()
   lighting.load()
   love.mouse.setVisible(false)
   inv = inventory.new()
+  -- A replaced weapon drops at the hunter's feet
+  compare.onChoose = function(index, newGun, pickup)
+    local old = inv.weapons[index]
+    inv.weapons[index] = newGun
+    if pickup.shop then
+      shop.take(pickup, inv) -- bought: pay now that a weapon to replace was chosen
+    else
+      pickups.remove(pickup)
+    end
+    local px, py = player:center()
+    pickups.dropWeapon(px + player.facing * 6, py, old, player.facing * 70, -50)
+    effects.popup(px, py - 14, newGun.name, { 1, 0.9, 0.6 })
+  end
+  -- With all weapon slots full, picking up a weapon asks which to replace
+  pickups.onWeaponFull = function(p)
+    compare.open(p.gun, p)
+  end
   -- Items dragged out of the inventory land on the ground by the hunter's feet
   itembar.onDrop = function(item)
     local px, py = player:center()
@@ -124,9 +148,10 @@ function game.update(dt)
 
   render.layout()
   -- The weapon panel and the menus pause the game, like Noita's inventory
-  love.mouse.setVisible(itembar.isOpen() or menu.isOpen())
+  love.mouse.setVisible(itembar.isOpen() or menu.isOpen() or compare.isOpen())
   menu.update()
-  if itembar.isOpen() or menu.isOpen() then
+  compare.update()
+  if itembar.isOpen() or menu.isOpen() or compare.isOpen() then
     return
   end
 
@@ -150,6 +175,7 @@ function game.update(dt)
 
   targets.update(dt)
   props.update(dt)
+  chests.update(dt)
   bullets.update(dt, world)
   enemies.update(dt, world, player)
   pickups.update(dt, world, player)
@@ -183,6 +209,8 @@ function game.draw()
   player:addLights(lighting)
   enemies.addLights(lighting, view)
   pickups.addLights(lighting, view)
+  chests.addLights(lighting, view)
+  shop.addLights(lighting, view)
   bullets.addLights(lighting)
   effects.addLights(lighting)
   if scene.addLights then
@@ -202,6 +230,8 @@ function game.draw()
   world:draw(camX, camY, config.VIRTUAL_W, config.VIRTUAL_H)
   targets.draw()
   props.draw()
+  chests.draw(view)
+  shop.draw(view)
   enemies.draw(view)
   player:draw()
   effects.drawWorld()
@@ -218,6 +248,7 @@ function game.draw()
   player:drawEmissive()
   enemies.drawEmissive(view)
   pickups.drawEmissive(view)
+  chests.drawEmissive(view)
   bullets.draw()
   effects.drawEmissive()
   if showPhysics then
@@ -229,7 +260,7 @@ function game.draw()
     love.graphics.setColor(0.7, 0.05, 0.05, 0.28 * player.hurtFlash)
     love.graphics.rectangle("fill", 0, 0, config.VIRTUAL_W, config.VIRTUAL_H)
   end
-  if not itembar.isOpen() and not menu.isOpen() and not player.dead then
+  if not itembar.isOpen() and not menu.isOpen() and not compare.isOpen() and not player.dead then
     hud.drawCrosshair(mouseVX, mouseVY)
   end
   if fade > 0 then
@@ -248,16 +279,19 @@ function game.draw()
   end
   effects.drawScreen(toScreen, font)
   pickups.drawScreen(toScreen, font, player)
+  chests.drawScreen(toScreen, font, player)
+  shop.drawScreen(toScreen, font, player)
   -- The title screen stands alone; a pause menu keeps the HUD but hides the
   -- area banner, which would show through it
   if menu.state() ~= "title" then
-    hud.hideBanner = menu.isOpen()
+    hud.hideBanner = menu.isOpen() or compare.isOpen()
     hud.draw(player, render.uiScale())
     if player.dead then
       hud.drawDeath(render.uiScale())
     end
     itembar.draw(inv, render.uiScale())
   end
+  compare.draw(inv, render.uiScale())
   menu.draw(render.uiScale())
   love.graphics.setColor(1, 1, 1)
 end
@@ -271,6 +305,10 @@ function game.keypressed(key)
   if menu.isOpen() then
     menuAction(menu.keypressed(key))
     return true -- a menu swallows every key
+  end
+  if compare.isOpen() then
+    compare.keypressed(key)
+    return true -- and so does the compare prompt
   end
   if key == "tab" or (key == "escape" and itembar.isOpen()) then
     itembar.toggle()
@@ -290,7 +328,9 @@ function game.keypressed(key)
   elseif key == "f" and not player.dead then
     player:kick()
   elseif key == "e" and not player.dead then
-    pickups.interact(player)
+    if not chests.interact(player) and not shop.interact(player) then
+      pickups.interact(player)
+    end
   elseif key == "f6" and not player.dead then
     -- Debug: swaps the held weapon for a randomly generated one
     local gun = guns.generate()
@@ -316,6 +356,9 @@ function game.mousepressed(x, y, button)
     menu.mousepressed(x, y, button)
     return
   end
+  if compare.isOpen() then
+    return
+  end
   if itembar.mousepressed(inv, x, y, button) or pending or itembar.isOpen() then
     return
   end
@@ -329,11 +372,15 @@ function game.mousereleased(x, y, button)
     menuAction(menu.mousereleased(x, y, button))
     return
   end
+  if compare.isOpen() then
+    compare.mousereleased(x, y, button)
+    return
+  end
   itembar.mousereleased(inv, x, y, button)
 end
 
 function game.wheelmoved(_, dy)
-  if dy ~= 0 and not itembar.isOpen() and not menu.isOpen() then
+  if dy ~= 0 and not itembar.isOpen() and not menu.isOpen() and not compare.isOpen() then
     inv:cycle(dy > 0 and -1 or 1)
   end
 end

@@ -6,9 +6,11 @@
 -- milliseconds per frame while the hunter is still on the surface (no
 -- loading screen); catacombs.finish() completes it at once if needed.
 local cavegen = require("src.cavegen")
+local chests = require("src.chests")
 local enemies = require("src.enemies")
 local hud = require("src.hud")
 local props = require("src.props")
+local shop = require("src.shop")
 
 local catacombs = {}
 
@@ -56,6 +58,11 @@ function catacombs.spawnProps()
     end
     for _, s in ipairs(info.ironCrates) do
       props.spawn("ironCrate", s[1], s[2] - 8.5).body:setAwake(false)
+    end
+    shop.populate(info.shop)
+    local a = info.area
+    for _, c in ipairs(info.chests) do
+      chests.spawn(c[1], c[2], (c[2] - a.y0) / (a.y1 - a.y0))
     end
     for _, m in ipairs(info.enemies) do
       enemies.spawn(m.kind, m.x, m.y, m.toughness)

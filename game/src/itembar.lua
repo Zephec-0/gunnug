@@ -260,6 +260,13 @@ function itembar.draw(inv, u)
   end
 end
 
+-- Shared with the weapon compare prompt (src.compare)
+itembar.font = font
+itembar.shadowPrint = shadowPrint
+itembar.drawThing = drawThing
+itembar.statLine = statLine
+itembar.weaponIcon = weaponIcon
+
 -- Returns true if the click was used by the item bar
 function itembar.mousepressed(inv, x, y, button)
   if not isOpen or button ~= 1 then

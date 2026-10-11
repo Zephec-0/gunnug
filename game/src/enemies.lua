@@ -164,16 +164,40 @@ local function die(e)
     enemies.onKill(e, e.lastFx)
   end
   -- (Monsters never drop weapons: those come from chests and the shop.)
-  local colors = {
-    ghoul = { { 0.42, 0.10, 0.10 }, { 0.55, 0.52, 0.48 } },
-    bat = { { 0.40, 0.08, 0.10 }, { 0.20, 0.17, 0.20 } },
-    spitter = { { 0.35, 0.62, 0.25 }, { 0.40, 0.30, 0.32 } },
-  }
-  local c = colors[e.kind]
-  for i = 1, 16 do
-    local a = love.math.random() * math.pi * 2
-    local s = 30 + love.math.random() * 110
-    effects.particle(cx, cy, math.cos(a) * s, math.sin(a) * s - 40, 0.6 + love.math.random() * 0.5, c[i % 2 + 1], 520)
+  local r = love.math.random
+  if e.kind == "ghoul" then
+    -- Crumbles to ash, rags and a dropped arm; a pale wisp leaves the body
+    for _ = 1, 16 do
+      local g = 0.45 + r() * 0.3
+      effects.chunk(cx + (r() - 0.5) * 8, cy + (r() - 0.5) * 12, (r() - 0.5) * 36, -20 - r() * 50, 1 + math.floor(r() * 2), 1, { g, g + 0.02, g + 0.04 }, 1.5 + r() * 1.5)
+    end
+    for _ = 1, 3 do
+      effects.chunk(cx + (r() - 0.5) * 6, cy, (r() - 0.5) * 50, -40 - r() * 40, 3, 2, { 0.27, 0.28, 0.32 }, 3)
+    end
+    effects.chunk(cx, cy - 2, (r() - 0.5) * 60, -60, 4, 1, { 0.62, 0.64, 0.66 }, 3)
+    for _ = 1, 8 do
+      effects.particle(cx + (r() - 0.5) * 6, cy + (r() - 0.5) * 12, (r() - 0.5) * 12, -10 - r() * 20, 0.9 + r() * 0.5, { 0.78, 0.92, 1 }, -30, true)
+    end
+  elseif e.kind == "bat" then
+    -- Folds up and plummets in pieces: two wings and the fuzzy body
+    effects.chunk(cx - 2, cy, -50 - r() * 30, -50, 4, 1, { 0.26, 0.17, 0.24 }, 3)
+    effects.chunk(cx + 2, cy, 50 + r() * 30, -50, 4, 1, { 0.26, 0.17, 0.24 }, 3)
+    effects.chunk(cx, cy, (r() - 0.5) * 20, -20, 3, 3, { 0.20, 0.15, 0.20 }, 3)
+    for _ = 1, 8 do
+      effects.particle(cx, cy, (r() - 0.5) * 70, (r() - 0.5) * 60, 0.5, r() < 0.5 and { 0.32, 0.25, 0.32 } or { 0.40, 0.08, 0.10 }, 400)
+    end
+  else
+    -- The spitter pops: acid splashes everywhere and fleshy bits fall
+    for _ = 1, 14 do
+      local a = r() * math.pi * 2
+      effects.particle(cx, cy, math.cos(a) * (30 + r() * 70), math.sin(a) * (30 + r() * 70) - 20, 0.6 + r() * 0.4, { 0.5, 0.92, 0.3 }, 300, true)
+    end
+    for _ = 1, 4 do
+      effects.chunk(cx + (r() - 0.5) * 6, cy, (r() - 0.5) * 70, -30 - r() * 50, 2, 2, { 0.44, 0.33, 0.33 }, 3)
+    end
+    for _ = 1, 3 do
+      effects.chunk(cx + (r() - 0.5) * 8, cy + 2, (r() - 0.5) * 40, -10, 2, 1, { 0.45, 0.8, 0.28 }, 4) -- acid pools
+    end
   end
 end
 
@@ -189,6 +213,11 @@ function enemies.damage(e, amount, dx, dy, force, crit, fx)
   e.flash = 0.08
   if fx then
     e.lastFx = fx
+  end
+  if dx and dx ~= 0 then
+    -- A hit shoves the sprite back for a moment
+    e.stagger = math.min(0.2, 0.08 + (force or 0) / 2500)
+    e.hitDir = dx > 0 and 1 or -1
   end
   local cx = center(e)
   if crit then
@@ -667,6 +696,7 @@ local function spit(e, tx, ty)
   cy = cy + 3
   local dx, dy = tx - cx, ty - cy
   local t = math.max(0.35, math.sqrt(dx * dx + dy * dy) / def.globSpeed)
+  e.spitT = 0.3
   globs[#globs + 1] = {
     isGlob = true,
     x = cx,
@@ -793,6 +823,8 @@ function enemies.update(dt, world, player)
       local cx, cy = center(e)
       if math.abs(cx - px) < ACTIVE_RANGE and math.abs(cy - py) < ACTIVE_RANGE then
         e.flash = math.max(0, e.flash - dt)
+        e.stagger = math.max(0, (e.stagger or 0) - dt)
+        e.spitT = math.max(0, (e.spitT or 0) - dt)
         e.stun = math.max(0, e.stun - dt)
         e.cooldown = math.max(0, e.cooldown - dt)
         e.ignoreProps = props.overlapping(e.body.x, e.body.y, e.body.w, e.body.h)
@@ -1117,31 +1149,99 @@ local function drawBatEyes(e)
   end
 end
 
--- A fleshy sac hanging from the rock by tendrils; it swells before spitting
+-- A fleshy sac hanging from the rock by twitching tendrils. It watches the
+-- hunter with a single eye, swells and throbs as it winds up, its throat
+-- glowing brighter, and shrivels for a moment after it spits.
+local SPITTER = {
+  flesh = { 0.44, 0.33, 0.33 },
+  fleshLight = { 0.58, 0.45, 0.43 },
+  fleshDark = { 0.30, 0.22, 0.24 },
+  vein = { 0.36, 0.20, 0.24 },
+}
+
+-- 0 -> 1 as it winds up to spit; and how squeezed it is just after
+local function spitterState(e)
+  local prog = e.windup and (1 - e.windup / e.def.windup) or 0
+  local squeeze = (e.spitT or 0) / 0.3
+  return prog, squeeze
+end
+
 local function drawSpitter(e)
   local b = e.body
   local white = e.flash > 0
-  local swell = e.windup and 1 or 0
+  local function color(c)
+    love.graphics.setColor(white and { 1, 1, 1 } or c)
+  end
+  local prog, squeeze = spitterState(e)
+  local t = love.timer.getTime() + e.phase
   local x, y = b.x, b.y
-  love.graphics.setColor(white and { 1, 1, 1 } or { 0.30, 0.22, 0.24 })
-  px(x + 1, y, 1, 3)
-  px(x + 4, y, 1, 2)
-  px(x + 8, y, 1, 3)
-  love.graphics.setColor(white and { 1, 1, 1 } or { 0.44, 0.33, 0.33 })
-  px(x + 1 - swell, y + 2, 8 + swell * 2, 5 + swell)
-  love.graphics.setColor(white and { 1, 1, 1 } or { 0.56, 0.44, 0.42 })
-  px(x + 2, y + 3, 3, 2)
+  local mid = x + 5
+  -- Tendrils anchoring it to the rock, each twitching on its own beat
+  color(SPITTER.fleshDark)
+  for i, tx in ipairs({ 1.5, 4.5, 7.5 }) do
+    local sway = math.sin(t * 3 + i * 2) * (0.6 + prog)
+    px(x + tx + sway * 0.5, y, 1, 2)
+    px(x + tx + sway, y + 2, 1, 1)
+  end
+  -- The sac: swells outward as it winds up (and throbs), contracts after a spit
+  local throb = prog > 0 and math.sin(t * 22) * 0.4 or math.sin(t * 2) * 0.25
+  local grow = prog * 1.4 + throb - squeeze * 1.3
+  local half = 4 + grow
+  local h = 5 + grow * 0.7
+  color(SPITTER.flesh)
+  px(mid - half, y + 3, half * 2, h)
+  px(mid - half + 1, y + 2, half * 2 - 2, 1)
+  px(mid - half + 1, y + 3 + h, half * 2 - 2, 1)
+  color(SPITTER.fleshDark)
+  px(mid - half + 2, y + 3 + h, half * 2 - 4, 1)
+  px(mid - half, y + 5, 1, 2)
+  -- Veins and a highlight
+  color(SPITTER.vein)
+  px(mid + 1, y + 3, 1, 3)
+  px(mid + 2, y + 5, 2, 1)
+  px(mid - 3, y + 5, 2, 1)
+  color(SPITTER.fleshLight)
+  px(mid - half + 1, y + 3, 3, 1)
+  px(mid - half + 1, y + 4, 1, 2)
+  -- A pale eye on the side facing the hunter
+  color({ 0.78, 0.82, 0.70 })
+  px(mid + e.facing * 2 - 1, y + 4, 2, 2)
+  color({ 0.1, 0.08, 0.08 })
+  px(mid + e.facing * 2 - (e.facing > 0 and 0 or 1), y + 5, 1, 1)
+  -- The throat at the bottom: a dark mouth that gapes as it winds up
+  color({ 0.12, 0.08, 0.1 })
+  px(mid - 1 - prog, y + 3 + h - 1, 2 + prog * 2, 1)
+  px(mid - 1, y + 3 + h, 2, 1)
 end
 
 local function drawSpitterGlow(e)
   local b = e.body
-  local swell = e.windup and 1 or 0
-  love.graphics.setColor(0.55, 1, 0.35)
-  px(b.x + 4 - swell, b.y + 6 + swell, 2 + swell * 2, 1)
+  local prog, squeeze = spitterState(e)
+  local h = 5 + prog * 1.4 * 0.7
+  local mid = b.x + 5
+  -- Acid brewing in the throat: a dim glow that blazes before the spit
+  local glow = 0.25 + prog * 0.75
+  love.graphics.setColor(0.55 * glow + 0.1, 1 * glow, 0.35 * glow)
+  px(mid - 1 - prog, b.y + 3 + h - 1, 2 + prog * 2, 1)
+  if prog > 0.5 then
+    px(mid - 1, b.y + 3 + h, 2, 1)
+  end
+  if squeeze > 0 then
+    love.graphics.setColor(0.6, 1, 0.4, squeeze)
+    px(mid - 2, b.y + 3 + h + 1, 4, 1)
+  end
 end
 
 local DRAW = { ghoul = drawGhoul, bat = drawBat, spitter = drawSpitter }
 local GLOW = { ghoul = drawGhoulEyes, bat = drawBatEyes, spitter = drawSpitterGlow }
+
+-- How far a freshly struck monster's sprite is thrown back, in pixels
+local function staggerOffset(e)
+  if not e.stagger or e.stagger <= 0 then
+    return 0
+  end
+  return math.floor((e.hitDir or 1) * e.stagger / 0.2 * 1.6 + 0.5)
+end
 
 local function onScreen(e, view)
   local b = e.body
@@ -1152,6 +1252,9 @@ end
 function enemies.draw(view)
   for _, e in ipairs(list) do
     if onScreen(e, view) then
+      local off = staggerOffset(e)
+      love.graphics.push()
+      love.graphics.translate(off, 0)
       drawAura(e)
       DRAW[e.kind](e)
       -- Status tints: frost, venom and acid wash over the sprite
@@ -1168,6 +1271,7 @@ function enemies.draw(view)
         love.graphics.setColor(0.8, 1, 0.2, 0.25)
         love.graphics.rectangle("fill", math.floor(b.x), math.floor(b.y), b.w, b.h)
       end
+      love.graphics.pop()
     end
   end
 end
@@ -1176,7 +1280,10 @@ end
 function enemies.drawEmissive(view)
   for _, e in ipairs(list) do
     if onScreen(e, view) then
+      love.graphics.push()
+      love.graphics.translate(staggerOffset(e), 0)
       GLOW[e.kind](e)
+      love.graphics.pop()
     end
   end
   for _, g in ipairs(globs) do

@@ -407,6 +407,38 @@ local function backdrop(y)
   return catacombs.backdrop(y)
 end
 
+-- Pseudo-random 0..1 from two integers (stable, for placing background rock)
+local function hash(i, k)
+  local n = math.sin(i * 127.1 + k * 311.7) * 43758.5453
+  return n - math.floor(n)
+end
+
+-- Far rock in the caves: two layers of pillars that slide past more slowly
+-- than the near terrain, so the open caverns have depth
+local function drawCaveDepth(camX, vx0, vx1, vy0, vy1)
+  for layer = 1, 2 do
+    local p = layer == 1 and 0.55 or 0.78
+    local spacing = layer == 1 and 74 or 48
+    local alpha = layer == 1 and 0.5 or 0.38
+    local off = camX * (1 - p)
+    for i = math.floor((vx0 - off) / spacing) - 1, math.floor((vx1 - off) / spacing) + 1 do
+      local h = hash(i, layer)
+      local w = (layer == 1 and 10 or 6) + math.floor(h * 14)
+      local x = math.floor(i * spacing + off + hash(i, layer + 7) * spacing * 0.6)
+      love.graphics.setColor(0.03, 0.025, 0.05, alpha)
+      love.graphics.rectangle("fill", x, vy0, w, vy1 - vy0)
+      -- A cold rim light down one edge, and cracks across the face
+      love.graphics.setColor(0.16, 0.13, 0.22, alpha * 0.8)
+      love.graphics.rectangle("fill", x, vy0, 1, vy1 - vy0)
+      for c = 1, 3 do
+        local cy = math.floor(vy0 / 40) * 40 + c * 40 + math.floor(hash(i, c) * 30)
+        love.graphics.setColor(0.10, 0.08, 0.15, alpha * 0.7)
+        love.graphics.rectangle("fill", x + 1 + math.floor(hash(c, i) * (w - 3)), cy, 2, 5)
+      end
+    end
+  end
+end
+
 -- Decorations drawn behind the player (they receive lighting)
 function overworld.drawDecor(camX, camY)
   local vx0, vy0 = camX - 8, camY - 8
@@ -423,6 +455,9 @@ function overworld.drawDecor(camX, camY)
   for y = math.max(math.floor(vy0 / 8) * 8, CAVE_TOP - 120), vy1, 8 do
     love.graphics.setColor(backdrop(y))
     love.graphics.rectangle("fill", vx0, y, vx1 - vx0, 8)
+  end
+  if vy1 > CAVE_TOP then
+    drawCaveDepth(camX, vx0, vx1, math.max(vy0, CAVE_TOP), vy1)
   end
   catacombs.drawDecor(view(camX, camY))
   for _, tree in ipairs(trees) do

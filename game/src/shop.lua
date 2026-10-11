@@ -340,6 +340,18 @@ end
 function shop.update(dt, player)
   local px, py = player:center()
   for _, s in ipairs(shops) do
+    s.px = px
+    for _, e in ipairs(s.stock) do
+      if e.kind == "perk" then
+        -- Perks stir as the hunter comes near: rising, glowing, shedding sparks
+        local close = (not e.sold and not e.hidden and not s.locked and math.abs(e.x - px) < 40 and math.abs(s.floorY - py) < 30) and 1 or 0
+        e.near = (e.near or 0) + (close - (e.near or 0)) * math.min(1, dt * 6)
+        if close == 1 and love.math.random() < dt * 8 then
+          local c = e.perk.color
+          effects.particle(e.x + (love.math.random() - 0.5) * 8, s.floorY - 7, (love.math.random() - 0.5) * 10, -14 - love.math.random() * 14, 0.9, c, -6, true)
+        end
+      end
+    end
     local h = s.hatch
     if h and h.broken and not h.opened then
       h.timer = h.timer - dt
@@ -387,17 +399,174 @@ local function drawHealPedestal(s)
   love.graphics.rectangle("fill", x - 6, f - 15, 12, 1)
 end
 
+-- Dressing: the room is a little market hall ---------------------------------
+
+local function rect(x, y, w, h)
+  love.graphics.rectangle("fill", math.floor(x), math.floor(y), w, h)
+end
+
+-- A stepped stone dais for a perk
+local function drawDais(s, e)
+  local f = s.floorY
+  love.graphics.setColor(0.26, 0.25, 0.31)
+  rect(e.x - 9, f - 2, 18, 2)
+  love.graphics.setColor(0.34, 0.33, 0.40)
+  rect(e.x - 7, f - 4, 14, 2)
+  love.graphics.setColor(0.42, 0.40, 0.48)
+  rect(e.x - 5, f - 6, 10, 2)
+  love.graphics.setColor(0.54, 0.52, 0.60)
+  rect(e.x - 5, f - 6, 10, 1)
+end
+
+-- Banners hanging from the ceiling beams, swaying very slightly
+local BANNER_COLORS = { { 0.45, 0.10, 0.14 }, { 0.12, 0.32, 0.34 }, { 0.40, 0.28, 0.10 } }
+local function drawBanners(s)
+  local r, t = s.room, love.timer.getTime()
+  for i, fx in ipairs({ 0.16, 0.50, 0.80 }) do
+    local bx, top = r.x + math.floor(r.w * fx), r.y
+    local sway = math.sin(t * 0.8 + i * 2) * 1.3
+    local col = BANNER_COLORS[i]
+    love.graphics.setColor(0.22, 0.15, 0.10)
+    rect(bx - 6, top, 12, 1)
+    for row = 0, 15 do
+      if not (row >= 14 and row <= 15) then
+        local off = sway * row / 15
+        local shade = 1 - 0.18 * ((row + i) % 2)
+        love.graphics.setColor(col[1] * shade, col[2] * shade, col[3] * shade)
+        rect(bx - 4 + off, top + 1 + row, 8, 1)
+      else
+        local off = sway
+        love.graphics.setColor(col[1] * 0.8, col[2] * 0.8, col[3] * 0.8)
+        rect(bx - 4 + off, top + 1 + row, 3, 1)
+        rect(bx + 1 + off, top + 1 + row, 3, 1)
+      end
+    end
+    -- Gold trim and a little sigil
+    local off = sway * 0.4
+    love.graphics.setColor(0.85, 0.68, 0.28)
+    rect(bx - 4 + off * 0.2, top + 2, 8, 1)
+    rect(bx - 1 + off, top + 6, 2, 1)
+    rect(bx - 2 + off, top + 7, 4, 1)
+    rect(bx - 1 + off, top + 8, 2, 1)
+  end
+end
+
+-- A runner of red cloth along the floor, a barrel, and a stack of crates
+local function drawFloorDressing(s)
+  local r, f = s.room, s.floorY
+  love.graphics.setColor(0.40, 0.09, 0.12)
+  rect(r.x + 14, f - 1, 415, 1)
+  love.graphics.setColor(0.80, 0.62, 0.24)
+  for x = r.x + 14, r.x + 428, 7 do
+    rect(x, f - 1, 3, 1)
+  end
+  -- Barrel against the left wall
+  local bx = r.x + 6
+  love.graphics.setColor(0.36, 0.24, 0.14)
+  rect(bx, f - 11, 9, 11)
+  love.graphics.setColor(0.46, 0.32, 0.20)
+  rect(bx + 1, f - 11, 2, 11)
+  love.graphics.setColor(0.18, 0.18, 0.22)
+  rect(bx, f - 9, 9, 1)
+  rect(bx, f - 3, 9, 1)
+  -- Crates stacked between the merchant and the hatch
+  local cx = r.x + 520
+  for i = 0, 1 do
+    local y = f - 10 - i * 10
+    love.graphics.setColor(0.42, 0.30, 0.18)
+    rect(cx + i * 3, y, 10, 10)
+    love.graphics.setColor(0.28, 0.19, 0.12)
+    rect(cx + i * 3, y, 10, 1)
+    rect(cx + i * 3, y + 9, 10, 1)
+    rect(cx + i * 3, y, 1, 10)
+    rect(cx + i * 3 + 9, y, 1, 10)
+    rect(cx + i * 3 + 1, y + 4, 8, 1)
+  end
+end
+
+-- The merchant: a hooded figure behind a counter, breathing slowly
+local function merchantX(s)
+  return s.room.x + 455
+end
+
+local function drawMerchant(s)
+  local mx, f, t = merchantX(s), s.floorY, love.timer.getTime()
+  local breathe = math.floor(math.sin(t * 1.6) * 0.5 + 0.6)
+  -- Robe and hood
+  love.graphics.setColor(0.20, 0.14, 0.22)
+  rect(mx - 4, f - 14 + breathe, 9, 11)
+  love.graphics.setColor(0.27, 0.20, 0.30)
+  rect(mx - 3, f - 18 + breathe, 7, 5)
+  rect(mx - 2, f - 19 + breathe, 5, 1)
+  love.graphics.setColor(0.07, 0.05, 0.09)
+  rect(mx - 2, f - 17 + breathe, 5, 3)
+  -- Hands resting on the counter, with a ring
+  love.graphics.setColor(0.60, 0.55, 0.50)
+  rect(mx - 6, f - 9 + breathe, 2, 1)
+  rect(mx + 5, f - 9 + breathe, 2, 1)
+  love.graphics.setColor(0.85, 0.68, 0.28)
+  rect(mx + 6, f - 9 + breathe, 1, 1)
+  -- The counter, with a few trinkets on it
+  love.graphics.setColor(0.36, 0.25, 0.16)
+  rect(mx - 15, f - 8, 30, 8)
+  love.graphics.setColor(0.50, 0.37, 0.25)
+  rect(mx - 16, f - 9, 32, 2)
+  love.graphics.setColor(0.26, 0.18, 0.12)
+  rect(mx - 12, f - 6, 1, 6)
+  rect(mx + 12, f - 6, 1, 6)
+  love.graphics.setColor(0.45, 0.80, 0.85)
+  rect(mx - 11, f - 11, 2, 2)
+  love.graphics.setColor(0.85, 0.35, 0.40)
+  rect(mx - 8, f - 10, 2, 1)
+  love.graphics.setColor(0.60, 0.60, 0.68)
+  rect(mx + 3, f - 12, 1, 3)
+  rect(mx + 9, f - 12, 3, 3)
+  love.graphics.setColor(0.2, 0.17, 0.12)
+  rect(mx + 9, f - 12, 3, 1)
+end
+
+local function drawMerchantEyes(s)
+  local mx, f, t = merchantX(s), s.floorY, love.timer.getTime()
+  local breathe = math.floor(math.sin(t * 1.6) * 0.5 + 0.6)
+  if s.locked then
+    love.graphics.setColor(0.35, 0.33, 0.30) -- shut for the day
+    rect(mx - 1, f - 15 + breathe, 3, 1)
+    return
+  end
+  local blink = (t % 5.3) < 0.12
+  local look = math.max(-1, math.min(1, math.floor(((s.px or mx) - mx) / 50)))
+  love.graphics.setColor(1, 0.85, 0.40)
+  if blink then
+    rect(mx - 2 + look, f - 15 + breathe, 5, 1)
+  else
+    rect(mx - 2 + look, f - 15 + breathe, 1, 1)
+    rect(mx + 1 + look, f - 15 + breathe, 1, 1)
+  end
+  -- The lantern on the counter
+  love.graphics.setColor(1, 0.72, 0.30)
+  rect(mx + 13, f - 13, 2, 3 + math.floor(math.sin(t * 9) * 0.5 + 0.5))
+  love.graphics.setColor(1, 0.95, 0.7)
+  rect(mx + 13, f - 12, 1, 1)
+end
+
 -- Pedestals with the goods on top, the healing pedestal, and the hatch chain
 -- (before the lighting)
 function shop.draw(view)
   for _, s in ipairs(shops) do
     if roomOnScreen(s, view) then
+      drawBanners(s)
+      drawFloorDressing(s)
+      drawMerchant(s)
       drawHealPedestal(s)
       for _, e in ipairs(s.stock) do
-        love.graphics.setColor(0.34, 0.32, 0.38)
-        love.graphics.rectangle("fill", e.x - 6, s.floorY - 5, 12, 5)
-        love.graphics.setColor(0.46, 0.44, 0.50)
-        love.graphics.rectangle("fill", e.x - 6, s.floorY - 5, 12, 1)
+        if e.kind == "perk" then
+          drawDais(s, e)
+        else
+          love.graphics.setColor(0.34, 0.32, 0.38)
+          love.graphics.rectangle("fill", e.x - 6, s.floorY - 5, 12, 5)
+          love.graphics.setColor(0.46, 0.44, 0.50)
+          love.graphics.rectangle("fill", e.x - 6, s.floorY - 5, 12, 1)
+        end
         if not e.sold and not e.hidden then
           local dim = s.locked and 0.45 or 1
           if e.kind == "perk" then
@@ -458,6 +627,20 @@ function shop.drawEmissive(view)
   local t = love.timer.getTime()
   for _, s in ipairs(shops) do
     if roomOnScreen(s, view) then
+      drawMerchantEyes(s)
+      -- Runes carved into each perk dais, glowing brighter as the hunter nears
+      for _, e in ipairs(s.stock) do
+        if e.kind == "perk" and not e.sold then
+          local c = (e.hidden or not e.perk) and { 0.45, 0.50, 0.60 } or e.perk.color
+          local glow = (s.locked and 0.2 or 0.55) + 0.4 * (e.near or 0)
+          love.graphics.setColor(c[1] * glow, c[2] * glow, c[3] * glow)
+          rect(e.x - 7, s.floorY - 3, 1, 1)
+          rect(e.x - 4, s.floorY - 3, 1, 1)
+          rect(e.x + 3, s.floorY - 3, 1, 1)
+          rect(e.x + 6, s.floorY - 3, 1, 1)
+          rect(e.x - 1, s.floorY - 5, 3, 1)
+        end
+      end
       -- Perks float and glow over their pedestals
       for _, e in ipairs(s.stock) do
         if e.kind == "perk" and not e.sold and not e.hidden then
@@ -502,6 +685,9 @@ end
 
 function shop.addLights(lighting, view)
   for _, s in ipairs(shops) do
+    if roomOnScreen(s, view) and not s.locked then
+      lighting.add(merchantX(s) + 14, s.floorY - 12, 70, 1, 0.78, 0.45, 0.8)
+    end
     if onScreen(s, s.heal.x, view) and not s.locked then
       lighting.add(s.heal.x, s.floorY - 22, 38, 1, 0.78, 0.7, 0.5)
     end

@@ -20,6 +20,29 @@ A **dark fantasy** 2D roguelite dungeon crawler built on the bones of **Noita**:
 - **Camera:** keeps the player centred (leaning slightly toward the aim) and is not clamped to the level; past a level's edge, the edge terrain continues.
 - **Character:** a lanky, slim **Van Helsing-style hunter**, drawn as pixel limbs on a procedural skeleton rather than sprite frames. His head is mostly a tall, wide-brimmed hat worn low, the brim pulled down to two glowing eyes peering from the shadow beneath; he wears a slim long dark coat with a crimson lining and a **light-grey shoulder mantle** (part of the coat, its loose end trailing in the wind), dark trousers and buckled boots, and carries an engraved dark-steel revolver. Legs walk via inverse kinematics, both hands grip the gun and follow the aim, the gun kicks on firing, legs tuck when rising and dangle when falling, the kick extends a leg, landings dip the body, and he has crouch and slide poses. The coat tails and mantle tail follow the motion with simple secondary physics.
 
+### 2a. Art bible (implemented so far)
+
+**Palette rules.** The world stays muted and desolate (greys, slate, dusty earth, cold cave violet). Colour is spent only on things that matter, and each effect uses one accent from a small fixed set so a busy screen stays readable:
+
+| Accent | Used for |
+|--------|----------|
+| warm gold / yellow | the hunter's eyes, gold, candles, muzzle fire, Gilded and Glowing rounds |
+| orange | fire, explosions, embers (Incendiary, Explosive, Cluster) |
+| pale ice blue | Frost, Spectral, shock arcs, the ghoul's eyes |
+| acid green | Venom, Acid, spitter globs, cave fungus, regeneration |
+| blood red | damage, Blood and Vampiric rounds, curses (red rim) |
+| violet | Singularity, the monsters' motes, Rare items are blue-rimmed instead |
+
+**Item and perk icons.** Every ammo type, attachment and perk has an 8x8 pixel icon (`src/icons.lua`) tinted with the item's own colour, with a rarity rim (none for common, blue for rare, red for cursed). Icons appear in the item bar, weapon panel, shop pedestals and dropped items.
+
+**Hunter.** Hits whip the upper body back; a kick throws it back for balance; a double jump twirls him around his middle; death knocks the hat off, drops the gun, topples him from the feet and then bursts him apart.
+
+**Ammo effects.** Frost leaves ice crystals, Venom and Vampiric drip, Acid bubbles, Shock crackles in a jagged line and rings on hit, Concussive throws a shock ring, Singularity draws sparks inward and collapses a ring, Seeker and Boomerang leave a trail (the boomerang spins), Spectral flickers, Glowing has a glare, Sticky bombs fizz and Cluster bomblets blink faster before they blow. Muzzle flashes differ by gun: round with side sparks (revolver), small star (pistol), wide fan (shotgun), thin needle (machine gun).
+
+**Enemies.** Hits shove the sprite back for a moment. Each monster dies its own way: the ghoul crumbles to ash and rags and a pale wisp leaves it; the bat folds into wings and body and plummets; the spitter pops into acid and flesh. The spitter now has twitching tendrils, an eye that tracks you, a swelling and throbbing sac and a throat that glows brighter before it spits.
+
+**Shop.** A market hall: perk daises with glowing runes that brighten (and shed sparks) as you approach, a hooded merchant behind a counter who breathes, blinks and follows you with their eyes (and sleeps when the shop closes), a lantern, a red floor runner, swaying banners, a barrel and crates. Cave backgrounds have two layers of far rock pillars that scroll slower than the terrain.
+
 ## 3. Game Structure
 
 ```

@@ -16,7 +16,10 @@ Inventory.__index = Inventory
 
 function inventory.new()
   local self = setmetatable({ weapons = {}, items = {}, selected = 1 }, Inventory)
+  -- No weapon pickups yet, so a run starts with one of each archetype
   self.weapons[1] = guns.new("revolver")
+  self.weapons[2] = guns.new("shotgun")
+  self.weapons[3] = guns.new("automatic")
   return self
 end
 

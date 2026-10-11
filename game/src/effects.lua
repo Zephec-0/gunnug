@@ -24,16 +24,18 @@ function effects.particle(x, y, vx, vy, life, color, gravity, emissive)
   }
 end
 
-function effects.muzzleFlash(x, y, angle)
-  flashes[#flashes + 1] = { x = x, y = y, angle = angle, life = 0.05 }
+-- size scales the flash, its sparks, smoke and light (1 = revolver)
+function effects.muzzleFlash(x, y, angle, size)
+  size = size or 1
+  flashes[#flashes + 1] = { x = x, y = y, angle = angle, life = 0.05, size = size }
   local dx, dy = math.cos(angle), math.sin(angle)
-  for _ = 1, 7 do
+  for _ = 1, math.floor(7 * size + 0.5) do
     local a = angle + (love.math.random() - 0.5) * 0.9
-    local s = 96 + love.math.random() * 128
+    local s = (96 + love.math.random() * 128) * math.sqrt(size)
     effects.particle(x, y, math.cos(a) * s, math.sin(a) * s, 0.12, { 1, 0.85, 0.3 }, 0, true)
   end
   -- A puff of smoke that drifts upward
-  for _ = 1, 3 do
+  for _ = 1, math.max(1, math.floor(3 * size + 0.5)) do
     effects.particle(
       x + dx * 3,
       y + dy * 3,
@@ -123,10 +125,11 @@ end
 function effects.drawEmissive()
   for _, f in ipairs(flashes) do
     local dx, dy = math.cos(f.angle), math.sin(f.angle)
+    local s = f.size
     love.graphics.setColor(1, 0.95, 0.6)
-    love.graphics.circle("fill", f.x + dx * 3, f.y + dy * 3, 4)
+    love.graphics.circle("fill", f.x + dx * 3 * s, f.y + dy * 3 * s, 4 * s)
     love.graphics.setColor(1, 1, 0.85)
-    love.graphics.circle("fill", f.x + dx * 2, f.y + dy * 2, 2)
+    love.graphics.circle("fill", f.x + dx * 2 * s, f.y + dy * 2 * s, 2 * s)
     love.graphics.setColor(1, 1, 1)
     love.graphics.rectangle("fill", math.floor(f.x + dx), math.floor(f.y + dy), 1, 1)
   end
@@ -136,7 +139,7 @@ end
 -- Muzzle flashes light up their surroundings
 function effects.addLights(lighting)
   for _, f in ipairs(flashes) do
-    lighting.add(f.x, f.y, 90, 1, 0.8, 0.45, 1.2)
+    lighting.add(f.x, f.y, 90 * math.sqrt(f.size), 1, 0.8, 0.45, 1.2)
   end
 end
 

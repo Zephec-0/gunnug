@@ -17,8 +17,18 @@ local HIP_HEIGHT = 9.9 -- hip above the feet when standing
 local CROUCH_HIP = 5.6
 local SLIDE_HIP = 4.2
 local TORSO = 6.4 -- hip to neck
-local REACH = 5.8 -- how far in front of the shoulder the hands hold the gun
-local GUN_LENGTH = 8.8
+-- How each kind of gun (its def.model) is held:
+--   reach    how far in front of the shoulder the trigger hand holds the grip
+--   support  where the other hand goes, along the barrel from the grip
+--            (nil: both hands on the grip, pistol style)
+--   pull     how far the recoil kick pulls the gun back
+--   tip      how far the recoil kick tips the barrel up (radians)
+-- Long guns are shouldered (short reach) so the support hand reaches the fore-end.
+local HOLDS = {
+  revolver = { reach = 5.8, pull = 2.6, tip = 0.45 },
+  shotgun = { reach = 3.4, support = 4.2, pull = 1.6, tip = 0.3 },
+  automatic = { reach = 3.4, support = 4.0, pull = 1.4, tip = 0.22 },
+}
 local TAIL_LINKS, TAIL_LINK = 4, 2.2
 
 -- Dark, desaturated clothing with a few accents (grey mantle, eyes, silver)
@@ -71,7 +81,17 @@ function anim.new()
 end
 
 function anim.onShoot(player)
-  player.anim.recoil = 1
+  -- Light guns kick a little on every shot; heavy ones kick hard
+  local a = player.anim
+  a.recoil = math.max(a.recoil, player.gun.def.kick)
+end
+
+local function gunLength(player)
+  return player.gun and player.gun.def.length or 8.8
+end
+
+local function gunHold(player)
+  return HOLDS[player.gun and player.gun.def.model or "revolver"] or HOLDS.revolver
 end
 
 -- Body landmarks shared by drawing, the gun/muzzle position and lighting
@@ -114,7 +134,8 @@ end
 function anim.muzzle(player)
   local sx, sy = anim.shoulder(player)
   local dx, dy = math.cos(player.aimAngle), math.sin(player.aimAngle)
-  return sx + dx * (REACH + GUN_LENGTH), sy + dy * (REACH + GUN_LENGTH)
+  local len = gunHold(player).reach + gunLength(player)
+  return sx + dx * len, sy + dy * len
 end
 
 -- Mantle tail: a short verlet chain of cloth hanging from the back of the mantle
@@ -412,17 +433,58 @@ local function drawHead(neckX, neckY, f)
   love.graphics.rectangle("fill", f > 0 and left + 3 or left - 1, hy - 5, 1, 3)
 end
 
-local function drawGun(gripX, gripY, angle, f)
-  local dx, dy = math.cos(angle), math.sin(angle)
+-- Gun drawers, one per def.model. (x, y) is the grip; d is along the barrel
+-- and p perpendicular to it, pointing "down" (toward the grip/magazine side).
+local GUN_DRAW = {}
+
+function GUN_DRAW.revolver(x, y, dx, dy, px, py, len)
   -- Grip angles down and back from the hand, perpendicular to the barrel
-  local px, py = -dy * f, dx * f
-  segment(gripX, gripY, gripX + px * 2.5 - dx * 1.5, gripY + py * 2.5 - dy * 1.5, COLORS.grip)
-  segment(gripX, gripY, gripX + dx * GUN_LENGTH, gripY + dy * GUN_LENGTH, COLORS.gun)
+  segment(x, y, x + px * 2.5 - dx * 1.5, y + py * 2.5 - dy * 1.5, COLORS.grip)
+  segment(x, y, x + dx * len, y + dy * len, COLORS.gun)
   -- Cylinder, silver engraving along the barrel, and the muzzle
-  pixel(gripX + dx * 2 + px * 0.9, gripY + dy * 2 + py * 0.9, COLORS.gunMid)
-  pixel(gripX + dx * 3 + px * 0.9, gripY + dy * 3 + py * 0.9, COLORS.gunMid)
-  pixel(gripX + dx * 5, gripY + dy * 5, COLORS.silver)
-  pixel(gripX + dx * GUN_LENGTH, gripY + dy * GUN_LENGTH, COLORS.silver)
+  pixel(x + dx * 2 + px * 0.9, y + dy * 2 + py * 0.9, COLORS.gunMid)
+  pixel(x + dx * 3 + px * 0.9, y + dy * 3 + py * 0.9, COLORS.gunMid)
+  pixel(x + dx * 5, y + dy * 5, COLORS.silver)
+  pixel(x + dx * len, y + dy * len, COLORS.silver)
+end
+
+function GUN_DRAW.shotgun(x, y, dx, dy, px, py, len)
+  -- Wooden stock running back into the shoulder
+  segment(x, y, x - dx * 4 + px * 1.6, y - dy * 4 + py * 1.6, COLORS.grip)
+  segment(x + px, y + py, x - dx * 3 + px * 2.4, y - dy * 3 + py * 2.4, COLORS.grip)
+  -- Two barrels side by side, the upper one a shade lighter
+  segment(x, y, x + dx * len, y + dy * len, COLORS.gun)
+  segment(x + dx * 2 - px, y + dy * 2 - py, x + dx * len - px, y + dy * len - py, COLORS.gunMid)
+  -- Wooden fore-end under the barrels, silver action and muzzles
+  segment(x + dx * 3 + px, y + dy * 3 + py, x + dx * 6.5 + px, y + dy * 6.5 + py, COLORS.grip)
+  pixel(x + dx * 1, y + dy * 1, COLORS.silver)
+  pixel(x + dx * len, y + dy * len, COLORS.silver)
+  pixel(x + dx * len - px, y + dy * len - py, COLORS.silver)
+end
+
+function GUN_DRAW.automatic(x, y, dx, dy, px, py, len)
+  -- Short stock, a boxy two-pixel receiver and a drum magazine underneath
+  segment(x, y, x - dx * 3 + px * 1.4, y + py * 1.4 - dy * 3, COLORS.grip)
+  segment(x - dx, y - dy, x + dx * 5, y + dy * 5, COLORS.gun)
+  segment(x - dx - px, y - dy - py, x + dx * 4 - px, y + dy * 4 - py, COLORS.gun)
+  local mx, my = x + dx * 2 + px * 2, y + dy * 2 + py * 2
+  love.graphics.setColor(COLORS.gun)
+  love.graphics.rectangle("fill", math.floor(mx) - 1, math.floor(my) - 1, 3, 3)
+  pixel(mx - 1, my - 1, COLORS.gunMid)
+  -- Cooling jacket over the barrel, with vent holes, then the muzzle
+  segment(x + dx * 5, y + dy * 5, x + dx * len, y + dy * len, COLORS.gunMid)
+  pixel(x + dx * 6.5, y + dy * 6.5, COLORS.gun)
+  pixel(x + dx * 8.5, y + dy * 8.5, COLORS.gun)
+  pixel(x + dx * 3, y + dy * 3 - py, COLORS.silver)
+  pixel(x + dx * len, y + dy * len, COLORS.silver)
+end
+
+local function drawGun(gun, gripX, gripY, angle, f)
+  local dx, dy = math.cos(angle), math.sin(angle)
+  local px, py = -dy * f, dx * f
+  local def = gun and gun.def
+  local draw = GUN_DRAW[def and def.model or "revolver"] or GUN_DRAW.revolver
+  draw(gripX, gripY, dx, dy, px, py, def and def.length or 8.8)
 end
 
 -- Eye position under the brim (the lighting adds a faint glow there)
@@ -447,24 +509,32 @@ function anim.draw(player)
   local sx, sy = neckX, neckY + 1.3
 
   -- Gun pose: hands at the grip, pulled back and tipped up by recoil
+  local hold = gunHold(player)
   local aim = player.aimAngle
   local dx, dy = math.cos(aim), math.sin(aim)
-  local gripX = sx + dx * (REACH - a.recoil * 2.6)
-  local gripY = sy + dy * (REACH - a.recoil * 2.6)
-  local gunAngle = aim - f * a.recoil * 0.45
+  local gripX = sx + dx * (hold.reach - a.recoil * hold.pull)
+  local gripY = sy + dy * (hold.reach - a.recoil * hold.pull)
+  local gunAngle = aim - f * a.recoil * hold.tip
+  -- The other hand: on the grip for a pistol, under the fore-end for long guns
+  local gdx, gdy = math.cos(gunAngle), math.sin(gunAngle)
+  local supX, supY = gripX - dx * 1.3, gripY - dy * 1.3
+  if hold.support then
+    supX = gripX + gdx * hold.support - gdy * f * 0.8
+    supY = gripY + gdy * hold.support + gdx * f * 0.8
+  end
 
   local fx1, fy1, fx2, fy2, bend = footTargets(player, cx, fy)
 
   -- Back to front: mantle tail, back arm, legs, coat over the thighs, mantle,
   -- head, gun, front arm
   drawMantleTail(player)
-  drawArm(sx - f * 0.6, sy, gripX - dx * 1.3, gripY - dy * 1.3, COLORS.coatDark)
+  drawArm(sx - f * 0.6, sy, supX, supY, COLORS.coatDark)
   drawLeg(hipX - f * 0.6, hipY, fx2, fy2, bend, COLORS.trousersDark, COLORS.bootsDark)
   drawLeg(hipX + f * 0.6, hipY, fx1, fy1, bend, COLORS.trousers, COLORS.boots)
   drawCoat(player, fy, hipX, hipY, neckX, neckY)
   drawMantle(player, neckX, neckY)
   drawHead(neckX, neckY, f)
-  drawGun(gripX, gripY, gunAngle, f)
+  drawGun(player.gun, gripX, gripY, gunAngle, f)
   drawArm(sx + f * 0.6, sy, gripX, gripY, COLORS.coat)
 end
 

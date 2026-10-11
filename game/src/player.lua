@@ -142,7 +142,7 @@ function Player:shoot()
   for _, s in ipairs(shots) do
     bullets.spawn(self.muzzleX, self.muzzleY, s)
   end
-  effects.muzzleFlash(self.muzzleX, self.muzzleY, self.aimAngle)
+  effects.muzzleFlash(self.muzzleX, self.muzzleY, self.aimAngle, self.gun.def.flash)
   self:applyRecoil(self.aimAngle)
   playeranim.onShoot(self)
 end

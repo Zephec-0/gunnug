@@ -49,7 +49,7 @@ function hud.draw(player, scale)
   love.graphics.setColor(1, 1, 1, 0.6)
   local small = font(math.max(10, math.floor(scale * 3)))
   shadowText(
-    "A/D move   W/Space jump   Ctrl crouch/slide   LMB shoot (aim down mid-air to recoil jump)   F kick   Tab weapons   1-3 switch   "
+    "A/D move   W/Space jump   Ctrl crouch/slide   LMB shoot (aim down mid-air to recoil jump)   RMB reload   F kick   Tab weapons   1-3 switch   "
       .. "R restart   F9 test room   F10 new cave   F2 physics   F3 stats",
     margin,
     love.graphics.getHeight() - margin - small:getHeight(),
@@ -65,18 +65,34 @@ function hud.drawGunStatus(gun, ww, margin, top, u, f)
   local r = 2 * u
   local gap = 2 * u
   local count = gun.def.chambers
-  local rowW = count * 2 * r + (count - 1) * gap
   local cy = top + 8 * u
-  local cx0 = ww - margin - rowW + r
-  for i = 1, count do
-    local cx = cx0 + (i - 1) * (2 * r + gap)
-    if i <= gun.chambers then
-      love.graphics.setColor(1, 0.8, 0.3)
-      love.graphics.circle("fill", cx, cy, r)
-    else
-      love.graphics.setColor(0.5, 0.45, 0.4)
-      love.graphics.setLineWidth(math.max(1, u / 2))
-      love.graphics.circle("line", cx, cy, r - u / 4)
+  local rowW
+  if count <= 12 then
+    rowW = count * 2 * r + (count - 1) * gap
+    local cx0 = ww - margin - rowW + r
+    for i = 1, count do
+      local cx = cx0 + (i - 1) * (2 * r + gap)
+      if i <= gun.chambers then
+        love.graphics.setColor(1, 0.8, 0.3)
+        love.graphics.circle("fill", cx, cy, r)
+      else
+        love.graphics.setColor(0.5, 0.45, 0.4)
+        love.graphics.setLineWidth(math.max(1, u / 2))
+        love.graphics.circle("line", cx, cy, r - u / 4)
+      end
+    end
+  else
+    -- Big magazines: a row of thin cartridge ticks instead of chambers
+    local tickW, tickGap = u, u
+    rowW = count * tickW + (count - 1) * tickGap
+    local x0 = ww - margin - rowW
+    for i = 1, count do
+      if i <= gun.chambers then
+        love.graphics.setColor(1, 0.8, 0.3)
+      else
+        love.graphics.setColor(0.5, 0.45, 0.4, 0.6)
+      end
+      love.graphics.rectangle("fill", x0 + (i - 1) * (tickW + tickGap), cy - r, tickW, 2 * r)
     end
   end
   love.graphics.setColor(1, 1, 1)

@@ -145,13 +145,14 @@ local function drawBar(inv, u)
 end
 
 local function statLine(def)
+  local damage = def.pellets > 1 and string.format("%d x %d", def.damage, def.pellets) or tostring(def.damage)
   return string.format(
-    "Chambers %d    Fire delay %.2fs    Reload %.2fs\nSpread %g°    Damage %d    Impact %d",
+    "Chambers %d    Fire delay %.2fs    Reload %.2fs\nSpread %g°    Damage %s    Impact %d",
     def.chambers,
     def.fireDelay,
     def.reloadTime,
     def.spread,
-    def.damage,
+    damage,
     def.impactForce
   )
 end

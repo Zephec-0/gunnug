@@ -240,7 +240,12 @@ function game.keypressed(key)
 end
 
 function game.mousepressed(x, y, button)
-  itembar.mousepressed(inv, x, y, button)
+  if itembar.mousepressed(inv, x, y, button) or pending or itembar.isOpen() then
+    return
+  end
+  if button == 2 and inv:selectedGun() then
+    inv:selectedGun():reload()
+  end
 end
 
 function game.mousereleased(x, y, button)

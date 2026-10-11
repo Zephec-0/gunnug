@@ -17,6 +17,7 @@ local compare = require("src.compare")
 local effects = require("src.effects")
 local guns = require("src.guns")
 local inventory = require("src.inventory")
+local icons = require("src.icons")
 local itembar = require("src.itembar")
 local items = require("src.items")
 local materials = require("src.materials")
@@ -407,14 +408,20 @@ function shop.draw(view)
             love.graphics.draw(icon, e.x - 8, s.floorY - 5 - icon:getHeight())
           else
             local c = e.item.color
-            love.graphics.setColor(c[1] * 0.45 * dim, c[2] * 0.45 * dim, c[3] * 0.45 * dim)
-            love.graphics.rectangle("fill", e.x - 3, s.floorY - 11, 6, 6)
-            love.graphics.setColor(c[1] * dim, c[2] * dim, c[3] * dim)
-            love.graphics.rectangle("fill", e.x - 2, s.floorY - 10, 4, 4)
+            local img = icons.get(e.item)
+            if img then
+              love.graphics.setColor(dim, dim, dim)
+              love.graphics.draw(img, e.x - 4, s.floorY - 14)
+            else
+              love.graphics.setColor(c[1] * 0.45 * dim, c[2] * 0.45 * dim, c[3] * 0.45 * dim)
+              love.graphics.rectangle("fill", e.x - 3, s.floorY - 11, 6, 6)
+              love.graphics.setColor(c[1] * dim, c[2] * dim, c[3] * dim)
+              love.graphics.rectangle("fill", e.x - 2, s.floorY - 10, 4, 4)
+            end
             local rarity = e.item.rarity ~= "common" and items.rarities[e.item.rarity]
             if rarity then
               love.graphics.setColor(rarity.border[1] * dim, rarity.border[2] * dim, rarity.border[3] * dim)
-              love.graphics.rectangle("line", e.x - 3.5, s.floorY - 11.5, 7, 7)
+              love.graphics.rectangle("line", e.x - 4.5, s.floorY - 14.5, 9, 9)
             end
           end
         end
@@ -456,17 +463,25 @@ function shop.drawEmissive(view)
         if e.kind == "perk" and not e.sold and not e.hidden then
           local c = e.perk.color
           local k = s.locked and 0.35 or 1
-          local bob = math.floor(math.sin(t * 2 + e.x) * 1.5)
-          local y = s.floorY - 14 + bob
-          local pulse = 0.8 + 0.2 * math.sin(t * 3 + e.x)
-          love.graphics.setColor(c[1] * 0.5 * k, c[2] * 0.5 * k, c[3] * 0.5 * k)
-          love.graphics.rectangle("fill", e.x - 3, y - 1, 7, 7)
-          love.graphics.rectangle("fill", e.x - 1, y - 3, 3, 11)
-          love.graphics.setColor(c[1] * pulse * k, c[2] * pulse * k, c[3] * pulse * k)
-          love.graphics.rectangle("fill", e.x - 2, y, 5, 5)
-          love.graphics.rectangle("fill", e.x, y - 2, 1, 9)
-          love.graphics.setColor(math.min(1, c[1] + 0.4) * k, math.min(1, c[2] + 0.4) * k, math.min(1, c[3] + 0.4) * k)
-          love.graphics.rectangle("fill", e.x - 1, y + 1, 1, 1)
+          local near = e.near or 0
+          local bob = math.floor(math.sin(t * 2 + e.x) * 1.5 - near * 2)
+          local y = s.floorY - 21 + bob
+          local pulse = 0.8 + 0.2 * math.sin(t * 3 + e.x) + 0.3 * near
+          -- A soft halo, then the perk's icon floating over its dais
+          love.graphics.setColor(c[1] * pulse * k, c[2] * pulse * k, c[3] * pulse * k, 0.35)
+          love.graphics.rectangle("fill", e.x - 7, y - 3, 14, 14)
+          love.graphics.setColor(c[1] * pulse * k, c[2] * pulse * k, c[3] * pulse * k, 0.35)
+          love.graphics.rectangle("fill", e.x - 5, y - 5, 10, 18)
+          local img = icons.get(e.perk)
+          if img then
+            love.graphics.setColor(k, k, k)
+            love.graphics.draw(img, e.x - 4, y)
+          end
+          local rarity = e.perk.rarity ~= "common" and items.rarities[e.perk.rarity]
+          if rarity then
+            love.graphics.setColor(rarity.border[1] * k, rarity.border[2] * k, rarity.border[3] * k)
+            love.graphics.rectangle("line", e.x - 4.5, y - 0.5, 9, 9)
+          end
         end
       end
       -- The floating heart

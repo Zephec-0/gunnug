@@ -156,6 +156,80 @@ local function stick(b, x, y, enemy)
   stuck[#stuck + 1] = bomb
 end
 
+-- Little visual cues for each kind of special ammo, as the bullet flies
+local function trailFx(b, dt)
+  if b.child then
+    return
+  end
+  local fx = b.fx
+  local r = love.math.random
+  local x, y = b.x, b.y
+  if has(fx, "freeze") and r() < dt * 40 then
+    effects.particle(x, y, (r() - 0.5) * 14, 6 + r() * 10, 0.45, { 0.72, 0.92, 1 }, 120, true) -- ice crystals
+  end
+  if has(fx, "poison") and r() < dt * 35 then
+    effects.particle(x, y, (r() - 0.5) * 8, 8, 0.45, { 0.45, 0.9, 0.3 }, 320, true) -- dripping
+  end
+  if has(fx, "acid") and r() < dt * 30 then
+    effects.particle(x, y, (r() - 0.5) * 10, -4, 0.5, { 0.82, 1, 0.3 }, -40, true) -- bubbles
+  end
+  if has(fx, "vamp") and r() < dt * 30 then
+    effects.particle(x, y, (r() - 0.5) * 8, 4, 0.4, { 0.8, 0.1, 0.2 }, 320, true)
+  end
+  if has(fx, "greed") and r() < dt * 40 then
+    effects.particle(x + (r() - 0.5) * 4, y + (r() - 0.5) * 4, 0, 0, 0.3, { 1, 0.88, 0.35 }, 0, true) -- sparkle
+  end
+  if has(fx, "execute") and r() < dt * 30 then
+    effects.particle(x, y, (r() - 0.5) * 20, (r() - 0.5) * 20, 0.25, { 0.6, 0.08, 0.1 }, 0, true)
+  end
+  if has(fx, "ghost") and r() < dt * 40 then
+    effects.particle(x, y, (r() - 0.5) * 10, -8, 0.4, { 0.7, 0.88, 1 }, -20, true) -- wisps
+  end
+  if has(fx, "gravity") and r() < dt * 50 then
+    local a = r() * math.pi * 2
+    effects.particle(x + math.cos(a) * 7, y + math.sin(a) * 7, -math.cos(a) * 30, -math.sin(a) * 30, 0.22, { 0.6, 0.35, 0.95 }, 0, true) -- drawn inward
+  end
+  if b.burn and r() < dt * 45 then
+    effects.particle(x, y, (r() - 0.5) * 10, -10, 0.35, { 1, 0.55 + r() * 0.3, 0.15 }, -60, true) -- embers
+  end
+  -- Curving shots (seeker, boomerang) leave a trail line behind them
+  if has(fx, "homing") or has(fx, "boomerang") then
+    b.trail = b.trail or {}
+    table.insert(b.trail, 1, { x, y })
+    b.trail[9] = nil
+  end
+end
+
+-- What a hit looks like for each status ammo
+local function hitFx(b, enemy)
+  local fx = b.fx
+  local eb = enemy.body
+  local x, y = eb.x + eb.w / 2, eb.y + eb.h / 2
+  local r = love.math.random
+  if has(fx, "freeze") then
+    for _ = 1, 7 do
+      local a = r() * math.pi * 2
+      effects.particle(x, y, math.cos(a) * 50, math.sin(a) * 50 - 20, 0.5, { 0.75, 0.93, 1 }, 200, true)
+    end
+  end
+  if has(fx, "concussive") then
+    effects.ring(x, y, 20, { 0.9, 0.9, 1 })
+  end
+  if has(fx, "shock") then
+    effects.ring(x, y, 10, { 0.6, 0.7, 1 })
+  end
+  if has(fx, "poison") or has(fx, "acid") then
+    for _ = 1, 5 do
+      effects.particle(x, y, (r() - 0.5) * 70, -r() * 50, 0.5, has(fx, "acid") and { 0.8, 1, 0.3 } or { 0.45, 0.9, 0.3 }, 300, true)
+    end
+  end
+  if has(fx, "vamp") then
+    for _ = 1, 4 do
+      effects.particle(x, y, (r() - 0.5) * 60, -r() * 40, 0.5, { 0.8, 0.1, 0.2 }, 320, true)
+    end
+  end
+end
+
 -- A bullet ends in an enemy, prop or target: explode if it carries explosive rounds
 local function finish(b, w, x, y, forward)
   if b.explosive then
@@ -164,6 +238,7 @@ local function finish(b, w, x, y, forward)
   spawnChildren(b, x, y, forward)
   if has(b.fx, "gravity") then
     enemies.pull(x, y, 50, 150)
+    effects.ring(x, y, 36, { 0.6, 0.35, 0.95 }, true)
   end
   return true
 end
@@ -185,6 +260,7 @@ local function hurtEnemy(b, enemy)
   if enemy.isGlob then
     return
   end
+  hitFx(b, enemy)
   if b.burn then
     enemies.ignite(enemy, b.burn.dps, b.burn.time)
   end
@@ -293,6 +369,7 @@ local function step(b, dt, w)
           spawnChildren(b, b.x, b.y, false)
           if has(fx, "gravity") then
             enemies.pull(b.x, b.y, 50, 150)
+            effects.ring(b.x, b.y, 36, { 0.6, 0.35, 0.95 }, true)
           end
         end
         return true
@@ -334,6 +411,7 @@ function bullets.update(dt, w)
     b.life = b.life - dt
     b.age = b.age + dt
     steer(b, dt)
+    trailFx(b, dt)
     local done = step(b, dt, w)
     if not done and b.life <= 0 and b.fuse and b.explosive then
       explode(b, w, b.x, b.y)
@@ -353,6 +431,9 @@ function bullets.update(dt, w)
         s.x, s.y = s.enemy.body.x + s.ox, s.enemy.body.y + s.oy
       end
     end
+    if love.math.random() < dt * 30 then
+      effects.particle(s.x, s.y - 1, (love.math.random() - 0.5) * 20, -20 - love.math.random() * 20, 0.25, { 1, 0.7, 0.2 }, 60, true) -- fizzing fuse
+    end
     if s.timer <= 0 then
       explode({ explosive = s.explosive, dx = 0, dy = -1 }, w, s.x, s.y)
       table.remove(stuck, i)
@@ -362,10 +443,50 @@ end
 
 -- Drawn after the lighting (bullets glow)
 function bullets.draw()
+  local t = love.timer.getTime()
   for _, b in ipairs(list) do
     local c = b.tint or { 1, 0.75, 0.25 }
-    love.graphics.setColor(c[1], c[2], c[3], b.child and 0.5 or 0.8)
+    local fx = b.fx
+    -- Seeker and boomerang trails
+    if b.trail and #b.trail > 1 then
+      for i = 1, #b.trail - 1 do
+        love.graphics.setColor(c[1], c[2], c[3], 0.6 * (1 - i / #b.trail))
+        love.graphics.line(b.trail[i][1], b.trail[i][2], b.trail[i + 1][1], b.trail[i + 1][2])
+      end
+    end
+    -- Glowing Rounds: a soft glare around the bullet
+    if has(fx, "glow") then
+      love.graphics.setColor(c[1], c[2], c[3], 0.22)
+      love.graphics.circle("fill", b.x, b.y, 5)
+      love.graphics.setColor(c[1], c[2], c[3], 0.4)
+      love.graphics.circle("fill", b.x, b.y, 2.5)
+    end
+    local alpha = b.child and 0.5 or 0.8
+    if has(fx, "ghost") then
+      alpha = 0.35 + 0.3 * math.sin(t * 30 + b.age * 20) -- flickers in and out
+    end
+    if has(fx, "shock") then
+      -- Crackling: a jagged line around the straight path
+      local mx, my = (b.prevX + b.x) / 2, (b.prevY + b.y) / 2
+      local nx, ny = -b.dy, b.dx
+      local j1, j2 = (love.math.random() - 0.5) * 4, (love.math.random() - 0.5) * 4
+      love.graphics.setColor(0.7, 0.8, 1, 0.9)
+      love.graphics.line(b.prevX, b.prevY, mx + nx * j1, my + ny * j1, b.x + nx * j2 * 0.5, b.y + ny * j2 * 0.5)
+    end
+    love.graphics.setColor(c[1], c[2], c[3], alpha)
     love.graphics.line(b.prevX, b.prevY, b.x, b.y)
+    if has(fx, "boomerang") then
+      -- It spins as it flies
+      local sa = b.age * 35
+      love.graphics.setColor(c[1], c[2], c[3], 0.95)
+      love.graphics.line(b.x - math.cos(sa) * 2.5, b.y - math.sin(sa) * 2.5, b.x + math.cos(sa) * 2.5, b.y + math.sin(sa) * 2.5)
+    end
+    if b.fuse then
+      -- A cluster bomblet: its fuse blinks faster and faster
+      local blink = math.floor((0.4 - b.life) * 25) % 2 == 0
+      love.graphics.setColor(1, blink and 0.3 or 0.8, 0.2)
+      love.graphics.rectangle("fill", math.floor(b.x), math.floor(b.y), 2, 2)
+    end
     if b.crit then
       love.graphics.setColor(1, 0.6, 0.2)
       love.graphics.rectangle("fill", math.floor(b.x) - 1, math.floor(b.y) - 1, 3, 3)

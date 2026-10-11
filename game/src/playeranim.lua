@@ -165,6 +165,11 @@ function anim.new()
     time = 0,
     squash = 0, -- landing dip, 1 -> 0
     recoil = 0, -- gun kick, 1 -> 0
+    hurt = 0, -- stagger after a hit, 1 -> 0
+    hurtDir = 0, -- the way the hit threw him
+    deathT = nil, -- seconds since dying (nil while alive)
+    gone = false, -- the body has burst and is no longer drawn
+    flip = nil, -- double-jump twirl, 0 -> 1
     coatX = 0, -- coat-tail trailing offset (spring-smoothed)
     coatY = 0,
     mantleTail = nil, -- chain of points, created on first update
@@ -213,6 +218,12 @@ local function torso(player)
   elseif player.crouched then
     lean = lean * 0.5 + player.facing * 1.4
     torsoLen = TORSO - 0.6
+  end
+  -- A hit whips the upper body back; a kick throws it back for balance
+  lean = lean - a.hurtDir * a.hurt * 3
+  dip = dip + a.hurt * 1.2
+  if player.kickTimer > 0 then
+    lean = lean - player.facing * math.sin(player.kickTimer / cfg.kickDuration * math.pi) * 1.6
   end
   local hipX, hipY = cx, fy - hip + dip
   local neckX, neckY = hipX + lean, hipY - torsoLen
@@ -269,6 +280,55 @@ local function updateMantleTail(player, dt)
           q.x, q.y = q.x + dx * k * 0.5, q.y + dy * k * 0.5
         end
       end
+    end
+  end
+end
+
+-- A hit: the upper body whips back against the way he is thrown
+function anim.onHurt(player, dir)
+  local a = player.anim
+  a.hurt = 1
+  a.hurtDir = dir
+end
+
+-- Death: the hat flies off, the gun drops, and he collapses (see updateDeath)
+function anim.onDeath(player, dir)
+  local a = player.anim
+  a.deathT = 0
+  a.deathDir = dir
+  a.gone = false
+  local _, _, _, _, neckX, neckY = torso(player)
+  local hx, hy = neckX, neckY - 4
+  effects.casing(hx, hy, dir * (40 + love.math.random() * 40), -(120 + love.math.random() * 50), 5, COLORS.hat)
+  if player.gun then
+    effects.casing(neckX + dir * 4, neckY + 3, dir * (20 + love.math.random() * 30), -50, 4, COLORS.gunMid)
+  end
+end
+
+-- The fallen hunter: a thud when he lands, then (after a beat) he bursts apart
+function anim.updateDeath(player, dt)
+  local a = player.anim
+  if not a.deathT then
+    return
+  end
+  local before = a.deathT
+  a.deathT = a.deathT + dt
+  local b = player.body
+  local cx, fy = b.x + b.w / 2, b.y + b.h
+  if before < 0.75 and a.deathT >= 0.75 then
+    audio.play("impact", 1.2, 0.5)
+    for _ = 1, 8 do
+      effects.particle(cx + a.deathDir * 6 + (love.math.random() - 0.5) * 8, fy - 1, (love.math.random() - 0.5) * 50, -love.math.random() * 40, 0.5, { 0.4, 0.37, 0.35 }, 200)
+    end
+  end
+  if before < 1.5 and a.deathT >= 1.5 and not a.gone then
+    a.gone = true
+    audio.play("explosion", 0.5, 1.4)
+    for _ = 1, 34 do
+      local ang = love.math.random() * math.pi * 2
+      local s = 40 + love.math.random() * 130
+      local col = love.math.random() < 0.55 and { 0.55, 0.06, 0.09 } or (love.math.random() < 0.5 and COLORS.coat or COLORS.mantle)
+      effects.particle(cx, fy - 6, math.cos(ang) * s, math.sin(ang) * s - 60, 0.8 + love.math.random() * 0.6, col, 480)
     end
   end
 end
@@ -347,6 +407,13 @@ function anim.update(player, dt)
   end
   a.squash = math.max(0, a.squash - dt * 6)
   a.recoil = math.max(0, a.recoil - dt * 7)
+  a.hurt = math.max(0, a.hurt - dt * 4.5)
+  if a.flip then
+    a.flip = a.flip + dt / 0.38
+    if a.flip >= 1 then
+      a.flip = nil
+    end
+  end
   anim.updateReload(player)
   a.wasGrounded = player.grounded
   a.lastVy = b.vy
@@ -552,7 +619,7 @@ local function headOrigin(neckX, neckY, f)
   return math.floor(neckX + f * 0.6), math.floor(neckY - 4)
 end
 
-local function drawHead(neckX, neckY, f)
+local function drawHead(neckX, neckY, f, nohat)
   local hx, hy = headOrigin(neckX, neckY, f)
   local left = f > 0 and hx - 2 or hx -- 3-wide face column
   love.graphics.setColor(COLORS.shadow)
@@ -564,6 +631,13 @@ local function drawHead(neckX, neckY, f)
   -- Eyes just under the brim
   pixel(hx, hy + 1, COLORS.eye)
   pixel(hx - f * 2, hy + 1, COLORS.eye)
+  if nohat then
+    -- Hat gone: dark hair on the bare head
+    love.graphics.setColor(COLORS.coatDark)
+    love.graphics.rectangle("fill", left, hy - 1, 3, 2)
+    pixel(f > 0 and left - 1 or left + 3, hy, COLORS.coatDark)
+    return
+  end
   -- Brim: wide, drooping more at the front, lit along the top
   love.graphics.setColor(COLORS.hat)
   love.graphics.rectangle("fill", left - 4, hy, 11, 1)
@@ -663,8 +737,9 @@ function anim.drawEyes(player)
   pixel(hx - f * 2, hy + 1, COLORS.eye)
 end
 
-function anim.draw(player)
+local function drawFigure(player)
   local a, f = player.anim, player.facing
+  local dead = player.dead
   local cx, fy, hipX, hipY, neckX, neckY = torso(player)
   local sx, sy = neckX, neckY + 1.3
 
@@ -682,7 +757,7 @@ function anim.draw(player)
   end
   local gripX = sx + dx * (hold.reach - a.recoil * hold.pull + reachAdd)
   local gripY = sy + dy * (hold.reach - a.recoil * hold.pull + reachAdd)
-  local gunAngle = aim - f * (a.recoil * hold.tip + tilt)
+  local gunAngle = aim - f * (a.recoil * hold.tip + tilt + a.hurt * 0.5)
   -- The other hand: on the grip for a pistol, under the fore-end for long guns
   local gdx, gdy = math.cos(gunAngle), math.sin(gunAngle)
   local supX, supY = gripX - dx * 1.3, gripY - dy * 1.3
@@ -709,6 +784,12 @@ function anim.draw(player)
     end
   end
 
+  if dead then
+    -- Arms hang limp (the gun is gone)
+    gripX, gripY = sx + f * 1.5, sy + 6.5
+    supX, supY = sx - f * 1.0, sy + 6.8
+  end
+
   local fx1, fy1, fx2, fy2, bend = footTargets(player, cx, fy)
 
   -- Back to front: mantle tail, back arm, legs, coat over the thighs, mantle,
@@ -719,15 +800,46 @@ function anim.draw(player)
   drawLeg(hipX + f * 0.6, hipY, fx1, fy1, bend, COLORS.trousers, COLORS.boots)
   drawCoat(player, fy, hipX, hipY, neckX, neckY)
   drawMantle(player, neckX, neckY)
-  drawHead(neckX, neckY, f)
-  drawGun(player.gun, gripX, gripY, gunAngle, f)
+  drawHead(neckX, neckY, f, dead)
+  if not dead then
+    drawGun(player.gun, gripX, gripY, gunAngle, f)
+  end
   drawArm(sx + f * 0.6, sy, gripX, gripY, COLORS.coat)
-  if carryX then
+  if carryX and not dead then
     -- A fresh round (or magazine) held in the hand
     local name = player.gun and player.gun.def.model
     pixel(carryX + f, carryY - 1, name == "shotgun" and { 0.72, 0.17, 0.13 } or { 0.85, 0.66, 0.25 })
     pixel(carryX + f, carryY, name == "shotgun" and { 0.85, 0.66, 0.25 } or COLORS.gunMid)
   end
+end
+
+-- Draws the hunter. A dying hunter topples over from the feet; a double
+-- jump twirls him around his middle.
+function anim.draw(player)
+  local a, b = player.anim, player.body
+  local cx, fy = b.x + b.w / 2, b.y + b.h
+  local theta, pivotY = 0, fy
+  if player.dead and a.deathT then
+    local k = clamp(a.deathT / 0.75, 0, 1)
+    theta = a.deathDir * (math.pi / 2) * k * k
+    -- A small bounce as he lands
+    if a.deathT > 0.75 then
+      theta = theta - a.deathDir * 0.1 * math.exp(-(a.deathT - 0.75) * 9) * math.abs(math.sin((a.deathT - 0.75) * 14))
+    end
+  elseif a.flip then
+    theta = player.facing * math.pi * 2 * smooth(a.flip)
+    pivotY = fy - 9
+  end
+  if theta == 0 then
+    drawFigure(player)
+    return
+  end
+  love.graphics.push()
+  love.graphics.translate(cx, pivotY)
+  love.graphics.rotate(theta)
+  love.graphics.translate(-cx, -pivotY)
+  drawFigure(player)
+  love.graphics.pop()
 end
 
 return anim

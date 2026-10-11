@@ -190,7 +190,7 @@ function Player:shoot()
     )
   end
   local quiet = st.sneak > 0 -- Suppressor
-  effects.muzzleFlash(self.muzzleX, self.muzzleY, self.aimAngle, self.gun.def.flash * (quiet and 0.5 or 1))
+  effects.muzzleFlash(self.muzzleX, self.muzzleY, self.aimAngle, self.gun.def.flash * (quiet and 0.5 or 1), self.gun.def.model)
   audio.play("shot_" .. (self.gun.def.model == "pistol" and "pistol" or self.gun.def.model), quiet and 0.35 or nil)
   if side then
     if side.cost > 0 and self.hp > 1 then
@@ -236,6 +236,7 @@ function Player:hurt(amount, fromX, fromY)
   self.hurtFlash = 1
   effects.popup(cx, b.y - 4, "-" .. amount, { 1, 0.3, 0.3 })
   local dir = cx >= (fromX or cx) and 1 or -1
+  playeranim.onHurt(self, dir)
   b.vx = dir * cfg.hurtKnockback
   b.vy = math.min(b.vy, -cfg.hurtLift)
   self.jumping = false
@@ -243,13 +244,9 @@ function Player:hurt(amount, fromX, fromY)
     effects.particle(cx, cy, (love.math.random() - 0.5) * 120, -love.math.random() * 90, 0.5, { 0.55, 0.06, 0.09 }, 480)
   end
   if self.hp <= 0 then
+    -- He topples over, then bursts apart (see playeranim.updateDeath)
     self.dead = true
-    for _ = 1, 30 do
-      local a = love.math.random() * math.pi * 2
-      local s = 40 + love.math.random() * 120
-      local c = love.math.random() < 0.6 and { 0.55, 0.06, 0.09 } or { 0.15, 0.13, 0.17 }
-      effects.particle(cx, cy, math.cos(a) * s, math.sin(a) * s - 50, 0.8 + love.math.random() * 0.6, c, 480)
-    end
+    playeranim.onDeath(self, dir)
   end
   return true
 end
@@ -319,6 +316,9 @@ end
 
 -- Hurt timers keep running while dead (the screen flash fades out)
 function Player:updateHurt(dt)
+  if self.dead then
+    playeranim.updateDeath(self, dt)
+  end
   self.invuln = math.max(0, self.invuln - dt)
   self.hurtFlash = math.max(0, self.hurtFlash - dt * 3)
 end
@@ -499,6 +499,7 @@ function Player:update(dt, aimX, aimY)
   elseif self.jumpBufferTimer > 0 and not self.grounded and self.airJumps > 0 then
     -- Double Jump
     self.airJumps = self.airJumps - 1
+    self.anim.flip = 0.0001 -- twirl
     b.vy = -cfg.jumpSpeed * perks.prod("jump") * 0.95
     self.jumping = true
     self.jumpBufferTimer = 0
@@ -649,7 +650,11 @@ function Player:drawEmissive()
 end
 
 function Player:draw()
-  if visible(self) then
+  if self.dead then
+    if not self.anim.gone then
+      playeranim.draw(self) -- the collapse
+    end
+  elseif visible(self) then
     playeranim.draw(self)
   end
 end

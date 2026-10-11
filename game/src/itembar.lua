@@ -6,6 +6,7 @@
 --
 -- Everything is drawn at full window resolution; u = one game pixel.
 local inventory = require("src.inventory")
+local itemIcons = require("src.icons")
 local items = require("src.items")
 local perks = require("src.perks")
 
@@ -82,6 +83,20 @@ local function drawThing(thing, x, y, size, u, alpha)
     local s = math.max(1, math.floor(size * 0.85 / icon:getWidth())) -- whole-number scale keeps pixels even
     love.graphics.setColor(1, 1, 1, alpha)
     love.graphics.draw(icon, x + (size - icon:getWidth() * s) / 2, y + (size - icon:getHeight() * s) / 2, 0, s, s)
+  elseif itemIcons.get(thing) then
+    -- A pixel icon in the item's colours, with the rarity rim around it
+    local img = itemIcons.get(thing)
+    local s = math.max(1, math.floor(size * 0.78 / 8))
+    local box = 8 * s
+    local ix, iy = x + (size - box) / 2, y + (size - box) / 2
+    love.graphics.setColor(1, 1, 1, alpha)
+    love.graphics.draw(img, ix, iy, 0, s, s)
+    local rarity = thing.rarity and thing.rarity ~= "common" and items.rarities[thing.rarity]
+    if rarity then
+      love.graphics.setLineWidth(math.max(1, u * 0.7))
+      love.graphics.setColor(rarity.border[1], rarity.border[2], rarity.border[3], alpha)
+      love.graphics.rectangle("line", x + u * 0.6, y + u * 0.6, size - u * 1.2, size - u * 1.2, u, u)
+    end
   else
     local c = thing.color or { 0.7, 0.7, 0.7 }
     local pad = size * 0.18

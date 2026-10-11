@@ -16,6 +16,7 @@ local guns = require("src.guns")
 local inventory = require("src.inventory")
 local itembar = require("src.itembar")
 local perks = require("src.perks")
+local icons = require("src.icons")
 local items = require("src.items")
 
 local pickups = {}
@@ -296,14 +297,28 @@ function pickups.drawEmissive(view)
       love.graphics.draw(icon, math.floor(p.x - icon:getWidth() / 2), math.floor(p.y - icon:getHeight()))
     elseif p.kind == "item" and onScreen(p, view) then
       -- A little glowing crate in the item's colour
-      local x, y = math.floor(p.x) - 2, math.floor(p.y) - 4
       local c = p.item.color
-      love.graphics.setColor(c[1] * 0.45, c[2] * 0.45, c[3] * 0.45)
-      love.graphics.rectangle("fill", x - 1, y - 1, 6, 6)
-      love.graphics.setColor(c[1], c[2], c[3])
-      love.graphics.rectangle("fill", x, y, 4, 4)
-      love.graphics.setColor(1, 1, 1, 0.7)
-      love.graphics.rectangle("fill", x, y, 2, 1)
+      local img = icons.get(p.item)
+      if img then
+        -- Its icon, hovering a little over the ground on a soft glow
+        local bob = math.floor(math.sin(t * 3 + p.sparkle) * 1)
+        local x, y = math.floor(p.x) - 4, math.floor(p.y) - 10 + bob
+        love.graphics.setColor(c[1], c[2], c[3], 0.25)
+        love.graphics.rectangle("fill", x - 1, y - 1, 10, 10)
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.draw(img, x, y)
+        local rarity = p.item.rarity ~= "common" and items.rarities[p.item.rarity]
+        if rarity then
+          love.graphics.setColor(rarity.border[1], rarity.border[2], rarity.border[3], 0.9)
+          love.graphics.rectangle("line", x - 0.5, y - 0.5, 9, 9)
+        end
+      else
+        local x, y = math.floor(p.x) - 2, math.floor(p.y) - 4
+        love.graphics.setColor(c[1] * 0.45, c[2] * 0.45, c[3] * 0.45)
+        love.graphics.rectangle("fill", x - 1, y - 1, 6, 6)
+        love.graphics.setColor(c[1], c[2], c[3])
+        love.graphics.rectangle("fill", x, y, 4, 4)
+      end
     elseif onScreen(p, view) and not blinkOff then
       local x, y = math.floor(p.x), math.floor(p.y)
       love.graphics.setColor(0.95, 0.74, 0.22)

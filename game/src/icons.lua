@@ -1,0 +1,170 @@
+-- Pixel icons (8x8) for every ammo type, attachment and perk. Each is a grid
+-- of palette letters; "c", "d" and "l" are the item's own colour, its shadow
+-- and its highlight, so an icon always matches its item. Built once into
+-- images with nearest-neighbour filtering.
+--
+--   . clear    c main colour  d dark  l light
+--   w white    k black        s steel S dark steel
+--   r red      o orange       y yellow g gold    b brown
+--   n green    u blue         p purple m pink
+local icons = {}
+
+local FIXED = {
+  w = { 0.95, 0.95, 0.97 },
+  k = { 0.08, 0.07, 0.10 },
+  s = { 0.72, 0.74, 0.80 },
+  S = { 0.36, 0.37, 0.44 },
+  r = { 0.86, 0.20, 0.22 },
+  o = { 1.00, 0.55, 0.15 },
+  y = { 1.00, 0.92, 0.40 },
+  g = { 0.95, 0.74, 0.22 },
+  b = { 0.52, 0.32, 0.16 },
+  n = { 0.40, 0.85, 0.35 },
+  u = { 0.45, 0.72, 1.00 },
+  p = { 0.60, 0.35, 0.85 },
+  m = { 0.95, 0.50, 0.72 },
+}
+
+local ITEMS = {
+  -- Ammo -------------------------------------------------------------------
+  slug = { "..cccc..", ".cllccd.", ".cllccd.", ".cccccd.", ".cccccd.", ".cccccd.", ".gggggg.", ".gddddg." },
+  piercing = { "...cc...", "...cc...", "..clcd..", "..clcd..", "..gggg..", "..gggg..", "..gddg..", "..dddd.." },
+  ricochet = { ".......c", "......cc", ".c...c..", "..c.c...", "...c....", "..c.c...", ".c...c..", "c.....cc" },
+  explosive = { "o..o..o.", ".o.yy.o.", "..oyyo..", "ooyyyyoo", "..oyyo..", ".o.yy.o.", "o..o..o.", "........" },
+  incendiary = { "...o....", "..oo....", "..ooo.o.", ".ooyoo..", ".oyyyoo.", ".oyyyoo.", "..oyyo..", "...oo..." },
+  scatter = { ".c...c..", "........", "..c..c.c", "c.......", "...c.c..", ".c....c.", "....c...", "c..c...c" },
+  frost = { "...u....", ".u.u.u..", "..uwu...", "uuwwwuu.", "..uwu...", ".u.u.u..", "...u....", "........" },
+  shock = { "....yy..", "...yy...", "..yy....", ".yyyyy..", "...yy...", "..yy....", ".yy.....", ".y......" },
+  poison = { "...n....", "...n....", "..nnn...", ".nnlnn..", ".nlnnn..", ".nnnnn..", "..nnn...", "........" },
+  vampiric = { ".w....w.", ".ww..ww.", ".ww..ww.", "..wwww..", "...rr...", "..rrrr..", "..rrrr..", "...rr..." },
+  gilded = { "..gggg..", ".gyyygg.", "gyygggdg", "gygyygdg", "gygggydg", "gyggggdg", ".gddddg.", "..gggg.." },
+  sticky = { ".....y..", "....o...", "..SSSS..", ".SmSSSS.", "SmmSSSSS", "SSSSSSSS", ".SSSSSS.", "..SSSS.." },
+  seeker = { "...cc...", ".cc..cc.", ".c.ww.c.", "cc.ww.cc", "cc.ww.cc", ".c.ww.c.", ".cc..cc.", "...cc..." },
+  singularity = { "..pppp..", ".pkkkkp.", "pkkpppkp", "pkpkkkkp", "pkpkkpkp", "pkkkkkkp", ".pkkkkp.", "..pppp.." },
+  auger = { "...cc...", "..cdc...", "..dcc...", "...cdc..", "..cdc...", "..dcc...", "...cd...", "...dd..." },
+  splitting = { "...cc...", "...cc...", "...cc...", "..cddc..", ".cc..cc.", ".c....c.", "c......c", "c......c" },
+  boomerang = { "cc....cc", "ccc..ccc", ".ccc.cc.", "..cccc..", "..cccc..", "...cc...", "........", "........" },
+  acid = { "..SSSS..", "...SS...", "..SSSS..", ".SnnnnS.", ".SnlnnS.", ".SnnnnS.", ".SSnnSS.", "..SSSS.." },
+  concussive = { "w..c..w.", ".w.c.w..", "..wcw...", "cccwccc.", "..wcw...", ".w.c.w..", "w..c..w.", "........" },
+  spectral = { "..wwww..", ".wwwwww.", ".wkwwkw.", ".wwwwww.", ".wwwwww.", ".wwwwww.", ".ww.ww.w", ".w..w..w" },
+  executioner = { ".wwwwww.", "wwwwwwww", "wkkwwkkw", "wkkwwkkw", "wwwkkwww", ".wwwwww.", ".wkwkwk.", "..wwww.." },
+  glowing = { "..yyyy..", ".yyllyy.", ".yylyyy.", ".yyyyyy.", "..yyyy..", "..ssss..", "..SSSS..", "...ss..." },
+  cluster = { "..S.....", ".SSS..S.", "..S..SSS", ".....S..", ".S......", "SSS..S..", ".S..SSS.", ".....S.." },
+  feather = { "......cc", ".....ccc", "....ccc.", "...ccc..", "..ccc...", ".cccd...", "cdd.....", "d......." },
+  blood = { "...r....", "...r....", "..rrr...", ".rrlrr..", ".rrlrr..", ".rrrrr..", "..rrr...", "..kkk..." },
+  unstable = { "..y.....", "...o....", ".rrrrrr.", "rrlrrrrr", "rrrrrrrr", "rrrkkrrr", ".rrkkrr.", "..rrrr.." },
+
+  -- Attachments --------------------------------------------------------------
+  longbarrel = { "........", "........", ".SSSSSSS", "sssssssS", ".SSSSSSS", "........", "........", "........" },
+  extmag = { ".SSSS...", ".SggS...", ".SggS...", ".SggS...", ".SggS...", ".SggS...", ".SggS...", ".SSSS..." },
+  compensator = { "........", ".SSSSSS.", ".SkSkSS.", ".sSsSsS.", ".SkSkSS.", ".SSSSSS.", "........", "........" },
+  speedloader = { "..gggg..", ".g.gg.g.", "g.g..g.g", "gg....gg", "g.g..g.g", ".g.gg.g.", "..gggg..", "........" },
+  hairtrigger = { ".SSSS...", "S....S..", "S....S..", ".SSSS...", "...SrS..", "...Sr...", "....r...", "........" },
+  choke = { "ssssssss", ".ssssss.", "..ssss..", "...ss...", "...ss...", "...ss...", "........", "........" },
+  charge = { ".bbbbbb.", "bddbbddb", ".bbbbbb.", "bddbbddb", ".bbbbbb.", "bddbbddb", ".bbbbbb.", "...o...." },
+  burst = { "........", ".g.g.g..", ".g.g.g..", ".g.g.g..", ".g.g.g..", ".d.d.d..", ".d.d.d..", "........" },
+  backblast = { "........", "...c....", "..cc....", ".ccccccc", ".ccccccc", "..cc....", "...c....", "........" },
+  primer = { ".cccc...", "c....c..", ".cccc...", "c....c..", ".cccc...", "c....c..", ".cccc...", "........" },
+  suppressor = { "........", "........", ".SSSSSSS", "SkSkSkSs", "SSSSSSSs", ".SSSSSSS", "........", "........" },
+  laser = { "........", "S.......", "SSrrrrrr", "S.......", "........", "........", "........", "........" },
+  bayonet = { "......ss", ".....ss.", "....ss..", "...ss...", ".bbs....", "bbb.....", "b.......", "........" },
+  overclock = { "..oooo..", ".o....o.", "o..r...o", "o...r..o", "o....r.o", ".o....o.", "..oooo..", "...kk..." },
+  magnet = { "rr....ww", "rr....ww", "rr....ww", "rr....ww", ".rr..ww.", "..rrww..", "...rw...", "........" },
+  lantern = { "...ss...", "..ssss..", ".syyyys.", ".syyyys.", ".syyyys.", ".syyyys.", "..ssss..", "...ss..." },
+  jets = { "...cc...", "..cccc..", "..cwwc..", "..cccc..", ".ccddcc.", ".c.oo.c.", "...oo...", "...yy..." },
+  mortar = { "...ss...", "..ssss..", "..sSsS..", "..ssss..", "..oooo..", "..oooo..", "..dddd..", "........" },
+  scavenger = { "..ccc...", ".c...c>.", "c.....c.", "c.....c.", "c.....c.", ".c...c..", "<.ccc...", "........" },
+  quickdraw = { ".bbbbbb.", ".bddddb.", ".bdssdb.", ".bdssdb.", ".bddddb.", "..bddb..", "..bbbb..", "........" },
+  glassbarrel = { ".wwwwww.", "w.u..u.w", "wu.uu.uw", "wuuuuuuw", "wu.uu.uw", "w.u..u.w", ".wwwwww.", "........" },
+  scope = { ".SSSSSS.", "S..c...S", "S..c...S", "SccccccS", "S..c...S", "S..c...S", ".SSSSSS.", "........" },
+  stock = { "........", "bbbbbb..", "bddddbb.", "bddddddb", "bddddddb", "bbbbbbb.", "........", "........" },
+  penetrator = { ".s..s..s", ".s..s..s", "cccccccc", ".s..s..s", ".s..s..s", "........", "........", "........" },
+  stabilizer = { "...ss...", "...ss...", "..s..s..", "..s..s..", ".s....s.", ".s....s.", "ss....ss", "........" },
+  holsterloader = { ".bbbbbb.", ".bsssbb.", ".bs.sbb.", ".bsssbb.", ".bbbbbb.", "..c.c...", ".ccccc..", "..c.c..." },
+  deadmans = { "..cccc..", ".cddddc.", "cddwwddc", "cdddwddc", "cddwwddc", ".cddddc.", "..cddc..", "...cc..." },
+  reckless = { "...rr...", "...rr...", "...rr...", "...rr...", "...rr...", "........", "...rr...", "...rr..." },
+}
+
+local PERKS = {
+  thick_skin = { ".cccccc.", ".cllccc.", ".cllccd.", ".cccccd.", "..cccd..", "..cccd..", "...cd...", "........" },
+  iron_will = { "ssssssss", "sSSsSSss", "sSssssSs", "sSssssSs", ".sSssSs.", "..sSSs..", "...ss...", "........" },
+  second_wind = { ".cccc...", "c....c..", ".....c..", ".ccccc..", "c.......", "c....c..", ".cccc...", "........" },
+  scar_tissue = { "..wwww..", "..wrrw..", "wwwrrwww", "wrrrrrrw", "wrrrrrrw", "wwwrrwww", "..wrrw..", "..wwww.." },
+  last_stand = { ".rr..rr.", "rrrrrrrr", "rrrkrrrr", "rrrrkrrr", ".rrkrrr.", "..rrkr..", "...rr...", "........" },
+  regeneration = { ".nn..nn.", "nnnnnnnn", "nnnwwnnn", "nnnwwnnn", ".nnnnnn.", "..nnnn..", "...nn...", "........" },
+  bloodthirst = { "...r....", "..rrr...", ".rrrrr..", ".rrwrr..", ".rrrrr..", "..rrr...", "..w.w...", "........" },
+  adrenaline = { ".......s", "......s.", ".....wr.", "....wrr.", "...wrr..", "..sss...", ".s......", "s......." },
+  springheel = { "...c....", "..ccc...", ".c.c.c..", "...c....", "bbbb....", "bbbbb...", "bbbbbb..", "dddddd.." },
+  fleet_foot = { "w.......", "ww.bbb..", "www.bb..", "ww.bbbb.", "w..bbbb.", "...bbbbb", "...ddddd", "........" },
+  slick_soles = { ".bbb....", ".bbb....", ".bbb....", "bbbbbb..", "dddddd..", "ssssssss", ".s....s.", "........" },
+  double_jump = { "...uu...", "..uuuu..", ".uu..uu.", "........", "...uu...", "..uuuu..", ".uu..uu.", "........" },
+  prospector = { ".sssss..", "s...s...", "....b...", "....b...", "....b...", "....b...", "....b...", "........" },
+  haggler = { "..bb....", "...bb...", "..bbbb..", ".bbggbb.", ".bgyybb.", ".bbggbb.", ".bbbbbb.", "..bbbb.." },
+  lucky_find = { ".nn.nn..", "nnnnnnn.", "nnnnnnn.", ".nnnnn..", "nnnnnnn.", "nnnnnnn.", ".nn.nn..", "...b...." },
+  magnetic_pockets = { "r....w..", "r....w..", "rr..ww..", ".rrww...", ".....gg.", "....gyyg", "....gggg", "........" },
+  sharp_eyes = { "........", "..cccc..", ".cwwwwc.", "cwwkkwwc", "cwwkkwwc", ".cwwwwc.", "..cccc..", "........" },
+  heavy_hitter = { ".ssssss.", ".ssSSss.", ".ssssss.", "...bb...", "...bb...", "...bb...", "...bb...", "........" },
+  quick_hands = { "wwwwwwww", ".wyyyyw.", "..wyyw..", "...ww...", "...ww...", "..w..w..", ".wyyyyw.", "wwwwwwww" },
+  momentum = { "oo..oo..", ".oo..oo.", "..oo..oo", "...oo..o", "...oo..o", "..oo..oo", ".oo..oo.", "oo..oo.." },
+  pyromaniac = { "..o.o...", "..ooo.o.", ".ooyoo..", ".oyyyo..", "oyykkyo.", "oyyyyyo.", ".oyyyo..", "..ooo..." },
+  ricochet_master = { "c.....c.", "cc...cc.", ".cc.cc..", "..ccc...", "...c....", "..c.c...", ".c...c..", "c.....c." },
+  needle_sight = { "......ss", ".....ss.", "....ss..", "...ss...", "..ss....", ".ss.....", "sw......", "w......." },
+  death_burst = { "o.w..w.o", ".wwwwww.", "wwkwwkww", "wwwwwwww", ".wkwkw..", "o.wwww.o", "........", "........" },
+  juggler = { "..c.....", ".ccc..c.", "..c..ccc", ".....c..", ".c......", "ccc..c..", ".c..ccc.", ".....c.." },
+  kicker = { "...bb..o", "...bb.o.", "...bb...", "..bbbbb.", ".bbbbbbb", ".bbbbbbb", ".dddddd.", "........" },
+  glass_cannon = { "..uuuu..", ".uuwuuu.", "uuuwuuuu", "uuwuuwuu", "uuuuwuuu", ".uuuuuu.", "..uuuu..", "........" },
+  devils_bargain = { "r......r", "rr....rr", ".rrrrrr.", ".rkrrkr.", ".rrrrrr.", ".rrwwrr.", "..rrrr..", "........" },
+  greedy_hands = { "..gggg..", ".gyyyyg.", ".gyyyyg.", "..gggg..", "ww.ww.ww", "wwwwwwww", ".wwwwww.", "........" },
+  berserker = { "..sss...", ".ssSss..", ".ssSsb..", "..sbb...", "...b....", "...b....", "...b....", "........" },
+  pact_of_pain = { "wwwwww..", "wddddw..", "wdrrdw..", "wdrrdw..", "wddddw..", "wwwwww..", ".rrr....", "........" },
+}
+
+local cache = {}
+
+local function shade(c, k)
+  return { c[1] * k, c[2] * k, c[3] * k }
+end
+
+local function light(c)
+  return { c[1] + (1 - c[1]) * 0.55, c[2] + (1 - c[2]) * 0.55, c[3] + (1 - c[3]) * 0.55 }
+end
+
+-- The grid for a thing ({ id, isPerk? }), or nil if it has no icon yet
+function icons.rows(thing)
+  return (thing.isPerk and PERKS or ITEMS)[thing.id]
+end
+
+-- An 8x8 image for an ammo type, attachment or perk (nil if none)
+function icons.get(thing)
+  local key = (thing.isPerk and "p:" or "i:") .. tostring(thing.id)
+  if cache[key] == nil then
+    local rows = icons.rows(thing)
+    if not rows then
+      cache[key] = false
+    else
+      local base = thing.color or { 0.7, 0.7, 0.7 }
+      local palette = { c = base, d = shade(base, 0.55), l = light(base) }
+      local data = love.image.newImageData(8, 8)
+      for y, row in ipairs(rows) do
+        for x = 1, 8 do
+          local ch = row:sub(x, x)
+          local c = palette[ch] or FIXED[ch]
+          if c then
+            data:setPixel(x - 1, y - 1, c[1], c[2], c[3], 1)
+          end
+        end
+      end
+      local img = love.graphics.newImage(data)
+      img:setFilter("nearest", "nearest")
+      cache[key] = img
+    end
+  end
+  return cache[key] or nil
+end
+
+-- For tests: every id that has an icon grid
+function icons.ids()
+  return ITEMS, PERKS
+end
+
+return icons

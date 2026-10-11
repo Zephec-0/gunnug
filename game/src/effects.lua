@@ -6,12 +6,14 @@ local effects = {}
 local particles = {}
 local flashes = {}
 local popups = {}
+local rings = {} -- expanding (or collapsing) shock rings
+local chunks = {} -- larger bits: hats, drums, ash, wings
 local casings = {} -- spent shells lying about; each lasts 10 seconds
 local MAX_CASINGS = 250
 local CASING_LIFE = 10
 
 function effects.clear()
-  particles, flashes, popups, casings = {}, {}, {}, {}
+  particles, flashes, popups, casings, rings, chunks = {}, {}, {}, {}, {}, {}
 end
 
 -- emissive particles (sparks, flashes) glow: they are drawn after the lighting
@@ -30,9 +32,12 @@ function effects.particle(x, y, vx, vy, life, color, gravity, emissive)
 end
 
 -- size scales the flash, its sparks, smoke and light (1 = revolver)
-function effects.muzzleFlash(x, y, angle, size)
+-- style (the gun's model) shapes the flash: a round one with side sparks for
+-- the revolver, a small star for the pistol, a wide fan for the shotgun and
+-- a thin needle for the machine gun
+function effects.muzzleFlash(x, y, angle, size, style)
   size = size or 1
-  flashes[#flashes + 1] = { x = x, y = y, angle = angle, life = 0.05, size = size }
+  flashes[#flashes + 1] = { x = x, y = y, angle = angle, life = style == "automatic" and 0.035 or 0.05, size = size, style = style }
   local dx, dy = math.cos(angle), math.sin(angle)
   for _ = 1, math.floor(7 * size + 0.5) do
     local a = angle + (love.math.random() - 0.5) * 0.9
@@ -106,6 +111,19 @@ function effects.casing(x, y, vx, vy, size, color, hull)
   }
 end
 
+-- A shock ring that expands (or, with inward, collapses) from a point
+function effects.ring(x, y, radius, color, inward)
+  rings[#rings + 1] = { x = x, y = y, radius = radius, color = color, inward = inward, life = 0.25, maxLife = 0.25 }
+end
+
+-- A bigger bit (w x h pixels) that tumbles, bounces, lies there and fades
+function effects.chunk(x, y, vx, vy, w, h, color, life)
+  if #chunks >= 120 then
+    table.remove(chunks, 1)
+  end
+  chunks[#chunks + 1] = { x = x, y = y, vx = vx, vy = vy, w = w, h = h, color = color, life = life or 3, maxLife = life or 3, landed = false, bounces = 0 }
+end
+
 function effects.popup(x, y, text, color)
   popups[#popups + 1] = {
     x = x + (love.math.random() - 0.5) * 10,
@@ -163,6 +181,39 @@ function effects.update(dt, world)
       table.remove(casings, i)
     end
   end
+  for i = #rings, 1, -1 do
+    rings[i].life = rings[i].life - dt
+    if rings[i].life <= 0 then
+      table.remove(rings, i)
+    end
+  end
+  for i = #chunks, 1, -1 do
+    local c = chunks[i]
+    c.life = c.life - dt
+    if not c.landed then
+      c.vy = math.min(c.vy + 520 * dt, 400)
+      local nx, ny = c.x + c.vx * dt, c.y + c.vy * dt
+      if world:isSolid(math.floor(nx), math.floor(c.y)) then
+        c.vx = -c.vx * 0.4
+        nx = c.x
+      end
+      if world:isSolid(math.floor(nx), math.floor(ny)) then
+        if c.vy > 50 and c.bounces < 2 then
+          c.vy = -c.vy * 0.3
+          c.vx = c.vx * 0.5
+          c.bounces = c.bounces + 1
+        else
+          c.landed = true
+          c.vx, c.vy = 0, 0
+        end
+        ny = c.y
+      end
+      c.x, c.y = nx, ny
+    end
+    if c.life <= 0 then
+      table.remove(chunks, i)
+    end
+  end
   for i = #flashes, 1, -1 do
     flashes[i].life = flashes[i].life - dt
     if flashes[i].life <= 0 then
@@ -179,6 +230,14 @@ function effects.update(dt, world)
   end
 end
 
+local function drawChunks()
+  for _, c in ipairs(chunks) do
+    local alpha = math.min(1, c.life / math.min(0.6, c.maxLife))
+    love.graphics.setColor(c.color[1], c.color[2], c.color[3], alpha)
+    love.graphics.rectangle("fill", math.floor(c.x), math.floor(c.y) - c.h + 1, c.w, c.h)
+  end
+end
+
 local function drawParticles(emissive)
   for _, p in ipairs(particles) do
     if p.emissive == emissive then
@@ -192,6 +251,7 @@ end
 -- Lit normally (dust, debris, smoke). Low-res canvas, world space.
 function effects.drawWorld()
   drawParticles(false)
+  drawChunks()
   for _, c in ipairs(casings) do
     local long = c.size
     local thick = c.size >= 4 and 2 or 1
@@ -217,13 +277,50 @@ end
 function effects.drawEmissive()
   for _, f in ipairs(flashes) do
     local dx, dy = math.cos(f.angle), math.sin(f.angle)
+    local px, py = -dy, dx
     local s = f.size
-    love.graphics.setColor(1, 0.95, 0.6)
-    love.graphics.circle("fill", f.x + dx * 3 * s, f.y + dy * 3 * s, 4 * s)
-    love.graphics.setColor(1, 1, 0.85)
-    love.graphics.circle("fill", f.x + dx * 2 * s, f.y + dy * 2 * s, 2 * s)
+    local style = f.style
+    if style == "shotgun" then
+      -- A wide fan of fire with a hot core
+      love.graphics.setColor(1, 0.6, 0.2)
+      love.graphics.polygon("fill", f.x, f.y, f.x + dx * 15 + px * 8, f.y + dy * 15 + py * 8, f.x + dx * 18, f.y + dy * 18, f.x + dx * 15 - px * 8, f.y + dy * 15 - py * 8)
+      love.graphics.setColor(1, 0.95, 0.6)
+      love.graphics.polygon("fill", f.x, f.y, f.x + dx * 11 + px * 4, f.y + dy * 11 + py * 4, f.x + dx * 13, f.y + dy * 13, f.x + dx * 11 - px * 4, f.y + dy * 11 - py * 4)
+    elseif style == "automatic" then
+      -- A thin, fast needle of light
+      love.graphics.setColor(1, 0.85, 0.4)
+      love.graphics.setLineWidth(2)
+      love.graphics.line(f.x, f.y, f.x + dx * 11, f.y + dy * 11)
+      love.graphics.setColor(1, 1, 0.9)
+      love.graphics.setLineWidth(1)
+      love.graphics.line(f.x, f.y, f.x + dx * 8, f.y + dy * 8)
+    elseif style == "pistol" then
+      -- A small sharp star
+      love.graphics.setColor(1, 0.9, 0.5)
+      love.graphics.polygon("fill", f.x + dx * 8, f.y + dy * 8, f.x + px * 2, f.y + py * 2, f.x - dx, f.y - dy, f.x - px * 2, f.y - py * 2)
+      love.graphics.setColor(1, 1, 0.9)
+      love.graphics.circle("fill", f.x + dx * 2, f.y + dy * 2, 1.5)
+    else
+      -- Revolver: a round blast, with a flash of fire out of the cylinder gap
+      love.graphics.setColor(1, 0.95, 0.6)
+      love.graphics.circle("fill", f.x + dx * 3 * s, f.y + dy * 3 * s, 4 * s)
+      love.graphics.setColor(1, 1, 0.85)
+      love.graphics.circle("fill", f.x + dx * 2 * s, f.y + dy * 2 * s, 2 * s)
+      if style == "revolver" then
+        love.graphics.setColor(1, 0.7, 0.3)
+        love.graphics.line(f.x - dx * 4 + px * 1, f.y - dy * 4 + py * 1, f.x - dx * 4 + px * 5, f.y - dy * 4 + py * 5)
+        love.graphics.line(f.x - dx * 4 - px * 1, f.y - dy * 4 - py * 1, f.x - dx * 4 - px * 5, f.y - dy * 4 - py * 5)
+      end
+    end
     love.graphics.setColor(1, 1, 1)
     love.graphics.rectangle("fill", math.floor(f.x + dx), math.floor(f.y + dy), 1, 1)
+  end
+  for _, r in ipairs(rings) do
+    local t = 1 - r.life / r.maxLife
+    local radius = r.inward and r.radius * (1 - t) or r.radius * t
+    love.graphics.setLineWidth(1)
+    love.graphics.setColor(r.color[1], r.color[2], r.color[3], 0.8 * (1 - t))
+    love.graphics.circle("line", r.x, r.y, radius)
   end
   drawParticles(true)
 end

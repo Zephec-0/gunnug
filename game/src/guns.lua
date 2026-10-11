@@ -68,6 +68,37 @@ guns.defs = {
     },
   },
 
+  -- Broomhandle-style semi-automatic pistol: fast follow-ups, low recoil.
+  semiauto = {
+    name = "Broomhandle",
+    chambers = 10,
+    fireDelay = 0.15,
+    reloadTime = 1.6,
+    spread = 3,
+    damage = 7,
+    pellets = 1,
+    bulletSpeed = 1000,
+    recoil = 110,
+    impactForce = 160,
+    digRadius = 3,
+    digPower = 1,
+    slots = 4,
+    model = "pistol",
+    length = 10,
+    kick = 0.6,
+    flash = 0.9,
+    icon = {
+      "                ",
+      "   ############ ",
+      "  LLLLLLLLLLLLL#",
+      "  ####cc########",
+      "  ##   ##  #    ",
+      " www#  ##       ",
+      "wwww# ###       ",
+      "www   ##        ",
+    },
+  },
+
   -- Early drum-fed machine gun: a long hose of weak rounds and a long reload.
   -- Its recoil is light per shot but sustained, so firing down slowly lifts
   -- the hunter for as long as the drum lasts.
@@ -109,6 +140,8 @@ function guns.new(name)
   local def = assert(guns.defs[name], "unknown gun: " .. tostring(name))
   local self = setmetatable({
     def = def,
+    name = def.name, -- generated guns get a prefix (e.g. "Rapid Revolver")
+    rolls = nil, -- generated guns: stat multipliers rolled when they were made
     chambers = def.chambers,
     fireTimer = 0,
     reloadTimer = 0,
@@ -152,6 +185,11 @@ function Gun:stats()
     explosive = 0,
     incendiary = 0,
   }
+  if self.rolls then
+    for _, k in ipairs(MULTIPLIED) do
+      st[k] = st[k] * (self.rolls[k] or 1)
+    end
+  end
   for i = 1, def.slots do
     local item = self.slots[i]
     if item then
@@ -172,6 +210,85 @@ function Gun:stats()
   -- A smaller magazine can't hold more rounds than it has room for
   self.chambers = math.min(self.chambers, st.chambers)
   return st
+end
+
+-- Weapon generation (design doc §9a) ----------------------------------------
+-- A generated weapon is a base archetype plus stat variation: two stats rolled
+-- better (+8-18%), one rolled worse (-5-12%), the rest nudged a little (+-4%),
+-- named after its best roll, and each ammo/attachment slot has a chance of
+-- already holding something.
+local ROLL_STATS = {
+  -- stat, which way is better (+1 higher, -1 lower), name prefix when rolled better
+  { "damage", 1, "Heavy" },
+  { "fireDelay", -1, "Rapid" },
+  { "reloadTime", -1, "Swift" },
+  { "spread", -1, "Accurate" },
+  { "bulletSpeed", 1, "Longshot" },
+  { "impactForce", 1, "Punching" },
+  { "chambers", 1, "Capacious" },
+  { "recoil", 0, nil }, -- neither better nor worse; only nudged
+}
+local FIT_CHANCE = 0.22 -- chance each slot of a generated gun is already filled
+local ARCHETYPE_ORDER = { "revolver", "shotgun", "semiauto", "automatic" }
+
+-- rng: a love.math RandomGenerator (default: the global one)
+function guns.generate(archetype, rng)
+  local items = require("src.items")
+  local random = rng and function(...) return rng:random(...) end or love.math.random
+  archetype = archetype or ARCHETYPE_ORDER[random(1, #ARCHETYPE_ORDER)]
+  local gun = guns.new(archetype)
+
+  local order = {}
+  for i = 1, 7 do
+    order[i] = i
+  end
+  for i = #order, 2, -1 do
+    local j = random(1, i)
+    order[i], order[j] = order[j], order[i]
+  end
+  local rolls = {}
+  local best
+  local function apply(stat, dir, amount)
+    -- amount > 0 is better; "lower is better" stats shrink instead
+    rolls[stat] = dir >= 0 and (1 + amount) or (1 - amount * 0.8)
+  end
+  for rank, idx in ipairs(order) do
+    local stat, dir, prefix = ROLL_STATS[idx][1], ROLL_STATS[idx][2], ROLL_STATS[idx][3]
+    if dir ~= 0 and rank <= 2 then
+      apply(stat, dir, 0.08 + random() * 0.10)
+      if stat == "chambers" then
+        -- Whole chambers only: a "capacious" gun always holds at least one more
+        rolls.chambers = math.max(rolls.chambers, (gun.def.chambers + 1) / gun.def.chambers)
+      end
+      best = best or prefix
+    elseif dir ~= 0 and rank == 3 then
+      apply(stat, dir, -(0.05 + random() * 0.07))
+    else
+      apply(stat, dir == 0 and 1 or dir, (random() * 2 - 1) * 0.04)
+    end
+  end
+  gun.rolls = rolls
+  if best then
+    gun.name = best .. " " .. gun.def.name
+  end
+
+  -- Pre-fitted ammo and attachments, never the same one twice
+  local used = {}
+  for slot = 1, gun.def.slots do
+    if random() < FIT_CHANCE then
+      local item = items.new(items.order[random(1, #items.order)])
+      if not used[item.id] then
+        used[item.id] = true
+        gun.slots[slot] = item
+      end
+    end
+  end
+  gun.generated = true
+  return gun
+end
+
+function guns.archetypes()
+  return ARCHETYPE_ORDER
 end
 
 function Gun:maxChambers()

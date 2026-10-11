@@ -26,6 +26,7 @@ local TORSO = 6.4 -- hip to neck
 -- Long guns are shouldered (short reach) so the support hand reaches the fore-end.
 local HOLDS = {
   revolver = { reach = 5.8, pull = 2.6, tip = 0.45 },
+  pistol = { reach = 5.8, pull = 2.0, tip = 0.35 },
   shotgun = { reach = 3.4, support = 4.2, pull = 1.6, tip = 0.3 },
   automatic = { reach = 3.4, support = 4.0, pull = 1.4, tip = 0.22 },
 }
@@ -445,6 +446,17 @@ function GUN_DRAW.revolver(x, y, dx, dy, px, py, len)
   pixel(x + dx * 2 + px * 0.9, y + dy * 2 + py * 0.9, COLORS.gunMid)
   pixel(x + dx * 3 + px * 0.9, y + dy * 3 + py * 0.9, COLORS.gunMid)
   pixel(x + dx * 5, y + dy * 5, COLORS.silver)
+  pixel(x + dx * len, y + dy * len, COLORS.silver)
+end
+
+function GUN_DRAW.pistol(x, y, dx, dy, px, py, len)
+  -- Long slanted grip, a boxy slide on top and a magazine in front of the grip
+  segment(x, y, x + px * 3 - dx * 1.5, y + py * 3 - dy * 1.5, COLORS.grip)
+  segment(x, y, x + dx * len, y + dy * len, COLORS.gun)
+  segment(x - dx, y - dy - 0, x + dx * 6, y + dy * 6, COLORS.gunMid)
+  pixel(x + dx * 3 + px * 1.6, y + dy * 3 + py * 1.6, COLORS.gun)
+  pixel(x + dx * 4 + px * 1.6, y + dy * 4 + py * 1.6, COLORS.gun)
+  pixel(x + dx * 7.5, y + dy * 7.5, COLORS.silver)
   pixel(x + dx * len, y + dy * len, COLORS.silver)
 end
 

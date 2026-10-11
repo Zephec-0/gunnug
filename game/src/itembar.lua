@@ -64,7 +64,7 @@ local function isWeapon(thing)
 end
 
 local function nameOf(thing)
-  return isWeapon(thing) and thing.def.name or thing.name
+  return thing.name
 end
 
 -- Draws a weapon icon or item badge centred in a box
@@ -204,7 +204,7 @@ local function drawPanel(inv, u)
       local iconBox = 34 * u
       drawThing(gun, x + 4 * u, y + 4 * u, iconBox, u)
       local tx = x + iconBox + 10 * u
-      shadowPrint(gun.def.name .. "  [" .. i .. "]", tx, y + 3 * u, titleFont, { 1, 0.9, 0.6 })
+      shadowPrint(gun.name .. "  [" .. i .. "]", tx, y + 3 * u, titleFont, { 1, 0.9, 0.6 })
       shadowPrint(statLine(gun), tx, y + 10 * u, textFont, { 0.88, 0.86, 0.82 })
 
       -- The gun's own ammo/attachment slots
@@ -272,6 +272,10 @@ function itembar.mousepressed(inv, x, y, button)
   return true
 end
 
+-- Called with an item that was dragged out of its slot and released outside
+-- every slot (set by src.game: it drops the item on the ground)
+itembar.onDrop = nil
+
 function itembar.mousereleased(inv, x, y, button)
   if not drag or button ~= 1 then
     return
@@ -279,6 +283,13 @@ function itembar.mousereleased(inv, x, y, button)
   local h = hitTest(x, y)
   if h then
     inv:move(drag.ref, h.ref)
+  elseif drag.ref.kind ~= "weapon" and itembar.onDrop then
+    -- Released away from any slot: ammo and attachments are dropped
+    local item = inv:get(drag.ref)
+    if item then
+      inv:set(drag.ref, nil)
+      itembar.onDrop(item)
+    end
   end
   drag = nil
 end

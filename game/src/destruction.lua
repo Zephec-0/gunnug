@@ -13,9 +13,11 @@ local defs = materials.defs
 local solid = materials.solid
 local anchored = materials.anchored
 
--- Loose pieces bigger than this stay put. Keeps the connectivity search cheap
--- and stops large floating landmasses from dropping out of the level.
-local MAX_FALLING_PIXELS = 1024
+-- A floating mass of terrain bigger than this stays where it is: still solid
+-- terrain that can be dug at. Once digging shrinks it to this many pixels or
+-- fewer it becomes physics debris and falls. (This also keeps the
+-- connectivity search cheap.)
+local MAX_FALLING_PIXELS = 100
 -- Loose pieces smaller than this just crumble into particles
 local MIN_DEBRIS_PIXELS = 15
 
@@ -99,6 +101,7 @@ local function makeDebris(world, pixels)
   local imageData = love.image.newImageData(w, h)
   local mask = {}
   local totalDensity = 0
+  local color = { world:pixelColor(pixels[1][1], pixels[1][2]) }
   for _, p in ipairs(pixels) do
     local lx, ly = p[1] - x0, p[2] - y0
     imageData:setPixel(lx, ly, world:pixelColor(p[1], p[2]))
@@ -108,7 +111,7 @@ local function makeDebris(world, pixels)
   local image = love.graphics.newImage(imageData)
 
   clearPixels(world, pixels)
-  props.spawnDebris(image, x0 + w / 2, y0 + h / 2, rectangles(mask, w, h), totalDensity / #pixels)
+  props.spawnDebris(image, x0 + w / 2, y0 + h / 2, rectangles(mask, w, h), totalDensity / #pixels, #pixels, color)
 end
 
 -- Flood-fills solid terrain from (sx, sy). Returns the island's pixels and

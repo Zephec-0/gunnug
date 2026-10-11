@@ -18,6 +18,7 @@ local camera = require("src.camera")
 local config = require("src.config")
 local effects = require("src.effects")
 local enemies = require("src.enemies")
+local guns = require("src.guns")
 local hud = require("src.hud")
 local inventory = require("src.inventory")
 local itembar = require("src.itembar")
@@ -82,6 +83,11 @@ function game.load()
   lighting.load()
   love.mouse.setVisible(false)
   inv = inventory.new()
+  -- Items dragged out of the inventory land on the ground by the hunter's feet
+  itembar.onDrop = function(item)
+    local px, py = player:center()
+    pickups.dropItem(px + player.facing * 6, py, item, player.facing * 70, -50)
+  end
   load("overworld")
   menu.open("title") -- the world waits, dimmed, behind the title screen
 end
@@ -241,6 +247,7 @@ function game.draw()
     scene.drawScreen(toScreen, font)
   end
   effects.drawScreen(toScreen, font)
+  pickups.drawScreen(toScreen, font, player)
   -- The title screen stands alone; a pause menu keeps the HUD but hides the
   -- area banner, which would show through it
   if menu.state() ~= "title" then
@@ -282,6 +289,14 @@ function game.keypressed(key)
     player:pressJump()
   elseif key == "f" and not player.dead then
     player:kick()
+  elseif key == "e" and not player.dead then
+    pickups.interact(player)
+  elseif key == "f6" and not player.dead then
+    -- Debug: swaps the held weapon for a randomly generated one
+    local gun = guns.generate()
+    inv.weapons[inv.selected] = gun
+    local px, py = player:center()
+    effects.popup(px, py - 14, gun.name, { 1, 0.9, 0.6 })
   elseif key == "r" then
     newRun()
   elseif key == "f9" then

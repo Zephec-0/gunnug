@@ -35,17 +35,19 @@ function pickups.count()
   return #list
 end
 
--- Drops an ammo type or attachment (an item from src.items) at (x, y). It
--- never despawns; the hunter picks it up when he has a free item slot.
-function pickups.dropItem(x, y, item)
+-- Drops an ammo type or attachment (an item from src.items) at (x, y),
+-- optionally thrown with a velocity. It never despawns, and is only picked
+-- up when the hunter presses E next to it (pickups.interact) and has a free
+-- item slot.
+function pickups.dropItem(x, y, item, vx, vy)
   list[#list + 1] = {
     kind = "item",
     item = item,
     value = 0,
     x = x,
     y = y,
-    vx = (love.math.random() - 0.5) * 60,
-    vy = -80 - love.math.random() * 40,
+    vx = vx or (love.math.random() - 0.5) * 60,
+    vy = vy or (-80 - love.math.random() * 40),
     age = 0,
     sparkle = love.math.random() * 6,
   }
@@ -115,11 +117,11 @@ function pickups.update(dt, world, player)
     local dx, dy = px - p.x, py - p.y
     local dist = math.sqrt(dx * dx + dy * dy)
     local taken = false
-    if canCollect and p.age > MAGNET_DELAY then
-      local room = p.kind ~= "item" or player.inventory:hasRoom()
-      if dist < PICKUP_RADIUS and room then
+    -- Only gold is collected by walking near; items need E
+    if canCollect and p.age > MAGNET_DELAY and p.kind == "gold" then
+      if dist < PICKUP_RADIUS then
         taken = collect(p, player)
-      elseif dist < MAGNET_RANGE and room then
+      elseif dist < MAGNET_RANGE then
         -- Pulled in, faster the closer it is
         local pull = 900 * (1 - dist / MAGNET_RANGE) + 120
         p.vx = p.vx + dx / dist * pull * dt
@@ -160,6 +162,62 @@ function pickups.update(dt, world, player)
       p.x, p.y = p.x + p.vx * dt, p.y + p.vy * dt
     end
   end
+end
+
+local ITEM_REACH = 18 -- how close the hunter must be to an item to pick it up with E
+
+-- The nearest item within reach of the hunter, if any
+function pickups.nearestItem(player)
+  local px, py = player:center()
+  local best, bestDist = nil, ITEM_REACH
+  for _, p in ipairs(list) do
+    if p.kind == "item" then
+      local d = math.sqrt((p.x - px) ^ 2 + (p.y - py) ^ 2)
+      if d < bestDist then
+        best, bestDist = p, d
+      end
+    end
+  end
+  return best
+end
+
+-- E: picks up the nearest item (if there's room for it). Returns true if one was.
+function pickups.interact(player)
+  local p = pickups.nearestItem(player)
+  if not p then
+    return false
+  end
+  if collect(p, player) then
+    for i, q in ipairs(list) do
+      if q == p then
+        table.remove(list, i)
+        break
+      end
+    end
+    return true
+  end
+  effects.popup(p.x, p.y - 8, "No room", { 1, 0.5, 0.4 })
+  return false
+end
+
+-- The "[E] Name" prompt over the nearest item (full resolution)
+function pickups.drawScreen(toScreen, font, player)
+  if player.dead then
+    return
+  end
+  local p = pickups.nearestItem(player)
+  if not p then
+    return
+  end
+  local sx, sy = toScreen(p.x, p.y - 12)
+  local text = "[E] " .. p.item.name
+  love.graphics.setFont(font)
+  local x, y = math.floor(sx - font:getWidth(text) / 2), math.floor(sy - font:getHeight())
+  love.graphics.setColor(0, 0, 0, 0.85)
+  love.graphics.print(text, x + 2, y + 2)
+  local c = p.item.color
+  love.graphics.setColor(math.min(1, c[1] + 0.3), math.min(1, c[2] + 0.3), math.min(1, c[3] + 0.3))
+  love.graphics.print(text, x, y)
 end
 
 local function onScreen(p, view)

@@ -151,7 +151,7 @@ A moving physics object hurts what it hits, judged by its **momentum** (mass × 
 
 ### 6b. Destruction rules
 - A bullet digs a small crater (revolver: radius 4 px, power 1). Each pixel in range is removed with probability *power / hardness*: dirt and sand (1) break readily, sandstone and wood (2) take a couple of hits, rock (3) chips slowly. Bedrock and brick never break.
-- Terrain that gets cut loose (no longer connected to bedrock/brick) **falls as physics debris**: it becomes a rigid body carrying its own pixels, with mass from its materials. Tiny pieces (< 15 px) crumble to particles; loose pieces larger than 1024 px stay put (keeps large floating landmasses stable and the check cheap). Up to 60 debris bodies exist at once.
+- Terrain that gets cut loose (no longer connected to bedrock/brick) **falls as physics debris**: it becomes a rigid body carrying its own pixels, with mass from its materials. Tiny pieces (< 15 px) crumble to particles; A **floating mass larger than 100 px stays where it is - still solid terrain that can be dug at like any other**; only once digging shrinks it to 100 px or fewer does it turn into physics debris and fall (the 100-px threshold is `MAX_FALLING_PIXELS` in destruction.lua, which also keeps the connectivity search cheap). Fallen debris is **breakable**: it crumbles to particles once damaged for about 40% of its pixel count (at least 6), so bullets, kicks, explosions and thrown objects can finish it off. Up to 60 debris bodies exist at once.
 
 ## 7. Procedural Generation
 - Each area is generated at the start of the run/area: caves and tunnels carved through terrain, a guaranteed traversable path from the entrance to the **shop room** at the end.
@@ -185,9 +185,10 @@ The generated area (above) under the dark-fantasy palette: the light blends from
 - **Shop:** stocks a few generated weapons plus ammo and attachments, priced from their stats and slots, restocked per area; buying is a walk-up-and-confirm interaction showing stats and price.
 
 ## 9a. Items, finding & generating weapons **[Roadmap steps 1, 4, 5, 6]**
-- **Pickups:** items exist in the world as physics objects (kickable, shootable), picked up by walking over them (gold, small items) or with an interact key (weapons).
+- **Pickups:** gold is collected by walking near it. **Ammo types, attachments and (later) weapons are picked up with E** while standing next to them (within ~18 px; a "[E] Name" prompt shows over the nearest one, and "No room" appears if the loose item slots are full).
+- **Dropping:** dragging an ammo type or attachment out of its slot and releasing it away from every slot drops it on the ground by the hunter's feet (thrown a little in the direction he faces); it can be picked up again with E.
 - **Finding weapons:** weapon chests in caverns and guarded spots, the occasional drop from tough enemies, and altars at the end of side routes — all while traversing the dungeon.
-- **Weapon generation:** a weapon is a base archetype (revolver, shotgun, machine gun, later semi-auto, rifle, crossbow) plus **rolled stat variance** (about ±10–20%) plus a chance of already-fitted ammo and attachments. The generator is seed-driven so chests, drops and the shop can all use it; adding a new archetype only means adding a definition.
+- **Weapon generation** (implemented, roadmap step 4; `guns.generate`): a weapon is a base archetype (revolver, double-barrel, **Broomhandle semi-auto pistol** — 10 chambers, 0.15 s, 1.6 s reload, 3° spread, 7 damage, low recoil — and machine gun; later rifle, crossbow) plus **rolled stat variance**: two stats rolled better (+8–18%), one worse (−5–12%), the rest nudged ±4% (a "capacious" roll always adds at least one whole chamber), named after its best roll ("Rapid Revolver", "Heavy Double-Barrel", "Longshot Machine Gun", "Accurate", "Swift", "Punching", "Capacious"). Each ammo/attachment slot has a 22% chance of already holding a random item (never the same one twice). It takes an optional random generator so chests, drops and the shop can all use it with seeds; adding a new archetype only means adding a definition. **F6** (debug) swaps the held weapon for a generated one, until chests and the shop exist.
 - **Fourth gun:** with all three weapon slots full, picking up another gun opens a **compare/choose prompt** side by side with the carried guns' stats; you pick which to replace (or cancel), and the replaced gun is dropped.
 
 ## 9b. Menu & audio **[Roadmap steps 2 and 7]**
@@ -215,7 +216,7 @@ Order of work, by what unlocks what (items/pickups → loot → shop; ammo/attac
 1. **Pickup system + gold** — *done:* coins from enemies, breakable crates and gold ore, collected by walking near, gold counter on the HUD. (Weapon/item pickups arrive with steps 4–5.)
 2. **Menu** — *done:* title screen and Esc pause menu.
 3. **Ammo types & attachments** — *done:* 6 ammo types and 7 attachments as data, effective gun stats, drops from crates and monsters.
-4. **Weapon generation** — archetype + rolled variance + chance of fitted ammo/attachments; add the semi-auto archetype.
+4. **Weapon generation** — *done:* archetype + rolled variance + chance of fitted ammo/attachments; semi-auto added; F6 debug key.
 5. **Finding weapons** — chests and drops in the dungeon, with the 4th-gun compare/choose prompt.
 6. **Shop** — generated stock, prices, buying.
 7. **Audio** — generated placeholder sounds.

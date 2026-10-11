@@ -159,7 +159,9 @@ end
 --   image: the chunk's pixels; x, y: centre of its bounding box
 --   rects: { {x, y, w, h}, ... } in image coordinates, covering the solid pixels
 --   density: Box2D density (per square metre)
-function props.spawnDebris(image, x, y, rects, density)
+--   pixels, color: how many pixels it holds and a sample colour; it breaks
+--   (crumbles) once damaged for about 40% of its pixel count, at least 6
+function props.spawnDebris(image, x, y, rects, density, pixels, color)
   local def = props.defs.debris
   local w, h = image:getDimensions()
   local body = newBody(def, x, y, 0)
@@ -168,7 +170,16 @@ function props.spawnDebris(image, x, y, rects, density)
     local shape = love.physics.newRectangleShape(r[1] + r[3] / 2 - w / 2, r[2] + r[4] / 2 - h / 2, r[3], r[4])
     fixtures[#fixtures + 1] = addFixture(def, body, shape, density)
   end
-  local prop = register({ def = def, body = body, fixtures = fixtures, width = w, height = h, image = image })
+  local prop = register({
+    def = def,
+    body = body,
+    fixtures = fixtures,
+    width = w,
+    height = h,
+    image = image,
+    hp = math.max(6, math.floor((pixels or 20) * 0.4)),
+    color = color,
+  })
 
   local debrisCount = 0
   for _, q in ipairs(list) do
@@ -205,7 +216,7 @@ end
 local function breakProp(p)
   p.broken = true
   local x, y = p.body:getPosition()
-  local c = p.def == props.defs.ironCrate and { 0.34, 0.35, 0.40 } or { 0.5, 0.36, 0.23 }
+  local c = p.color or (p.def == props.defs.ironCrate and { 0.34, 0.35, 0.40 } or { 0.5, 0.36, 0.23 })
   for _ = 1, 12 do
     local a = love.math.random() * math.pi * 2
     local s = 30 + love.math.random() * 100
@@ -223,7 +234,8 @@ end
 function props.damage(p, amount)
   p.flash = 0.08
   p.total = p.total + amount
-  if p.def.hp and p.total >= p.def.hp and not p.broken then
+  local hp = p.hp or p.def.hp
+  if hp and p.total >= hp and not p.broken then
     breakProp(p)
   end
   if p.def.showDamage then

@@ -62,7 +62,7 @@ function hud.draw(player, scale)
   love.graphics.setColor(1, 1, 1, 0.6)
   local small = font(math.max(10, math.floor(scale * 3)))
   shadowText(
-    "A/D move   W/Space jump   Ctrl crouch/slide   LMB shoot (aim down mid-air to recoil jump)   RMB reload   F kick   Tab weapons   1-3 switch   Esc menu   "
+    "A/D move   W/Space jump   Ctrl crouch/slide   LMB shoot (aim down mid-air to recoil jump)   RMB reload   F kick   E pick up   F6 new gun   Tab weapons   1-3 switch   Esc menu   "
       .. "R restart   F9 test room   F10 new cave   F2 physics   F3 stats",
     margin,
     love.graphics.getHeight() - margin - small:getHeight(),
@@ -109,7 +109,7 @@ function hud.drawGunStatus(gun, ww, margin, top, u, f)
     end
   end
   love.graphics.setColor(1, 1, 1)
-  shadowText(gun.def.name, ww - margin - rowW - f:getWidth(gun.def.name) - 4 * u, cy - f:getHeight() / 2, f)
+  shadowText(gun.name, ww - margin - rowW - f:getWidth(gun.name) - 4 * u, cy - f:getHeight() / 2, f)
 
   -- Reload bar
   if gun:isReloading() then

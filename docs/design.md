@@ -97,12 +97,29 @@ Until weapon pickups exist, every run starts with one of each implemented gun in
 ### 5.4 Era scope
 Old designs up to roughly **WW2-era** firearms (e.g. crossbows, blunderbusses, flintlocks, revolvers, lever-action rifles, double-barrel shotguns, Gatling and Maxim guns, bolt-action rifles, early submachine guns), styled to fit the dark-fantasy world. No modern tactical firearms. Specific weapon roster **[Later]**.
 
-### 5.5 Ammo types & attachments **[Roadmap step 3]**
-Each gun has its own number of slots for them (revolver 4, shotgun 3, machine gun 5), separate from its chamber count. **Decided: simple per-slot modifiers.** Every filled slot independently adds its modifier to the gun's stats or shots; order doesn't matter (no Noita-style ordered stacking, to keep it readable and easy to balance).
-- **Ammo** changes what a shot does (e.g. slug, explosive, incendiary, ricochet). **Decided: ammo types stack** — every ammo type in a slot applies to every shot, so a gun loaded with several gets all their effects at once (stat changes add up; behaviours like explosive and incendiary combine). Because order still doesn't matter, stacking is just "apply each fitted modifier". The ammo list will need combinations that stay sensible (e.g. two incompatible behaviours resolve by a simple rule such as the higher value winning), to be settled when designing the list.
-- **Attachments** change the gun's stats or behaviour (barrel length, extended magazine, recoil compensator, …).
-- Both are **data, not code**: a table of named modifiers over the existing stat block (damage, spread, recoil, impact force, chambers, fire delay, reload time, pellets, dig power).
-- No colour-coded rarity for now (a later pass can add it).
+### 5.5 Ammo types & attachments (implemented, roadmap step 3)
+Each gun has its own number of slots for them (revolver 4, shotgun 3, machine gun 5), separate from its chamber count. **Simple per-slot modifiers:** every filled slot applies on its own and order doesn't matter (no Noita-style ordered stacking). **Ammo types stack** — every ammo type in a slot applies to every shot, so a gun loaded with several gets all their effects at once. Items are **pure data** (src/items.lua) over the gun's stat block; a gun's *effective stats* (`Gun:stats()`, cached until the slots change) are its definition with every fitted item applied, and the weapon panel, HUD, recoil and firing all use them. Stat multipliers multiply, additions add, and effect counts add up (two explosive rounds make a bigger blast). Dragging items in the weapon panel fits them (that UI already existed); hovering an item shows what it does. No colour-coded rarity for now.
+
+| Ammo | Effect |
+|---|---|
+| Heavy Slug | +50% damage, ×2 impact, ×1.3 recoil, tighter (×0.7 spread), 15% slower fire |
+| Piercing Rounds | passes through 1 enemy, +1 dig power, −10% damage |
+| Ricochet Rounds | bounces off rock up to 2 times |
+| Explosive Rounds | bursts on impact: crater plus area damage and shove to enemies and loose objects (radius 14, damage 10; each extra explosive ammo +5 radius, +4 damage); −20% damage, 20% slower fire. Multi-pellet shots scale the blast down so a shotgun isn't seven explosions. No self-damage yet. |
+| Incendiary Rounds | sets enemies alight: 3 damage/s for 3 s (stronger and longer when stacked), refreshed by hits |
+| Scatter Shot | +2 pellets, −40% damage per pellet, ×1.6 spread |
+
+| Attachment | Effect |
+|---|---|
+| Long Barrel | +25% bullet speed, ×0.7 spread, +10% damage |
+| Extended Magazine | +50% chambers, 15% slower reload |
+| Recoil Compensator | −40% recoil |
+| Speed Loader | −40% reload time |
+| Hair Trigger | −25% time between shots, +30% spread |
+| Choke | halves the spread |
+| Powder Charge | +50% recoil (bigger recoil jumps), +15% damage, +30% impact |
+
+**Getting them (for now):** dropped by broken crates (wooden 12%, iron 40%) and dying monsters (10%) as little glowing crates in the item's colour; they never despawn, are picked up by walking over them when there's a free loose item slot, and are then fitted in the weapon panel. Finding and buying them properly arrives with the chests and shop (steps 5–6).
 
 ### 5.6 Item bar & weapon panel
 Noita-style, along the top-left of the screen:
@@ -163,8 +180,8 @@ The generated area (above) under the dark-fantasy palette: the light blends from
 - **[Later]** more types (e.g. a heavy brute), loot drops, respawning.
 
 ## 9. Economy & Shop **[Roadmap steps 1 and 6]**
-- **Gold** is an item: it fountains out as small physics bits that the hunter scoops up by walking over them. **It resets every run** (no meta-progression for now).
-- **Sources:** enemy drops (small amounts, scaling with toughness), crates (often a little gold, so smashing them pays), and the dungeon itself (deposits buried in the rock that you dig out, plus rare hidden chests in caverns).
+- **Gold** (implemented, step 1) spills out as small coins that bounce on the terrain, glint (they're drawn emissive so they can be spotted in the dark) and are pulled toward the hunter within ~36 px, then collected on touch (a short delay after spilling). **A coin that has landed and isn't picked up vanishes 7 seconds later** (blinking for the last 1.5 s); its gold is lost, and being pulled toward the hunter restarts the timer. Coins are pixel-simulated like particles rather than Box2D bodies, so hundreds can lie around (cap 400; the oldest give way and their value carries on to the next coin). The run's total shows next to a coin icon under the gun status. **It resets every run** (no meta-progression for now).
+- **Sources:** enemy drops (ghoul 3–6, bat 1–3, spitter 4–8, × the monster's toughness), **crates, which now break** from damage (wooden: 25 total, 0–4 gold; iron: 90, 5–12 gold) and splinter, and the dungeon itself: **gold ore** (rock veined with gold flecks, scattered through the cave walls — 150 veins per area) spills a speck or two from a tenth of the pixels you dig out. Rare hidden chests in caverns come with the weapon chests (step 5).
 - **Shop:** stocks a few generated weapons plus ammo and attachments, priced from their stats and slots, restocked per area; buying is a walk-up-and-confirm interaction showing stats and price.
 
 ## 9a. Items, finding & generating weapons **[Roadmap steps 1, 4, 5, 6]**
@@ -174,7 +191,7 @@ The generated area (above) under the dark-fantasy palette: the light blends from
 - **Fourth gun:** with all three weapon slots full, picking up another gun opens a **compare/choose prompt** side by side with the carried guns' stats; you pick which to replace (or cancel), and the replaced gun is dropped.
 
 ## 9b. Menu & audio **[Roadmap steps 2 and 7]**
-- **Menu:** a title screen and a pause menu (Esc: resume, restart, quit; settings later). Esc stops quitting the game instantly.
+- **Menu** (implemented, step 2): the game opens on a **title screen** (Play, Quit) over the dimmed, paused world, and **Esc** during play opens a **pause menu** (Resume, Restart run, Title screen, Quit) — Esc no longer quits instantly (Esc still closes the weapon panel first). Navigate with W/S or the arrows and Enter/Space, or the mouse (hovering selects; a button fires on release, so the click never also fires a shot). Menus pause the game and swallow all other keys. R still restarts directly; settings (volume, keys) come later.
 - **Audio:** no sound yet. Placeholder sounds are generated in code (shots per gun, hits, footsteps, pickups, ambient cave tone) so they can be swapped for real assets later.
 
 ---
@@ -195,9 +212,9 @@ After Milestone 1, add the shotgun, semi-auto, and automatic archetypes, then st
 ## 11. Roadmap
 Order of work, by what unlocks what (items/pickups → loot → shop; ammo/attachments → weapon generation → shop; menu is independent):
 
-1. **Pickup system + gold** — items as physics objects, scooping up gold; gold from enemies, crates and buried deposits; gold counter on the HUD.
-2. **Menu** — title screen and Esc pause menu.
-3. **Ammo types & attachments** — simple per-slot modifiers as data, fitted by dragging in the weapon panel (that UI already exists).
+1. **Pickup system + gold** — *done:* coins from enemies, breakable crates and gold ore, collected by walking near, gold counter on the HUD. (Weapon/item pickups arrive with steps 4–5.)
+2. **Menu** — *done:* title screen and Esc pause menu.
+3. **Ammo types & attachments** — *done:* 6 ammo types and 7 attachments as data, effective gun stats, drops from crates and monsters.
 4. **Weapon generation** — archetype + rolled variance + chance of fitted ammo/attachments; add the semi-auto archetype.
 5. **Finding weapons** — chests and drops in the dungeon, with the 4th-gun compare/choose prompt.
 6. **Shop** — generated stock, prices, buying.

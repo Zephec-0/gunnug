@@ -45,11 +45,24 @@ function hud.draw(player, scale)
     hud.drawGunStatus(player.gun, ww, margin, y + barH, u, f)
   end
 
+  -- Gold: a coin and the run's total, under the gun status
+  local goldText = tostring(player.inventory.gold)
+  local gy = y + barH + 24 * u
+  local gx = ww - margin - f:getWidth(goldText)
+  love.graphics.setColor(1, 0.86, 0.45)
+  shadowText(goldText, gx, gy, f)
+  local coinR = 2.2 * u
+  love.graphics.setColor(0.95, 0.74, 0.22)
+  love.graphics.circle("fill", gx - 4 * u - coinR, gy + f:getHeight() / 2, coinR)
+  love.graphics.setColor(1, 0.92, 0.55)
+  love.graphics.circle("fill", gx - 4 * u - coinR - 0.5 * u, gy + f:getHeight() / 2 - 0.5 * u, coinR * 0.45)
+  love.graphics.setColor(1, 1, 1)
+
   -- Controls hint
   love.graphics.setColor(1, 1, 1, 0.6)
   local small = font(math.max(10, math.floor(scale * 3)))
   shadowText(
-    "A/D move   W/Space jump   Ctrl crouch/slide   LMB shoot (aim down mid-air to recoil jump)   RMB reload   F kick   Tab weapons   1-3 switch   "
+    "A/D move   W/Space jump   Ctrl crouch/slide   LMB shoot (aim down mid-air to recoil jump)   RMB reload   F kick   Tab weapons   1-3 switch   Esc menu   "
       .. "R restart   F9 test room   F10 new cave   F2 physics   F3 stats",
     margin,
     love.graphics.getHeight() - margin - small:getHeight(),
@@ -64,7 +77,7 @@ end
 function hud.drawGunStatus(gun, ww, margin, top, u, f)
   local r = 2 * u
   local gap = 2 * u
-  local count = gun.def.chambers
+  local count = gun:maxChambers()
   local cy = top + 8 * u
   local rowW
   if count <= 12 then
@@ -121,7 +134,7 @@ function hud.update(dt)
 end
 
 function hud.drawBanner(scale)
-  if banner.time <= 0 then
+  if banner.time <= 0 or hud.hideBanner then
     return
   end
   local elapsed = BANNER_TIME - banner.time

@@ -10,7 +10,7 @@ local config = require("src.config")
 local materials = require("src.materials")
 
 local AIR, DIRT, ROCK, BEDROCK = materials.AIR, materials.DIRT, materials.ROCK, materials.BEDROCK
-local WOOD, BRICK = materials.WOOD, materials.BRICK
+local WOOD, BRICK, GOLDORE = materials.WOOD, materials.BRICK, materials.GOLDORE
 local solid = materials.solid
 
 local cavegen = {}
@@ -418,8 +418,29 @@ function cavegen.generate(world, area, seed, tick)
     return spots
   end
 
+  -- Veins of gold ore: wandering blobs in solid rock and dirt, some right
+  -- at a cave wall (glinting where they can be seen) and some buried deep
+  local function placeOre()
+    for _ = 1, 150 do
+      tick()
+      local x = X0 + BORDER + 20 + rng:random() * (W - 2 * BORDER - 40)
+      local y = Y0 + 140 + rng:random() * (H - 300)
+      local r = 4 + rng:random() * 5
+      for oy = -r, r do
+        for ox = -r, r do
+          local px, py = math.floor(x + ox), math.floor(y + oy)
+          local id = world:get(px, py)
+          if ox * ox + oy * oy <= r * r and (id == ROCK or id == DIRT) then
+            world:setRaw(px, py, GOLDORE)
+          end
+        end
+      end
+    end
+  end
+
   fillBase()
   carveCaves()
+  placeOre()
   carveCaverns()
 
   local entranceX, entranceY = area.entranceX, area.entranceY

@@ -15,7 +15,7 @@ local Inventory = {}
 Inventory.__index = Inventory
 
 function inventory.new()
-  local self = setmetatable({ weapons = {}, items = {}, selected = 1 }, Inventory)
+  local self = setmetatable({ weapons = {}, items = {}, selected = 1, gold = 0 }, Inventory)
   -- No weapon pickups yet, so a run starts with one of each archetype
   self.weapons[1] = guns.new("revolver")
   self.weapons[2] = guns.new("shotgun")
@@ -107,6 +107,15 @@ function Inventory:move(from, to)
     self:cycle(1)
   end
   return true
+end
+
+function Inventory:hasRoom()
+  for i = 1, inventory.ITEM_SLOTS do
+    if not self.items[i] then
+      return true
+    end
+  end
+  return false
 end
 
 -- Puts an item in the first free loose slot. Returns false if full.

@@ -3,6 +3,8 @@
 -- recoil to clear, and a high ledge only reachable by recoil jumping.
 local config = require("src.config")
 local enemies = require("src.enemies")
+local items = require("src.items")
+local pickups = require("src.pickups")
 local materials = require("src.materials")
 local props = require("src.props")
 local targets = require("src.targets")
@@ -103,6 +105,13 @@ function testroom.populate(world)
   -- Heavy iron crates: one on the plateau, one on the ledge
   onGround("ironCrate", 456)
   onGround("ironCrate", 864)
+
+  -- Every ammo type and attachment, lined up on the floor near the start
+  -- (only 7 fit in the loose slots at a time: fit some, then grab the rest)
+  for i, id in ipairs(items.order) do
+    local x = 40 + (i - 1) * 8
+    pickups.dropItem(x, world:findGround(x, BORDER + 160) - 6, items.new(id))
+  end
 
   -- One of each monster to practise on: a ghoul on the floor past the
   -- pillar, and a bat and a spitter hanging under the high ledge

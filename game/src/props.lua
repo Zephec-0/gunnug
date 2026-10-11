@@ -4,6 +4,7 @@
 local config = require("src.config")
 local effects = require("src.effects")
 local physics = require("src.physics")
+local pickups = require("src.pickups")
 
 local props = {}
 
@@ -68,6 +69,9 @@ props.defs = {
     width = 13,
     height = 13,
     mass = 1,
+    hp = 25, -- breaks when its damage total reaches this
+    gold = { 0, 4 }, -- gold spilled when it breaks (min, max)
+    itemChance = 0.12, -- chance it holds an ammo type or attachment
     gravityScale = 0.4,
     friction = 0.4,
     restitution = 0.25,
@@ -80,6 +84,9 @@ props.defs = {
     width = 16,
     height = 16,
     mass = 4,
+    hp = 90,
+    gold = { 5, 12 },
+    itemChance = 0.4,
     gravityScale = 0.6,
     friction = 0.7,
     restitution = 0.1,
@@ -192,9 +199,33 @@ function props.hitTest(x, y)
   return nil
 end
 
+-- Breaks a crate: wood splinters and any gold inside spills out. The prop
+-- itself is removed on the next props.update, so callers that are looping
+-- over the list aren't disturbed.
+local function breakProp(p)
+  p.broken = true
+  local x, y = p.body:getPosition()
+  local c = p.def == props.defs.ironCrate and { 0.34, 0.35, 0.40 } or { 0.5, 0.36, 0.23 }
+  for _ = 1, 12 do
+    local a = love.math.random() * math.pi * 2
+    local s = 30 + love.math.random() * 100
+    effects.particle(x, y, math.cos(a) * s, math.sin(a) * s - 40, 0.6, c, 520)
+  end
+  local gold = p.def.gold
+  if gold then
+    pickups.dropGold(x, y, love.math.random(gold[1], gold[2]))
+  end
+  if p.def.itemChance then
+    pickups.maybeDropItem(x, y, p.def.itemChance)
+  end
+end
+
 function props.damage(p, amount)
   p.flash = 0.08
   p.total = p.total + amount
+  if p.def.hp and p.total >= p.def.hp and not p.broken then
+    breakProp(p)
+  end
   if p.def.showDamage then
     effects.popup(p.body:getX(), p.body:getY() - p.height / 2 - 2, tostring(amount), { 1, 0.9, 0.3 })
   end
@@ -327,8 +358,12 @@ function props.impactDamage(p, vx, vy)
 end
 
 function props.update(dt)
-  for _, p in ipairs(list) do
+  for i = #list, 1, -1 do
+    local p = list[i]
     p.flash = math.max(0, p.flash - dt)
+    if p.broken then
+      remove(p)
+    end
   end
 end
 

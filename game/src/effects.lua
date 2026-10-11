@@ -48,6 +48,21 @@ function effects.muzzleFlash(x, y, angle, size)
   end
 end
 
+-- A burst of fire, sparks and smoke for an explosion of the given radius
+function effects.explosion(x, y, radius)
+  flashes[#flashes + 1] = { x = x, y = y, angle = 0, life = 0.1, size = radius / 6 }
+  for _ = 1, math.floor(radius * 1.6) do
+    local a = love.math.random() * math.pi * 2
+    local s = (0.3 + love.math.random() * 0.9) * radius * 8
+    effects.particle(x, y, math.cos(a) * s, math.sin(a) * s, 0.25 + love.math.random() * 0.25, { 1, 0.55 + love.math.random() * 0.35, 0.2 }, 120, true)
+  end
+  for _ = 1, math.floor(radius * 0.5) do
+    local a = love.math.random() * math.pi * 2
+    local s = 20 + love.math.random() * radius * 3
+    effects.particle(x, y, math.cos(a) * s, math.sin(a) * s - 20, 0.7, { 0.3, 0.27, 0.27 }, -30)
+  end
+end
+
 -- Sparks plus debris in the struck material's colour
 function effects.impact(x, y, dx, dy, debrisColor)
   for _ = 1, 4 do

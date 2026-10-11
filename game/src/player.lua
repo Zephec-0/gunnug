@@ -122,7 +122,7 @@ end
 -- Pushes the player opposite the shot. On the ground the push is heavily reduced.
 function Player:applyRecoil(angle)
   local b = self.body
-  local strength = self.gun.def.recoil
+  local strength = self.gun:stats().recoil
   local ix, iy = -math.cos(angle) * strength, -math.sin(angle) * strength
   if self.grounded then
     b.vx = b.vx + ix * cfg.groundRecoilScale

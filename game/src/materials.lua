@@ -16,6 +16,7 @@ local materials = {
   WOOD = 6,
   BRICK = 7,
   STONEBRICK = 8,
+  GOLDORE = 9,
 }
 
 materials.defs = {
@@ -95,6 +96,18 @@ materials.defs = {
     topColor = { 0.52, 0.50, 0.55 },
     variation = 0.05,
     brick = true,
+  },
+  -- Rock veined with gold: spills coins when dug out (destruction.dig)
+  [9] = {
+    name = "gold ore",
+    solid = true,
+    hardness = 2,
+    density = 2.8,
+    color = { 0.30, 0.30, 0.38 },
+    topColor = { 0.46, 0.46, 0.58 },
+    variation = 0.06,
+    flecks = { 0.95, 0.74, 0.22 }, -- gold glints scattered through it
+    gold = { 1, 2 }, -- gold per speck (a tenth of the pixels dug out give one)
   },
 }
 

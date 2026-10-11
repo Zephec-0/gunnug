@@ -107,13 +107,75 @@ Gun.__index = Gun
 
 function guns.new(name)
   local def = assert(guns.defs[name], "unknown gun: " .. tostring(name))
-  return setmetatable({
+  local self = setmetatable({
     def = def,
     chambers = def.chambers,
     fireTimer = 0,
     reloadTimer = 0,
+    reloadTotal = def.reloadTime,
     slots = {}, -- slots[i] = item or nil, for i = 1..def.slots
   }, Gun)
+  return self
+end
+
+-- The gun's effective stats: its definition with every fitted ammo type and
+-- attachment applied (design doc §5.5). Cached until the slots change.
+local MULTIPLIED = { "damage", "spread", "recoil", "fireDelay", "reloadTime", "bulletSpeed", "impactForce", "chambers" }
+local ADDED = { "pellets", "digRadius", "digPower" }
+local EFFECTS = { "pierce", "bounces", "explosive", "incendiary" }
+
+function Gun:stats()
+  local ids = {}
+  for i = 1, self.def.slots do
+    ids[i] = self.slots[i] and self.slots[i].id or "-"
+  end
+  local signature = table.concat(ids, ",")
+  if self.statsSignature == signature then
+    return self.cached
+  end
+
+  local def = self.def
+  local st = {
+    damage = def.damage,
+    spread = def.spread,
+    recoil = def.recoil,
+    fireDelay = def.fireDelay,
+    reloadTime = def.reloadTime,
+    bulletSpeed = def.bulletSpeed,
+    impactForce = def.impactForce,
+    chambers = def.chambers,
+    pellets = def.pellets,
+    digRadius = def.digRadius,
+    digPower = def.digPower,
+    pierce = 0,
+    bounces = 0,
+    explosive = 0,
+    incendiary = 0,
+  }
+  for i = 1, def.slots do
+    local item = self.slots[i]
+    if item then
+      for _, k in ipairs(MULTIPLIED) do
+        st[k] = st[k] * (item.mods[k] or 1)
+      end
+      for _, k in ipairs(ADDED) do
+        st[k] = st[k] + (item.mods[k] or 0)
+      end
+      for _, k in ipairs(EFFECTS) do
+        st[k] = st[k] + (item.mods[k] or 0)
+      end
+    end
+  end
+  st.chambers = math.max(1, math.floor(st.chambers + 0.5))
+  st.damage = math.max(1, st.damage)
+  self.statsSignature, self.cached = signature, st
+  -- A smaller magazine can't hold more rounds than it has room for
+  self.chambers = math.min(self.chambers, st.chambers)
+  return st
+end
+
+function Gun:maxChambers()
+  return self:stats().chambers
 end
 
 function Gun:update(dt)
@@ -122,7 +184,7 @@ function Gun:update(dt)
     self.reloadTimer = self.reloadTimer - dt
     if self.reloadTimer <= 0 then
       self.reloadTimer = 0
-      self.chambers = self.def.chambers
+      self.chambers = self:maxChambers()
     end
   end
 end
@@ -133,17 +195,18 @@ end
 
 -- 0 at the start of a reload, 1 when finished
 function Gun:reloadProgress()
-  return 1 - self.reloadTimer / self.def.reloadTime
+  return 1 - self.reloadTimer / self.reloadTotal
 end
 
--- Starts a manual reload (right click). Only when at least one chamber is
--- spent and the gun isn't already reloading; takes the full reload time.
--- Returns true if a reload started.
+-- Starts a reload (right click, or automatically when empty). Takes the gun's
+-- full reload time. Returns true if a reload started.
 function Gun:reload()
-  if self.reloadTimer > 0 or self.chambers >= self.def.chambers then
+  local st = self:stats()
+  if self.reloadTimer > 0 or self.chambers >= st.chambers then
     return false
   end
-  self.reloadTimer = self.def.reloadTime
+  self.reloadTimer = st.reloadTime
+  self.reloadTotal = st.reloadTime
   return true
 end
 
@@ -156,24 +219,45 @@ function Gun:fire(angle)
   if not self:canFire() then
     return nil
   end
-  local def = self.def
+  local def, st = self.def, self:stats()
   self.chambers = self.chambers - 1
-  self.fireTimer = def.fireDelay
+  self.fireTimer = st.fireDelay
   if self.chambers == 0 then
-    self.reloadTimer = def.reloadTime
+    self.reloadTimer = st.reloadTime
+    self.reloadTotal = st.reloadTime
   end
 
+  -- Tracer colour: the last fitted ammo type that has one
+  local tint
+  for i = 1, def.slots do
+    local item = self.slots[i]
+    if item and item.kind == "ammo" and (item.mods.incendiary or item.mods.explosive) then
+      tint = item.color
+    end
+  end
+
+  local pellets = st.pellets
   local shots = {}
-  for i = 1, def.pellets do
-    local offset = math.rad(def.spread) * (love.math.random() - 0.5)
+  for i = 1, pellets do
+    local offset = math.rad(st.spread) * (love.math.random() - 0.5)
     local jitter = (def.speedJitter or 0) * (love.math.random() * 2 - 1)
     shots[i] = {
       angle = angle + offset,
-      speed = def.bulletSpeed * (1 + jitter),
-      damage = def.damage,
-      impact = def.impactForce,
-      digRadius = def.digRadius,
-      digPower = def.digPower,
+      speed = st.bulletSpeed * (1 + jitter),
+      damage = math.max(1, math.floor(st.damage + 0.5)),
+      impact = st.impactForce,
+      digRadius = st.digRadius,
+      digPower = st.digPower,
+      pierce = st.pierce,
+      bounces = st.bounces,
+      -- Explosions are scaled down for multi-pellet shots so a shotgun blast
+      -- isn't seven full explosions
+      explosive = st.explosive > 0 and {
+        count = st.explosive,
+        scale = pellets > 1 and 1 / math.sqrt(pellets) or 1,
+      } or nil,
+      burn = st.incendiary > 0 and { dps = 3 * st.incendiary, time = 2 + st.incendiary } or nil,
+      tint = tint,
     }
   end
   return shots

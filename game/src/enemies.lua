@@ -12,6 +12,7 @@ local Body = require("src.body")
 local config = require("src.config")
 local effects = require("src.effects")
 local physics = require("src.physics")
+local pickups = require("src.pickups")
 local props = require("src.props")
 
 local enemies = {}
@@ -32,6 +33,7 @@ enemies.defs = {
     forget = 460, -- gives up the chase this far away
     damage = 12,
     knockback = 0.45, -- fraction of a bullet's impact force applied as speed
+    gold = { 3, 6 }, -- gold dropped on death (min, max), scaled by toughness
     pushForce = 300, -- shoves crates in its way (the hunter pushes with 512)
     weight = 2.5, -- how much objects' momentum moves it (speed gained = momentum / weight)
   },
@@ -44,6 +46,7 @@ enemies.defs = {
     sight = 210,
     forget = 520,
     damage = 6,
+    gold = { 1, 3 },
     retreat = 0.8, -- flies off this long after biting
     knockback = 0.7,
     weight = 0.6,
@@ -58,11 +61,13 @@ enemies.defs = {
     globSpeed = 190,
     globGravity = 300,
     globDamage = 10,
+    gold = { 4, 8 },
     knockback = 0,
     weight = 3,
   },
 }
 
+local ITEM_DROP_CHANCE = 0.1 -- chance a dying monster drops an ammo type or attachment
 local ACTIVE_RANGE = 520 -- enemies further than this from the hunter are frozen
 local GLOB_LIFE = 4
 
@@ -87,6 +92,7 @@ function enemies.spawn(kind, x, y, toughness)
     def = def,
     body = Body.new(math.floor(x - def.w / 2), math.floor(top), def.w, def.h),
     hp = math.floor(def.hp * (toughness or 1) + 0.5),
+    toughness = toughness or 1,
     state = kind == "ghoul" and "idle" or "sleep",
     facing = love.math.random() < 0.5 and -1 or 1,
     timer = love.math.random() * 2, -- general-purpose state timer
@@ -135,6 +141,9 @@ local function die(e)
   e.dead = true
   removePhysics(e)
   local cx, cy = center(e)
+  local gold = love.math.random(e.def.gold[1], e.def.gold[2])
+  pickups.dropGold(cx, cy, math.floor(gold * e.toughness + 0.5))
+  pickups.maybeDropItem(cx, cy, ITEM_DROP_CHANCE)
   local colors = {
     ghoul = { { 0.42, 0.10, 0.10 }, { 0.55, 0.52, 0.48 } },
     bat = { { 0.40, 0.08, 0.10 }, { 0.20, 0.17, 0.20 } },
@@ -169,6 +178,59 @@ function enemies.damage(e, amount, dx, dy, force)
   end
   if e.hp <= 0 then
     die(e)
+  end
+end
+
+-- Explosions: hurts every enemy within the radius (more at the centre) and
+-- throws them away from it. `force` is the shove speed at the centre.
+function enemies.damageArea(x, y, radius, damage, force)
+  for _, e in ipairs(list) do
+    if not e.dead then
+      local cx, cy = center(e)
+      local dx, dy = cx - x, cy - y
+      local dist = math.sqrt(dx * dx + dy * dy)
+      local reach = radius + math.max(e.body.w, e.body.h) / 2
+      if dist < reach then
+        local fall = 1 - 0.6 * dist / reach
+        local d = math.max(1, dist)
+        enemies.damage(e, math.max(1, math.floor(damage * fall + 0.5)), dx / d, dy / d, force * fall / math.max(0.1, e.def.knockback > 0 and e.def.knockback or 1))
+      end
+    end
+  end
+end
+
+-- Sets an enemy alight: dps burning damage for `time` seconds (a stronger
+-- fire replaces a weaker one; it refreshes the time)
+function enemies.ignite(e, dps, time)
+  if e.dead then
+    return
+  end
+  if e.burn then
+    e.burn.dps = math.max(e.burn.dps, dps)
+    e.burn.left = math.max(e.burn.left, time)
+  else
+    e.burn = { dps = dps, left = time, tick = 0.5 }
+  end
+end
+
+-- Burning: a damage tick every half second and flickering flames
+local function updateBurn(e, dt)
+  local burn = e.burn
+  if not burn then
+    return
+  end
+  burn.left = burn.left - dt
+  burn.tick = burn.tick - dt
+  if love.math.random() < 0.5 then
+    local cx = center(e)
+    effects.particle(cx + (love.math.random() - 0.5) * e.body.w, e.body.y + love.math.random() * e.body.h, (love.math.random() - 0.5) * 12, -25 - love.math.random() * 25, 0.35, { 1, 0.5 + love.math.random() * 0.3, 0.15 }, -40, true)
+  end
+  if burn.tick <= 0 then
+    burn.tick = 0.5
+    enemies.damage(e, math.max(1, math.floor(burn.dps * 0.5 + 0.5)))
+  end
+  if burn.left <= 0 then
+    e.burn = nil
   end
 end
 
@@ -507,6 +569,7 @@ function enemies.update(dt, world, player)
         end
         UPDATE[e.kind](e, dt, world, player, px, py)
         propImpacts(e, dt)
+        updateBurn(e, dt)
         -- Touching the hunter hurts him
         local b = e.body
         if not player.dead and e.state ~= "sleep" and overlaps(b.x, b.y, b.w, b.h, pb.x, pb.y, pb.w, pb.h) then

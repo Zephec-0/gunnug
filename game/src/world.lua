@@ -160,6 +160,10 @@ function World:colorAt(x, y, depth)
   if def.bands then
     v = v + math.sin(y * 0.7 + math.sin(x * 0.05) * 2) * def.bands
   end
+  if def.flecks and noise(x * 3.1, y * 1.7) > 0.58 then
+    local s = shadeFactor(depth or self:depthAt(x, y))
+    return def.flecks[1] * s, def.flecks[2] * s, def.flecks[3] * s, 1
+  end
   if def.grain and x % 4 == 0 then
     v = v - 0.12
   end

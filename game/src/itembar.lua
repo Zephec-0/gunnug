@@ -144,17 +144,38 @@ local function drawBar(inv, u)
   end
 end
 
-local function statLine(def)
-  local damage = def.pellets > 1 and string.format("%d x %d", def.damage, def.pellets) or tostring(def.damage)
-  return string.format(
-    "Chambers %d    Fire delay %.2fs    Reload %.2fs\nSpread %g°    Damage %s    Impact %d",
-    def.chambers,
-    def.fireDelay,
-    def.reloadTime,
-    def.spread,
+-- The gun's effective stats (fitted ammo and attachments applied)
+local function statLine(gun)
+  local st = gun:stats()
+  local dmg = math.max(1, math.floor(st.damage + 0.5))
+  local damage = st.pellets > 1 and string.format("%d x %d", dmg, st.pellets) or tostring(dmg)
+  local text = string.format(
+    "Chambers %d    Fire delay %.2fs    Reload %.2fs\nSpread %.1f°    Damage %s    Impact %d    Recoil %d",
+    st.chambers,
+    st.fireDelay,
+    st.reloadTime,
+    st.spread,
     damage,
-    def.impactForce
+    st.impactForce,
+    st.recoil
   )
+  local effects = {}
+  if st.pierce > 0 then
+    effects[#effects + 1] = "Pierce " .. st.pierce
+  end
+  if st.bounces > 0 then
+    effects[#effects + 1] = "Ricochet " .. st.bounces
+  end
+  if st.explosive > 0 then
+    effects[#effects + 1] = "Explosive " .. st.explosive
+  end
+  if st.incendiary > 0 then
+    effects[#effects + 1] = "Incendiary " .. st.incendiary
+  end
+  if #effects > 0 then
+    text = text .. "\n" .. table.concat(effects, "    ")
+  end
+  return text
 end
 
 -- The weapon panel: one card per carried weapon with its stats and slots
@@ -184,7 +205,7 @@ local function drawPanel(inv, u)
       drawThing(gun, x + 4 * u, y + 4 * u, iconBox, u)
       local tx = x + iconBox + 10 * u
       shadowPrint(gun.def.name .. "  [" .. i .. "]", tx, y + 3 * u, titleFont, { 1, 0.9, 0.6 })
-      shadowPrint(statLine(gun.def), tx, y + 10 * u, textFont, { 0.88, 0.86, 0.82 })
+      shadowPrint(statLine(gun), tx, y + 10 * u, textFont, { 0.88, 0.86, 0.82 })
 
       -- The gun's own ammo/attachment slots
       local sy = y + cardH - GUN_SLOT_SIZE * u - 4 * u
@@ -219,11 +240,22 @@ function itembar.draw(inv, u)
     local h = hitTest(mx, my)
     local thing = h and inv:get(h.ref)
     if thing then
+      -- Name, and for ammo and attachments what they do
       local f = font(3.4 * u)
       local name = nameOf(thing)
-      love.graphics.setColor(0.05, 0.04, 0.06, 0.92)
-      love.graphics.rectangle("fill", mx + 4 * u, my + 4 * u, f:getWidth(name) + 4 * u, f:getHeight() + 2 * u, u, u)
-      shadowPrint(name, mx + 6 * u, my + 5 * u, f)
+      local wrapW = 90 * u
+      local _, lines = f:getWrap(thing.desc or "", wrapW)
+      local w = math.max(f:getWidth(name), thing.desc and wrapW or 0) + 4 * u
+      local h = f:getHeight() * (1 + (thing.desc and #lines or 0)) + 3 * u
+      local tx, ty = mx + 4 * u, my + 4 * u
+      love.graphics.setColor(0.05, 0.04, 0.06, 0.94)
+      love.graphics.rectangle("fill", tx, ty, w, h, u, u)
+      shadowPrint(name, tx + 2 * u, ty + u, f, thing.color or { 1, 1, 1 })
+      if thing.desc then
+        love.graphics.setFont(f)
+        love.graphics.setColor(0.85, 0.83, 0.8)
+        love.graphics.printf(thing.desc, tx + 2 * u, ty + u + f:getHeight(), wrapW)
+      end
     end
   end
 end

@@ -3,6 +3,7 @@
 local effects = require("src.effects")
 local materials = require("src.materials")
 local physics = require("src.physics")
+local pickups = require("src.pickups")
 local props = require("src.props")
 
 local destruction = {}
@@ -190,6 +191,10 @@ function destruction.dig(world, cx, cy, radius, power, dx, dy)
         local def = defs[id]
         if def.solid and love.math.random() < power / def.hardness then
           removed[#removed + 1] = { x, y }
+          if def.gold and love.math.random() < 0.1 then
+            -- A tenth of the ore pixels give a speck or two, spilling out of the hole
+            pickups.dropGold(x + 0.5, y + 0.5, love.math.random(def.gold[1], def.gold[2]))
+          end
           if love.math.random() < 0.6 then
             local c = def.color
             local a = math.atan2(-(dy or 0), -(dx or 0)) + (love.math.random() - 0.5) * 2.2

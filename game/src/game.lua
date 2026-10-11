@@ -22,7 +22,9 @@ local hud = require("src.hud")
 local inventory = require("src.inventory")
 local itembar = require("src.itembar")
 local lighting = require("src.lighting")
+local menu = require("src.menu")
 local physics = require("src.physics")
+local pickups = require("src.pickups")
 local Player = require("src.player")
 local props = require("src.props")
 local render = require("src.render")
@@ -55,6 +57,7 @@ local function load(name, opts)
   bullets.clear()
   effects.clear()
   enemies.clear()
+  pickups.clear()
   local spawnX, spawnY
   world, spawnX, spawnY = scene.build(opts)
   physics.init(world)
@@ -80,6 +83,25 @@ function game.load()
   love.mouse.setVisible(false)
   inv = inventory.new()
   load("overworld")
+  menu.open("title") -- the world waits, dimmed, behind the title screen
+end
+
+-- Carries out the action a menu button chose
+local function menuAction(action)
+  if action == "play" then
+    menu.close()
+    hud.showBanner(scene.title, scene.subtitle)
+  elseif action == "resume" then
+    menu.close()
+  elseif action == "restart" then
+    newRun()
+    menu.close()
+  elseif action == "title" then
+    newRun()
+    menu.open("title")
+  elseif action == "quit" then
+    love.event.quit()
+  end
 end
 
 function game.update(dt)
@@ -95,9 +117,10 @@ function game.update(dt)
   end
 
   render.layout()
-  -- The weapon panel pauses the game, like Noita's inventory
-  love.mouse.setVisible(itembar.isOpen())
-  if itembar.isOpen() then
+  -- The weapon panel and the menus pause the game, like Noita's inventory
+  love.mouse.setVisible(itembar.isOpen() or menu.isOpen())
+  menu.update()
+  if itembar.isOpen() or menu.isOpen() then
     return
   end
 
@@ -123,6 +146,7 @@ function game.update(dt)
   props.update(dt)
   bullets.update(dt, world)
   enemies.update(dt, world, player)
+  pickups.update(dt, world, player)
   effects.update(dt, world)
   world:refresh()
   hud.update(dt)
@@ -152,6 +176,7 @@ function game.draw()
   lighting.begin(scene.ambient)
   player:addLights(lighting)
   enemies.addLights(lighting, view)
+  pickups.addLights(lighting, view)
   bullets.addLights(lighting)
   effects.addLights(lighting)
   if scene.addLights then
@@ -186,6 +211,7 @@ function game.draw()
   end
   player:drawEmissive()
   enemies.drawEmissive(view)
+  pickups.drawEmissive(view)
   bullets.draw()
   effects.drawEmissive()
   if showPhysics then
@@ -197,7 +223,7 @@ function game.draw()
     love.graphics.setColor(0.7, 0.05, 0.05, 0.28 * player.hurtFlash)
     love.graphics.rectangle("fill", 0, 0, config.VIRTUAL_W, config.VIRTUAL_H)
   end
-  if not itembar.isOpen() and not player.dead then
+  if not itembar.isOpen() and not menu.isOpen() and not player.dead then
     hud.drawCrosshair(mouseVX, mouseVY)
   end
   if fade > 0 then
@@ -215,22 +241,35 @@ function game.draw()
     scene.drawScreen(toScreen, font)
   end
   effects.drawScreen(toScreen, font)
-  hud.draw(player, render.uiScale())
-  if player.dead then
-    hud.drawDeath(render.uiScale())
+  -- The title screen stands alone; a pause menu keeps the HUD but hides the
+  -- area banner, which would show through it
+  if menu.state() ~= "title" then
+    hud.hideBanner = menu.isOpen()
+    hud.draw(player, render.uiScale())
+    if player.dead then
+      hud.drawDeath(render.uiScale())
+    end
+    itembar.draw(inv, render.uiScale())
   end
-  itembar.draw(inv, render.uiScale())
+  menu.draw(render.uiScale())
   love.graphics.setColor(1, 1, 1)
 end
 
 -- Returns true if the key was handled (main.lua uses this so Escape closes
--- the weapon panel instead of quitting)
+-- the weapon panel or opens the pause menu instead of quitting)
 function game.keypressed(key)
   if pending then
     return false
   end
+  if menu.isOpen() then
+    menuAction(menu.keypressed(key))
+    return true -- a menu swallows every key
+  end
   if key == "tab" or (key == "escape" and itembar.isOpen()) then
     itembar.toggle()
+    return true
+  elseif key == "escape" then
+    menu.open("pause")
     return true
   elseif key == "1" or key == "2" or key == "3" then
     inv:select(tonumber(key))
@@ -258,6 +297,10 @@ function game.keypressed(key)
 end
 
 function game.mousepressed(x, y, button)
+  if menu.isOpen() then
+    menu.mousepressed(x, y, button)
+    return
+  end
   if itembar.mousepressed(inv, x, y, button) or pending or itembar.isOpen() then
     return
   end
@@ -267,11 +310,15 @@ function game.mousepressed(x, y, button)
 end
 
 function game.mousereleased(x, y, button)
+  if menu.isOpen() then
+    menuAction(menu.mousereleased(x, y, button))
+    return
+  end
   itembar.mousereleased(inv, x, y, button)
 end
 
 function game.wheelmoved(_, dy)
-  if dy ~= 0 and not itembar.isOpen() then
+  if dy ~= 0 and not itembar.isOpen() and not menu.isOpen() then
     inv:cycle(dy > 0 and -1 or 1)
   end
 end

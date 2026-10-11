@@ -2,6 +2,7 @@
 -- thin terrain, targets or props.
 local destruction = require("src.destruction")
 local effects = require("src.effects")
+local enemies = require("src.enemies")
 local materials = require("src.materials")
 local props = require("src.props")
 local targets = require("src.targets")
@@ -48,6 +49,14 @@ local function step(b, dt, world)
       props.damage(prop, b.damage)
       -- Push at the exact hit point so glancing shots spin the object
       props.impulse(prop, b.dx * b.impact, b.dy * b.impact, nx, ny)
+      effects.impact(b.x, b.y, b.dx, b.dy, nil)
+      return true
+    end
+
+    local enemy = enemies.hitTest(nx, ny)
+    if enemy then
+      b.x, b.y = nx, ny
+      enemies.hit(enemy, b.damage, b.dx, b.dy, b.impact)
       effects.impact(b.x, b.y, b.dx, b.dy, nil)
       return true
     end

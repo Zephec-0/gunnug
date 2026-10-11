@@ -1,28 +1,43 @@
--- The Barrens: hand-built desolate desert at dusk, the same every run. The
--- hunter starts on the left, passes crumbling ancient ruins with a campfire,
--- a mesa and a natural arch, and drops down the old mine shaft on the right to
--- enter the catacombs.
+-- The whole world of a run, one seamless level with no loading screens.
+-- On top, the Barrens: a hand-built desolate desert at dusk, the same every
+-- run. The hunter starts on the left, passes crumbling ancient ruins with a
+-- campfire, a mesa and a natural arch, and drops down the old mine shaft on
+-- the right. Below lie the Catacombs, generated fresh each run
+-- (scenes/catacombs.lua) in the background while the hunter is on the surface.
+local catacombs = require("src.scenes.catacombs")
 local config = require("src.config")
+local hud = require("src.hud")
 local materials = require("src.materials")
 local props = require("src.props")
 local targets = require("src.targets")
 local World = require("src.world")
 
-local SAND, SANDSTONE, BEDROCK, WOOD, STONE, AIR =
-  materials.SAND, materials.SANDSTONE, materials.BEDROCK, materials.WOOD, materials.STONEBRICK, materials.AIR
+local SAND, SANDSTONE, WOOD, STONE, AIR =
+  materials.SAND, materials.SANDSTONE, materials.WOOD, materials.STONEBRICK, materials.AIR
 
 local overworld = {
   title = "The Barrens",
   subtitle = "Find the old mine",
-  ambient = { 0.88, 0.76, 0.74 }, -- warm evening light
+  ambient = { 0.88, 0.76, 0.74 }, -- updated every frame: blends to the cave's as the hunter descends
 }
 
-local WIDTH, HEIGHT = 1920, 1024 -- deep enough that the camera never sees past the bottom
-local FLOOR = 10 -- bedrock rows at the bottom
+local SURFACE_AMBIENT = { 0.88, 0.76, 0.74 } -- warm evening light
+local CAVE_AMBIENT = { 0.36, 0.32, 0.44 } -- dim but readable
 
--- Mine shaft
+-- The surface's sandstone runs down to CAVE_TOP, where the catacombs begin
+-- (twice the size of the original separate cave area in both directions)
+local WIDTH = 1920
+local CAVE_TOP = 760
+local CAVE_HEIGHT = 3680
+local HEIGHT = CAVE_TOP + CAVE_HEIGHT
+
+-- Mine shaft: from the headframe down into the catacombs' entrance chamber
 local SHAFT_X0, SHAFT_X1 = 1616, 1654
-local SHAFT_BOTTOM = 661
+local SHAFT_BOTTOM = CAVE_TOP - 20 -- the cave generator carries it on from here
+local ENTRANCE_Y = CAVE_TOP + 96
+
+-- Cave generation time per frame while on the surface (seconds)
+local GEN_BUDGET = 0.009
 
 local CAMPFIRE_X = 668
 local SUN_X, SUN_Y = 440, 196 -- on screen, low over the horizon
@@ -49,7 +64,7 @@ local function canyonWall(world, x0, x1, fromLeft)
   for x = x0, x1 do
     local t = fromLeft and (x - x0) / (x1 - x0) or (x1 - x) / (x1 - x0)
     local top = math.floor(64 + t * t * 384 + love.math.noise(x * 0.125, 5) * 16)
-    world:fillRect(x, top, x, HEIGHT - 1, SANDSTONE)
+    world:fillRect(x, top, x, CAVE_TOP, SANDSTONE)
   end
 end
 
@@ -94,13 +109,25 @@ local function buildMine(world)
   world:fillRect(SHAFT_X0, groundY - 19, SHAFT_X1, SHAFT_BOTTOM, AIR)
   world:fillRect(SHAFT_X0 - 3, groundY, SHAFT_X0 - 1, SHAFT_BOTTOM, WOOD)
   world:fillRect(SHAFT_X1 + 1, groundY, SHAFT_X1 + 3, SHAFT_BOTTOM, WOOD)
+  -- Only the right leg, its brace and the crossbeam are solid. The left leg
+  -- and brace are drawn as scenery (drawDecor), so the hunter coming from
+  -- the left can walk straight into the shaft.
   local frameTop = groundY - 74
-  world:fillRect(SHAFT_X0 - 7, frameTop, SHAFT_X0 - 3, groundY, WOOD)
   world:fillRect(SHAFT_X1 + 3, frameTop, SHAFT_X1 + 7, groundY, WOOD)
   world:fillRect(SHAFT_X0 - 13, frameTop, SHAFT_X1 + 13, frameTop + 4, WOOD)
   for i = 0, 29 do
-    world:fillRect(SHAFT_X0 - 7 - i, groundY - 29 + i, SHAFT_X0 - 6 - i, groundY - 28 + i, WOOD)
     world:fillRect(SHAFT_X1 + 6 + i, groundY - 29 + i, SHAFT_X1 + 7 + i, groundY - 28 + i, WOOD)
+  end
+end
+
+-- The headframe's left leg and brace, drawn behind the hunter
+local function drawOpenSide()
+  local groundY, frameTop = mineGround, mineGround - 74
+  local c = materials.defs[WOOD].color
+  love.graphics.setColor(c[1] * 0.8, c[2] * 0.8, c[3] * 0.8)
+  love.graphics.rectangle("fill", SHAFT_X0 - 7, frameTop + 5, 5, groundY - frameTop - 4)
+  for i = 0, 29 do
+    love.graphics.rectangle("fill", SHAFT_X0 - 7 - i, groundY - 29 + i, 2, 2)
   end
 end
 
@@ -174,15 +201,22 @@ local function buildBackground()
   }
 end
 
-function overworld.build()
-  local world = World.new(WIDTH, HEIGHT)
+local seed
+local caveAnnounced = false
 
-  -- Sand over sandstone
+-- opts.seed: cave seed (default random). opts.atCave: start in the
+-- catacombs' entrance chamber instead of on the surface (generates at once).
+function overworld.build(opts)
+  local world = World.new(WIDTH, HEIGHT)
+  seed = (opts and opts.seed) or math.floor(love.math.random() * 1000000)
+  caveAnnounced = false
+
+  -- Sand over sandstone (the cave generator replaces what lies below CAVE_TOP)
   for x = 0, WIDTH - 1 do
     local top = surface(x)
     local depth = 16 + math.floor(love.math.noise(x * 0.031, 3) * 10)
     world:fillRect(x, top, x, top + depth, SAND)
-    world:fillRect(x, top + depth + 1, x, HEIGHT - 1, SANDSTONE)
+    world:fillRect(x, top + depth + 1, x, CAVE_TOP + 40, SANDSTONE)
   end
 
   canyonWall(world, 0, 64, false)
@@ -197,9 +231,8 @@ function overworld.build()
     world:fillRect(x, 381, x, 406 - arch, SANDSTONE)
   end
   buildMine(world)
-
-  world:fillRect(0, HEIGHT - FLOOR, WIDTH - 1, HEIGHT - 1, BEDROCK)
-  world:repaintAll()
+  -- Only the surface is painted now; the cave paints itself as it generates
+  world:repaintRect(0, 0, WIDTH - 1, CAVE_TOP + 40)
 
   background = background or buildBackground()
   trees = {}
@@ -207,13 +240,31 @@ function overworld.build()
     trees[#trees + 1] = { x = t[1], y = world:findGround(t[1], 160), lean = t[2], height = 46 + (t[1] % 17) }
   end
 
+  catacombs.start(world, {
+    x0 = 0,
+    y0 = CAVE_TOP,
+    x1 = WIDTH - 1,
+    y1 = HEIGHT - 1,
+    entranceX = math.floor((SHAFT_X0 + SHAFT_X1) / 2),
+    entranceY = ENTRANCE_Y,
+    shaftX0 = SHAFT_X0,
+    shaftX1 = SHAFT_X1,
+  }, seed)
+  if opts and opts.atCave then
+    catacombs.finish()
+    local info = catacombs.info()
+    return world, info.spawnX, info.spawnY
+  end
+
   local spawnX = 336
   return world, spawnX, world:findGroundUnder(spawnX, config.player.width, 160) - config.player.height
 end
 
+-- Called once physics exists; the cave adds its own crates when generated
 function overworld.populate(world)
   targets.clear()
   props.clear()
+  catacombs.spawnProps()
   -- A little practice range near the start
   for _, x in ipairs({ 400, 435 }) do
     targets.addDummy(x, world:findGround(x, 160))
@@ -230,7 +281,13 @@ end
 
 local smokeTimer = 0
 
--- Campfire smoke, and dropping to the bottom of the shaft enters the catacombs
+-- How far underground a point is: 0 on the surface, 1 well inside the rock
+local function underground(x, y)
+  return math.max(0, math.min(1, (y - surface(x) - 24) / 220))
+end
+
+-- Campfire smoke, cave generation in the background, and the light and
+-- banners changing as the hunter goes underground
 function overworld.update(dt, player, game, effects)
   smokeTimer = smokeTimer - dt
   if smokeTimer <= 0 and effects then
@@ -238,9 +295,23 @@ function overworld.update(dt, player, game, effects)
     local g = 0.32 + love.math.random() * 0.1
     effects.particle(CAMPFIRE_X + (love.math.random() - 0.5) * 4, surface(CAMPFIRE_X) - 6, (love.math.random() - 0.3) * 8, -18, 2.2, { g, g * 0.95, g }, -6)
   end
-  local b = player.body
-  if b.x >= SHAFT_X0 - 3 and b.x + b.w <= SHAFT_X1 + 3 and b.y + b.h >= SHAFT_BOTTOM - 6 then
-    game.enter("catacombs")
+
+  local px, py = player:center()
+  -- The cave must be complete before the hunter can get anywhere near it
+  if not catacombs.ready() and py > surface(px) + 12 then
+    catacombs.finish()
+  else
+    catacombs.step(GEN_BUDGET)
+  end
+  catacombs.update(player)
+
+  local t = underground(px, py)
+  for i = 1, 3 do
+    overworld.ambient[i] = SURFACE_AMBIENT[i] + (CAVE_AMBIENT[i] - SURFACE_AMBIENT[i]) * t
+  end
+  if not caveAnnounced and py > CAVE_TOP then
+    caveAnnounced = true
+    hud.showBanner("The Catacombs", "Area 1  ·  seed " .. seed)
   end
 end
 
@@ -253,15 +324,26 @@ local function lanternPos()
   return math.floor((SHAFT_X0 + SHAFT_X1) / 2), mineGround - 64
 end
 
+local function view(camX, camY)
+  return { x = camX, y = camY, w = config.VIRTUAL_W, h = config.VIRTUAL_H }
+end
+
 function overworld.addLights(lighting, camX, camY)
-  -- Low warm light from the setting sun's place in the sky
-  lighting.add(camX + SUN_X, camY + SUN_Y, 420, 1, 0.62, 0.38, 0.3)
+  -- Low warm light from the setting sun's place in the sky, fading underground
+  local sunlight = 1 - underground(camX + config.VIRTUAL_W / 2, camY + config.VIRTUAL_H / 2)
+  if sunlight > 0 then
+    lighting.add(camX + SUN_X, camY + SUN_Y, 420, 1, 0.62, 0.38, 0.3 * sunlight)
+  end
+  catacombs.addLights(lighting, view(camX, camY))
   local lx, ly = lanternPos()
   lighting.add(lx, ly + 4, 80, 1, 0.7, 0.35, 0.7 + flicker(1) * 0.08)
   lighting.add(CAMPFIRE_X, surface(CAMPFIRE_X) - 5, 110, 1, 0.6, 0.3, 0.85 + flicker(2) * 0.12)
 end
 
 function overworld.drawBackground(camX, camY)
+  if camY > CAVE_TOP - 200 then
+    return -- the view is all underground; the backdrop (drawDecor) covers it
+  end
   love.graphics.setColor(1, 1, 1)
   love.graphics.draw(background.sky, 0, 0)
   for _, l in ipairs(background.layers) do
@@ -304,18 +386,41 @@ local function drawTree(tree)
   love.graphics.setLineWidth(1)
 end
 
--- Decorations drawn behind the player (they receive lighting)
-function overworld.drawDecor()
-  -- Dark earth behind the ground, so holes below the surface (and the mine
-  -- shaft) show soil rather than sky
-  love.graphics.setColor(0.10, 0.07, 0.07)
-  for x = -480, WIDTH + 472, 8 do
-    local a, b = surface(x) + 4, surface(x + 8) + 4
-    love.graphics.polygon("fill", x, a, x + 8, b, x + 8, HEIGHT + 480, x, HEIGHT + 480)
+local EARTH = { 0.10, 0.07, 0.07 }
+local CAVE_BACK = { 0.10, 0.08, 0.14 }
+local CAVE_DEEP_BACK = { 0.06, 0.05, 0.09 }
+
+-- Colour of the backdrop behind the terrain at a depth: dark earth under the
+-- surface, turning to the catacombs' cold gloom, darker the deeper you go
+local function backdrop(y)
+  if y < CAVE_TOP then
+    return lerpColor(EARTH, CAVE_BACK, math.max(0, (y - (CAVE_TOP - 120)) / 120))
   end
+  return lerpColor(CAVE_BACK, CAVE_DEEP_BACK, math.min(1, (y - CAVE_TOP) / (CAVE_HEIGHT * 0.8)))
+end
+
+-- Decorations drawn behind the player (they receive lighting)
+function overworld.drawDecor(camX, camY)
+  local vx0, vy0 = camX - 8, camY - 8
+  local vx1, vy1 = camX + config.VIRTUAL_W + 8, camY + config.VIRTUAL_H + 8
+  -- Backdrop behind the ground, so holes, the mine shaft and the caves show
+  -- earth and rock rather than sky. Its top follows the surface.
+  love.graphics.setColor(EARTH)
+  for x = math.floor(vx0 / 8) * 8, vx1, 8 do
+    local a, b = surface(x) + 4, surface(x + 8) + 4
+    if math.min(a, b) < vy1 then
+      love.graphics.polygon("fill", x, a, x + 8, b, x + 8, vy1, x, vy1)
+    end
+  end
+  for y = math.max(math.floor(vy0 / 8) * 8, CAVE_TOP - 120), vy1, 8 do
+    love.graphics.setColor(backdrop(y))
+    love.graphics.rectangle("fill", vx0, y, vx1 - vx0, 8)
+  end
+  catacombs.drawDecor(view(camX, camY))
   for _, tree in ipairs(trees) do
     drawTree(tree)
   end
+  drawOpenSide()
   -- Pulley wheel and rope on the headframe, with a lantern hanging from the beam
   local cx = math.floor((SHAFT_X0 + SHAFT_X1) / 2)
   love.graphics.setColor(0.22, 0.17, 0.14)
@@ -339,8 +444,13 @@ function overworld.drawDecor()
   love.graphics.line(CAMPFIRE_X - 4.5, g - 3.5, CAMPFIRE_X + 5.5, g - 0.5)
 end
 
+function overworld.drawScreen(toScreen, font)
+  catacombs.drawScreen(toScreen, font)
+end
+
 -- Flames glow regardless of the light level
-function overworld.drawEmissive()
+function overworld.drawEmissive(camX, camY)
+  catacombs.drawEmissive(view(camX, camY))
   local lx, ly = lanternPos()
   love.graphics.setColor(1, 0.78, 0.38)
   love.graphics.rectangle("fill", lx - 1, ly + 1, 3, 5)

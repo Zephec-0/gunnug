@@ -6,17 +6,18 @@
 --   build(opts) -> world, spawnX, spawnY
 --   populate(world)               place targets/props (after physics exists)
 -- and optionally:
---   update(dt, player, game, effects)  triggers (e.g. game.enter("catacombs")), ambient effects
+--   update(dt, player, game, effects)  triggers, ambient effects, background work
 --   ambient                       light level colour (default: fully lit)
 --   addLights(lighting, camX, camY) light sources (lanterns, candles, moon)
---   drawEmissive()                world-space glows drawn after the lighting
+--   drawEmissive(camX, camY)      world-space glows drawn after the lighting
 --   drawBackground(camX, camY)    on the low-res canvas, behind everything
---   drawDecor()                   world-space decorations behind the player
+--   drawDecor(camX, camY)         world-space decorations behind the player
 --   drawScreen(toScreen, font)    full-resolution text such as signs
 local bullets = require("src.bullets")
 local camera = require("src.camera")
 local config = require("src.config")
 local effects = require("src.effects")
+local enemies = require("src.enemies")
 local hud = require("src.hud")
 local inventory = require("src.inventory")
 local itembar = require("src.itembar")
@@ -27,9 +28,10 @@ local props = require("src.props")
 local render = require("src.render")
 local targets = require("src.targets")
 
+-- The overworld scene is the whole world (surface and catacombs); the test
+-- room is a separate tuning ground
 local scenes = {
   overworld = require("src.scenes.overworld"),
-  catacombs = require("src.scenes.catacombs"),
   testroom = require("src.scenes.testroom"),
 }
 
@@ -42,8 +44,8 @@ local fade = 0 -- black overlay alpha, fades out after entering a scene
 local mouseVX, mouseVY = 0, 0
 local showPhysics = false
 
--- Queues a scene change. Loading happens next update so a "loading" frame
--- can be drawn first (generation takes a moment).
+-- Queues a scene change (a new run, or the test room). Loading happens next
+-- update, after one blank frame.
 function game.enter(name, opts)
   pending = { name = name, opts = opts }
 end
@@ -52,6 +54,7 @@ local function load(name, opts)
   scene = assert(scenes[name], "unknown scene: " .. tostring(name))
   bullets.clear()
   effects.clear()
+  enemies.clear()
   local spawnX, spawnY
   world, spawnX, spawnY = scene.build(opts)
   physics.init(world)
@@ -103,14 +106,23 @@ function game.update(dt)
   local camX, camY = camera.offset()
   local aimX, aimY = mouseVX + camX, mouseVY + camY
 
-  player:update(dt, aimX, aimY)
+  -- A dead hunter stays where he fell until the run is restarted (R)
+  if not player.dead then
+    player:update(dt, aimX, aimY)
+  end
+  player:updateHurt(dt)
   player:syncPhysics(dt)
+  enemies.syncPhysics(dt)
+  props.snapshotVelocities()
   physics.update(dt)
-  player:ride(dt)
+  if not player.dead then
+    player:ride(dt)
+  end
 
   targets.update(dt)
   props.update(dt)
   bullets.update(dt, world)
+  enemies.update(dt, world, player)
   effects.update(dt, world)
   world:refresh()
   hud.update(dt)
@@ -125,12 +137,6 @@ end
 
 local function drawLoading()
   love.graphics.clear(0, 0, 0)
-  local f = hud.font(render.uiScale())
-  local text = "Descending..."
-  love.graphics.setFont(f)
-  love.graphics.setColor(1, 0.86, 0.45)
-  local ww, wh = love.graphics.getDimensions()
-  love.graphics.print(text, math.floor((ww - f:getWidth(text)) / 2), math.floor(wh / 2))
   pending.drawn = true
 end
 
@@ -142,8 +148,10 @@ function game.draw()
   local camX, camY = camera.offset()
 
   -- Light map for this frame (scene ambient + every light source)
+  local view = { x = camX, y = camY, w = config.VIRTUAL_W, h = config.VIRTUAL_H }
   lighting.begin(scene.ambient)
   player:addLights(lighting)
+  enemies.addLights(lighting, view)
   bullets.addLights(lighting)
   effects.addLights(lighting)
   if scene.addLights then
@@ -158,11 +166,12 @@ function game.draw()
   love.graphics.push()
   love.graphics.translate(-camX, -camY)
   if scene.drawDecor then
-    scene.drawDecor()
+    scene.drawDecor(camX, camY)
   end
-  world:draw()
+  world:draw(camX, camY, config.VIRTUAL_W, config.VIRTUAL_H)
   targets.draw()
   props.draw()
+  enemies.draw(view)
   player:draw()
   effects.drawWorld()
   love.graphics.pop()
@@ -173,16 +182,22 @@ function game.draw()
   love.graphics.push()
   love.graphics.translate(-camX, -camY)
   if scene.drawEmissive then
-    scene.drawEmissive()
+    scene.drawEmissive(camX, camY)
   end
   player:drawEmissive()
+  enemies.drawEmissive(view)
   bullets.draw()
   effects.drawEmissive()
   if showPhysics then
     physics.drawDebug()
   end
   love.graphics.pop()
-  if not itembar.isOpen() then
+  -- A red flash when the hunter is hurt
+  if player.hurtFlash > 0 then
+    love.graphics.setColor(0.7, 0.05, 0.05, 0.28 * player.hurtFlash)
+    love.graphics.rectangle("fill", 0, 0, config.VIRTUAL_W, config.VIRTUAL_H)
+  end
+  if not itembar.isOpen() and not player.dead then
     hud.drawCrosshair(mouseVX, mouseVY)
   end
   if fade > 0 then
@@ -201,6 +216,9 @@ function game.draw()
   end
   effects.drawScreen(toScreen, font)
   hud.draw(player, render.uiScale())
+  if player.dead then
+    hud.drawDeath(render.uiScale())
+  end
   itembar.draw(inv, render.uiScale())
   love.graphics.setColor(1, 1, 1)
 end
@@ -221,16 +239,16 @@ function game.keypressed(key)
   if itembar.isOpen() then
     return false -- everything else waits until the panel is closed
   end
-  if key == "w" or key == "space" then
+  if (key == "w" or key == "space") and not player.dead then
     player:pressJump()
-  elseif key == "f" then
+  elseif key == "f" and not player.dead then
     player:kick()
   elseif key == "r" then
     newRun()
   elseif key == "f9" then
     game.enter("testroom")
   elseif key == "f10" then
-    game.enter("catacombs")
+    game.enter("overworld", { atCave = true }) -- a fresh world, starting at the catacombs' entrance
   elseif key == "f2" then
     showPhysics = not showPhysics
   else

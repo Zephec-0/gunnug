@@ -15,18 +15,64 @@ local function noise(x, y)
   return n - math.floor(n)
 end
 
+-- Cells live in a compact byte array when LuaJIT's FFI is available (the
+-- unified world is millions of pixels), else in a plain table.
+local hasFFI, ffi = pcall(require, "ffi")
+
+local function newCells(n)
+  if hasFFI then
+    return ffi.new("uint8_t[?]", n + 1) -- zero-filled = AIR; indices 1..n used
+  end
+  local cells = {}
+  for i = 1, n do
+    cells[i] = AIR
+  end
+  return cells
+end
+
+-- The terrain image is split into tiles so changing a few pixels only
+-- re-uploads their tile, and drawing only touches tiles on screen.
+local TILE = 256
+
 function World.new(width, height)
   local self = setmetatable({}, World)
   self.width = width
   self.height = height
-  self.cells = {}
-  for i = 1, width * height do
-    self.cells[i] = AIR
+  self.cells = newCells(width * height)
+  self.tilesX = math.ceil(width / TILE)
+  self.tilesY = math.ceil(height / TILE)
+  self.tiles = {}
+  for ty = 0, self.tilesY - 1 do
+    for tx = 0, self.tilesX - 1 do
+      local x0, y0 = tx * TILE, ty * TILE
+      local w, h = math.min(TILE, width - x0), math.min(TILE, height - y0)
+      self.tiles[ty * self.tilesX + tx + 1] = {
+        x = x0,
+        y = y0,
+        w = w,
+        h = h,
+        data = love.image.newImageData(w, h),
+        image = nil, -- created when first drawn
+        dirty = true,
+      }
+    end
   end
-  self.imageData = love.image.newImageData(width, height)
-  self.image = love.graphics.newImage(self.imageData)
-  self.dirty = false
   return self
+end
+
+-- Writes a colour into the tile image covering (x, y)
+function World:writePixel(x, y, r, g, b, a)
+  local tx, ty = math.floor(x / TILE), math.floor(y / TILE)
+  local tile = self.tiles[ty * self.tilesX + tx + 1]
+  tile.data:setPixel(x - tile.x, y - tile.y, r, g, b, a)
+  tile.dirty = true
+end
+
+-- The colour currently shown for a terrain pixel
+function World:pixelColor(x, y)
+  local tx, ty = math.floor(x / TILE), math.floor(y / TILE)
+  local tile = self.tiles[ty * self.tilesX + tx + 1]
+  return tile.data:getPixel(x - tile.x, y - tile.y)
 end
 
 function World:inBounds(x, y)
@@ -129,59 +175,87 @@ end
 
 function World:repaint(x, y)
   if self:inBounds(x, y) then
-    self.imageData:setPixel(x, y, self:colorAt(x, y))
-    self.dirty = true
+    self:writePixel(x, y, self:colorAt(x, y))
   end
 end
 
--- Full repaint. Depths come from four sweeps (down, up, right, left) instead
--- of per-pixel searches, which keeps this fast on large levels.
-function World:repaintAll()
+-- Repaints a rectangle (clamped to the world). Depths come from four sweeps
+-- (down, up, right, left) instead of per-pixel searches, which keeps this
+-- fast on big areas. Works in horizontal bands so the depth table stays
+-- small; each band reads SHADE_DEPTH extra rows/columns around it so depths
+-- at its edges are still exact. tick (optional) is called once per row, so a
+-- caller running this in a coroutine can yield.
+local BAND = 128
+
+function World:repaintRect(x0, y0, x1, y1, tick)
   local w, h, cells = self.width, self.height, self.cells
   local cap = SHADE_DEPTH + 1
+  x0, y0 = math.max(0, x0), math.max(0, y0)
+  x1, y1 = math.min(w - 1, x1), math.min(h - 1, y1)
+  -- Extended area the sweeps run over
+  local ex0, ex1 = x0 - cap, x1 + cap
+  local ew = ex1 - ex0 + 1
+  local function isSolidAt(x, y)
+    if x < 0 or y < 0 or x >= w or y >= h then
+      return true -- outside the level counts as solid
+    end
+    return solid[cells[y * w + x + 1]]
+  end
   local depth = {}
-  for x = 0, w - 1 do
-    local run = cap -- outside the level counts as solid
-    for y = 0, h - 1 do
-      local i = y * w + x + 1
-      run = solid[cells[i]] and math.min(run + 1, cap) or 0
-      depth[i] = run
-    end
-    run = cap
-    for y = h - 1, 0, -1 do
-      local i = y * w + x + 1
-      run = solid[cells[i]] and math.min(run + 1, cap) or 0
-      if run < depth[i] then
+  for by0 = y0, y1, BAND do
+    local by1 = math.min(y1, by0 + BAND - 1)
+    local ey0, ey1 = by0 - cap, by1 + cap
+    -- Vertical sweeps
+    for x = ex0, ex1 do
+      local run = cap
+      for y = ey0, ey1 do
+        local i = (y - ey0) * ew + (x - ex0)
+        run = isSolidAt(x, y) and math.min(run + 1, cap) or 0
         depth[i] = run
+      end
+      run = cap
+      for y = ey1, ey0, -1 do
+        local i = (y - ey0) * ew + (x - ex0)
+        run = isSolidAt(x, y) and math.min(run + 1, cap) or 0
+        if run < depth[i] then
+          depth[i] = run
+        end
+      end
+      if tick and x % 32 == 0 then
+        tick()
+      end
+    end
+    -- Horizontal sweeps (only the band's own rows are needed)
+    for y = by0, by1 do
+      local row = (y - ey0) * ew - ex0
+      local run = cap
+      for x = ex0, ex1 do
+        run = isSolidAt(x, y) and math.min(run + 1, cap) or 0
+        if run < depth[row + x] then
+          depth[row + x] = run
+        end
+      end
+      run = cap
+      for x = ex1, ex0, -1 do
+        run = isSolidAt(x, y) and math.min(run + 1, cap) or 0
+        if run < depth[row + x] then
+          depth[row + x] = run
+        end
+      end
+      for x = x0, x1 do
+        self:writePixel(x, y, self:colorAt(x, y, depth[row + x]))
+      end
+      if tick then
+        tick()
       end
     end
   end
-  for y = 0, h - 1 do
-    local row = y * w + 1
-    local run = cap
-    for x = 0, w - 1 do
-      local i = row + x
-      run = solid[cells[i]] and math.min(run + 1, cap) or 0
-      if run < depth[i] then
-        depth[i] = run
-      end
-    end
-    run = cap
-    for x = w - 1, 0, -1 do
-      local i = row + x
-      run = solid[cells[i]] and math.min(run + 1, cap) or 0
-      if run < depth[i] then
-        depth[i] = run
-      end
-    end
-  end
-  for y = 0, h - 1 do
-    for x = 0, w - 1 do
-      self.imageData:setPixel(x, y, self:colorAt(x, y, depth[y * w + x + 1]))
-    end
-  end
-  self.dirty = true
 end
+
+function World:repaintAll(tick)
+  self:repaintRect(0, 0, self.width - 1, self.height - 1, tick)
+end
+
 -- First solid pixel at or below fromY in column x
 function World:findGround(x, fromY)
   for y = fromY, self.height - 1 do
@@ -202,26 +276,50 @@ function World:findGroundUnder(x, w, fromY)
   return best
 end
 
+-- Uploads changed tiles that have been drawn before (others upload when
+-- they first come on screen)
 function World:refresh()
-  if self.dirty then
-    self.image:replacePixels(self.imageData)
-    self.dirty = false
+  for _, tile in ipairs(self.tiles) do
+    if tile.dirty and tile.image then
+      tile.image:replacePixels(tile.data)
+      tile.dirty = false
+    end
   end
 end
 
--- Drawn with a margin around the level: the image's edge pixels are stretched
--- outward (clamp wrapping), so bedrock borders continue as solid rock and open
--- sky continues as sky when the camera looks past the level's edge.
+-- Tiles along the level's edge are drawn with a margin: their edge pixels are
+-- stretched outward (clamp wrapping), so bedrock borders continue as solid
+-- rock and open sky continues as sky when the camera looks past the level.
 local EDGE_MARGIN = 480
 
-function World:draw()
-  if not self.edgeQuad then
-    local m = EDGE_MARGIN
-    self.image:setWrap("clamp", "clamp")
-    self.edgeQuad = love.graphics.newQuad(-m, -m, self.width + 2 * m, self.height + 2 * m, self.width, self.height)
-  end
+-- Draws the tiles overlapping the view rectangle (world coordinates)
+function World:draw(viewX, viewY, viewW, viewH)
   love.graphics.setColor(1, 1, 1)
-  love.graphics.draw(self.image, self.edgeQuad, -EDGE_MARGIN, -EDGE_MARGIN)
+  for _, tile in ipairs(self.tiles) do
+    local left = tile.x == 0 and EDGE_MARGIN or 0
+    local top = tile.y == 0 and EDGE_MARGIN or 0
+    local right = tile.x + tile.w == self.width and EDGE_MARGIN or 0
+    local bottom = tile.y + tile.h == self.height and EDGE_MARGIN or 0
+    local dx0, dy0 = tile.x - left, tile.y - top
+    local dx1, dy1 = tile.x + tile.w + right, tile.y + tile.h + bottom
+    if dx1 > viewX and dx0 < viewX + viewW and dy1 > viewY and dy0 < viewY + viewH then
+      if not tile.image then
+        tile.image = love.graphics.newImage(tile.data)
+        tile.image:setWrap("clamp", "clamp")
+        tile.dirty = false
+      elseif tile.dirty then
+        tile.image:replacePixels(tile.data)
+        tile.dirty = false
+      end
+      if left + top + right + bottom == 0 then
+        love.graphics.draw(tile.image, tile.x, tile.y)
+      else
+        tile.quad = tile.quad
+          or love.graphics.newQuad(-left, -top, tile.w + left + right, tile.h + top + bottom, tile.w, tile.h)
+        love.graphics.draw(tile.image, tile.quad, dx0, dy0)
+      end
+    end
+  end
 end
 
 return World

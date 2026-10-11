@@ -3,6 +3,7 @@ local Body = require("src.body")
 local bullets = require("src.bullets")
 local config = require("src.config")
 local effects = require("src.effects")
+local enemies = require("src.enemies")
 local physics = require("src.physics")
 local playeranim = require("src.playeranim")
 local props = require("src.props")
@@ -52,6 +53,9 @@ function Player.new(x, y, world, inv)
   self.groundProp = nil
   self.hp = cfg.maxHp
   self.maxHp = cfg.maxHp
+  self.dead = false
+  self.invuln = 0 -- can't be hurt again until this runs out
+  self.hurtFlash = 0 -- red screen flash after a hit
   self.inventory = inv
   self.gun = inv:selectedGun()
   self.facing = 1
@@ -100,6 +104,7 @@ function Player:kick()
   local b = self.body
   local x = self.facing > 0 and b.x + b.w or b.x - cfg.kickRange
   targets.kick(x, b.y + 6, cfg.kickRange, b.h - 6, cfg.kickDamage)
+  enemies.kick(x, b.y + 6, cfg.kickRange, b.h - 6, self.facing, cfg.kickDamage)
   props.kick(x, b.y + 6, cfg.kickRange, b.h - 6, self.facing, cfg.kickForce, cfg.kickLift, cfg.kickDamage)
 end
 
@@ -139,12 +144,53 @@ function Player:shoot()
   if not shots then
     return
   end
+  -- Bullets start at the shoulder and travel out through the barrel, so a
+  -- monster pressed up against the hunter (closer than the muzzle) still
+  -- gets hit, and a wall in front of the barrel blocks the shot
+  local sx, sy = self:shoulder()
   for _, s in ipairs(shots) do
-    bullets.spawn(self.muzzleX, self.muzzleY, s)
+    bullets.spawn(sx, sy, s)
   end
   effects.muzzleFlash(self.muzzleX, self.muzzleY, self.aimAngle, self.gun.def.flash)
   self:applyRecoil(self.aimAngle)
   playeranim.onShoot(self)
+end
+
+-- Takes damage from something at (fromX, fromY): knocks the hunter away from
+-- it and makes him briefly invulnerable. Returns true if the hit landed.
+function Player:hurt(amount, fromX, fromY)
+  if self.dead or self.invuln > 0 then
+    return false
+  end
+  local b = self.body
+  local cx, cy = self:center()
+  self.hp = math.max(0, self.hp - amount)
+  self.invuln = cfg.hurtInvulnerability
+  self.hurtFlash = 1
+  effects.popup(cx, b.y - 4, "-" .. amount, { 1, 0.3, 0.3 })
+  local dir = cx >= (fromX or cx) and 1 or -1
+  b.vx = dir * cfg.hurtKnockback
+  b.vy = math.min(b.vy, -cfg.hurtLift)
+  self.jumping = false
+  for _ = 1, 8 do
+    effects.particle(cx, cy, (love.math.random() - 0.5) * 120, -love.math.random() * 90, 0.5, { 0.55, 0.06, 0.09 }, 480)
+  end
+  if self.hp <= 0 then
+    self.dead = true
+    for _ = 1, 30 do
+      local a = love.math.random() * math.pi * 2
+      local s = 40 + love.math.random() * 120
+      local c = love.math.random() < 0.6 and { 0.55, 0.06, 0.09 } or { 0.15, 0.13, 0.17 }
+      effects.particle(cx, cy, math.cos(a) * s, math.sin(a) * s - 50, 0.8 + love.math.random() * 0.6, c, 480)
+    end
+  end
+  return true
+end
+
+-- Hurt timers keep running while dead (the screen flash fades out)
+function Player:updateHurt(dt)
+  self.invuln = math.max(0, self.invuln - dt)
+  self.hurtFlash = math.max(0, self.hurtFlash - dt * 3)
 end
 
 -- Resizes the hitbox (and its physics stand-in), keeping the feet in place
@@ -422,12 +468,21 @@ function Player:addLights(lighting)
   lighting.add(ex, ey, 9, 1, 0.8, 0.4, 0.7)
 end
 
+-- Blinks while invulnerable after a hit; gone once dead (he bursts apart)
+local function visible(self)
+  return not self.dead and (self.invuln <= 0 or math.floor(self.invuln * 14) % 2 == 0)
+end
+
 function Player:drawEmissive()
-  playeranim.drawEyes(self)
+  if visible(self) then
+    playeranim.drawEyes(self)
+  end
 end
 
 function Player:draw()
-  playeranim.draw(self)
+  if visible(self) then
+    playeranim.draw(self)
+  end
 end
 
 return Player

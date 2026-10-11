@@ -2,6 +2,7 @@
 -- Layout (left to right): floating platform, ramp, steps, a pillar that needs
 -- recoil to clear, and a high ledge only reachable by recoil jumping.
 local config = require("src.config")
+local enemies = require("src.enemies")
 local materials = require("src.materials")
 local props = require("src.props")
 local targets = require("src.targets")
@@ -102,6 +103,12 @@ function testroom.populate(world)
   -- Heavy iron crates: one on the plateau, one on the ledge
   onGround("ironCrate", 456)
   onGround("ironCrate", 864)
+
+  -- One of each monster to practise on: a ghoul on the floor past the
+  -- pillar, and a bat and a spitter hanging under the high ledge
+  enemies.spawn("ghoul", 760, world:findGround(760, BORDER + 160))
+  enemies.spawn("bat", 880, 391)
+  enemies.spawn("spitter", 960, 391)
 end
 
 return testroom

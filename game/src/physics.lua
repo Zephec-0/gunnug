@@ -1,6 +1,8 @@
 -- Box2D world (love.physics) plus collision outlines traced from the pixel
 -- terrain. Outlines are built per chunk so destroying terrain only needs the
--- touched chunks rebuilt (physics.rebuildRegion).
+-- touched chunks rebuilt (physics.rebuildRegion). The world is large, so
+-- chunks are only traced when a moving object comes near them
+-- (physics.update); untouched terrain never needs outlines.
 local config = require("src.config")
 
 local physics = {}
@@ -8,7 +10,7 @@ local physics = {}
 local CHUNK = config.physics.chunkSize
 
 local terrain -- src.world instance the outlines are traced from
-local chunks = {} -- chunk key -> static body holding that chunk's outlines
+local chunks = {} -- chunk key -> static body with that chunk's outlines, or false if traced and empty
 
 -- Marching squares. Corners: a = top-left, b = top-right, c = bottom-right,
 -- d = bottom-left; case = a*8 + b*4 + c*2 + d. Edges: 1 top, 2 right,
@@ -167,6 +169,9 @@ local function traceChunk(cx, cy)
   return polylines
 end
 
+-- Margin around an object: its size plus more than it moves in a step
+local REACH = CHUNK * 1.5
+
 local function chunkKey(cx, cy)
   return cy * 65536 + cx
 end
@@ -180,6 +185,7 @@ local function rebuildChunk(cx, cy)
 
   local polylines = traceChunk(cx, cy)
   if #polylines == 0 then
+    chunks[key] = false
     return
   end
   local body = love.physics.newBody(physics.world, 0, 0, "static")
@@ -204,7 +210,8 @@ local function rebuildChunk(cx, cy)
   chunks[key] = body
 end
 
--- Creates a fresh physics world for the given terrain and traces all of it
+-- Creates a fresh physics world for the given terrain. Chunks are traced on
+-- demand (see ensureChunks).
 function physics.init(world)
   if physics.world then
     physics.world:destroy()
@@ -213,32 +220,52 @@ function physics.init(world)
   physics.world = love.physics.newWorld(0, config.gravity, true)
   terrain = world
   chunks = {}
-  for cy = 0, math.ceil(world.height / CHUNK) - 1 do
-    for cx = 0, math.ceil(world.width / CHUNK) - 1 do
-      rebuildChunk(cx, cy)
-    end
-  end
 end
 
--- Re-traces every chunk touching the pixel rectangle (for destructible terrain)
-function physics.rebuildRegion(x0, y0, x1, y1)
-  -- Squares reach one pixel left/up into neighbouring chunks
-  for cy = math.floor((y0 - 1) / CHUNK), math.floor(y1 / CHUNK) do
-    for cx = math.floor((x0 - 1) / CHUNK), math.floor(x1 / CHUNK) do
-      if cx >= 0 and cy >= 0 then
+-- Traces any not-yet-traced chunks overlapping the pixel rectangle
+local function ensureChunks(x0, y0, x1, y1)
+  local maxX = math.ceil(terrain.width / CHUNK) - 1
+  local maxY = math.ceil(terrain.height / CHUNK) - 1
+  for cy = math.max(0, math.floor(y0 / CHUNK)), math.min(maxY, math.floor(y1 / CHUNK)) do
+    for cx = math.max(0, math.floor(x0 / CHUNK)), math.min(maxX, math.floor(x1 / CHUNK)) do
+      if chunks[chunkKey(cx, cy)] == nil then
         rebuildChunk(cx, cy)
       end
     end
   end
-  -- Wake sleeping objects so they notice terrain vanishing beneath them
+end
+
+-- Re-traces the already-traced chunks touching the pixel rectangle (for
+-- destructible terrain); untraced ones pick up the change when first traced.
+function physics.rebuildRegion(x0, y0, x1, y1)
+  -- Squares reach one pixel left/up into neighbouring chunks
+  for cy = math.floor((y0 - 1) / CHUNK), math.floor(y1 / CHUNK) do
+    for cx = math.floor((x0 - 1) / CHUNK), math.floor(x1 / CHUNK) do
+      if cx >= 0 and cy >= 0 and chunks[chunkKey(cx, cy)] ~= nil then
+        rebuildChunk(cx, cy)
+      end
+    end
+  end
+  -- Wake nearby sleeping objects so they notice terrain vanishing beneath them
+  local m = REACH
   for _, body in ipairs(physics.world:getBodies()) do
-    if body:getType() == "dynamic" then
-      body:setAwake(true)
+    if body:getType() == "dynamic" and not body:isAwake() then
+      local x, y = body:getPosition()
+      if x > x0 - m and x < x1 + m and y > y0 - m and y < y1 + m then
+        body:setAwake(true)
+      end
     end
   end
 end
 
+-- Every moving object gets outlines traced around it before stepping
 function physics.update(dt)
+  for _, body in ipairs(physics.world:getBodies()) do
+    if body:getType() == "dynamic" and body:isAwake() then
+      local x, y = body:getPosition()
+      ensureChunks(x - REACH, y - REACH, x + REACH, y + REACH)
+    end
+  end
   physics.world:update(dt)
 end
 

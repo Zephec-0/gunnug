@@ -74,6 +74,11 @@ local config = {
     standForce = 192, -- the player's weight pressing on an object they stand on
     headBonk = 0.6, -- fraction of upward speed passed to an object hit from below
 
+    -- Getting hurt (design doc §4.3)
+    hurtInvulnerability = 0.9, -- seconds before the hunter can be hurt again
+    hurtKnockback = 170, -- sideways speed away from what hit him
+    hurtLift = 120,
+
     kickRange = 14,
     kickForce = 272,
     kickLift = 112,

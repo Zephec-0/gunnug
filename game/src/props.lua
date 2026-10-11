@@ -299,6 +299,33 @@ function props.all()
   return list
 end
 
+-- Remembers every object's velocity from just before the physics step. A
+-- collision happens inside the step and changes the velocity, so impacts
+-- have to be judged by the speed the object arrived with.
+function props.snapshotVelocities()
+  for _, p in ipairs(list) do
+    p.prevVx, p.prevVy = p.body:getLinearVelocity()
+  end
+end
+
+-- Impact damage (design doc §6a): what a moving object does to whatever it
+-- hits, from its momentum (mass x speed, in the same units as a kick's
+-- impulse). A kicked crate is worth about 7, a heavy iron crate or a big
+-- chunk of falling rock far more; slow or resting objects do nothing.
+-- vx, vy: the object's own velocity (px/s), so a creature walking into a
+-- resting object never counts as an impact.
+-- Returns damage (0 when too gentle), and the momentum itself.
+local MIN_MOMENTUM = 90 -- below this an object just bumps
+local MOMENTUM_PER_DAMAGE = 25
+
+function props.impactDamage(p, vx, vy)
+  local momentum = p.body:getMass() * math.sqrt(vx * vx + vy * vy)
+  if momentum <= MIN_MOMENTUM then
+    return 0, momentum
+  end
+  return math.floor((momentum - MIN_MOMENTUM) / MOMENTUM_PER_DAMAGE), momentum
+end
+
 function props.update(dt)
   for _, p in ipairs(list) do
     p.flash = math.max(0, p.flash - dt)

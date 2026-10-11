@@ -138,6 +138,21 @@ function hud.drawBanner(scale)
   end
 end
 
+-- Shown over a dimmed screen once the hunter has died
+function hud.drawDeath(scale)
+  local ww, wh = love.graphics.getDimensions()
+  love.graphics.setColor(0, 0, 0, 0.45)
+  love.graphics.rectangle("fill", 0, 0, ww, wh)
+  local big = font(math.max(16, math.floor(scale * 11)))
+  local f = font(math.max(10, math.floor(scale * 4)))
+  local y = math.floor(wh * 0.38)
+  local title, sub = "You Died", "Press R to begin a new hunt"
+  love.graphics.setColor(0.86, 0.16, 0.2)
+  shadowText(title, math.floor((ww - big:getWidth(title)) / 2), y, big)
+  love.graphics.setColor(1, 1, 1, 0.85)
+  shadowText(sub, math.floor((ww - f:getWidth(sub)) / 2), y + big:getHeight() + 3 * scale, f)
+end
+
 function hud.drawCrosshair(vx, vy)
   local x, y = math.floor(vx), math.floor(vy)
   love.graphics.setColor(0, 0, 0, 0.5)

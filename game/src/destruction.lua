@@ -100,7 +100,7 @@ local function makeDebris(world, pixels)
   local totalDensity = 0
   for _, p in ipairs(pixels) do
     local lx, ly = p[1] - x0, p[2] - y0
-    imageData:setPixel(lx, ly, world.imageData:getPixel(p[1], p[2]))
+    imageData:setPixel(lx, ly, world:pixelColor(p[1], p[2]))
     mask[ly * w + lx] = true
     totalDensity = totalDensity + (defs[world:get(p[1], p[2])].density or 1)
   end

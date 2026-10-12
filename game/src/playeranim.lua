@@ -18,6 +18,7 @@ local UPPER_ARM, FOREARM = 3.8, 3.8
 local HIP_HEIGHT = 9.9 -- hip above the feet when standing
 local CROUCH_HIP = 5.6
 local SLIDE_HIP = 4.2
+local ROLL_HIP = 4.6 -- tucked into a ball for the dodge roll
 local TORSO = 6.4 -- hip to neck
 -- How each kind of gun (its def.model) is held:
 --   reach    how far in front of the shoulder the trigger hand holds the grip
@@ -211,7 +212,12 @@ local function torso(player)
   end
   local lean = clamp(b.vx / cfg.walkSpeed, -1.2, 1.2) * 1.4
   local torsoLen = TORSO
-  if player.sliding then
+  if player.rollT then
+    -- Hunched right over, head tucked in
+    hip, dip = ROLL_HIP, 0
+    lean = player.rollDir * 3.8
+    torsoLen = TORSO - 2.8
+  elseif player.sliding then
     -- Lean back against the direction of travel
     lean = -(b.vx >= 0 and 1 or -1) * 3.2
     torsoLen = TORSO - 0.8
@@ -470,7 +476,13 @@ local function footTargets(player, cx, fy)
   local a, b, f = player.anim, player.body, player.facing
   local fx1, fy1, fx2, fy2
   local bend = f
-  if player.sliding then
+  if player.rollT then
+    -- Knees pulled up to the chest
+    local dir = player.rollDir
+    bend = dir
+    fx1, fy1 = cx + dir * 2.6, fy - 4.2
+    fx2, fy2 = cx + dir * 0.6, fy - 2.6
+  elseif player.sliding then
     -- Lead leg stretched out along the ground, trailing leg folded under
     local dir = b.vx >= 0 and 1 or -1
     bend = dir
@@ -550,7 +562,10 @@ local function drawCoat(player, fy, hipX, hipY, neckX, neckY)
   local flutter = math.sin(a.time * 11) * math.min(1, math.abs(player.body.vx) / 80) * 0.8
   local tailX = hipX - f * 2.8 + a.coatX
   local tailY = hemY + a.coatY + flutter
-  if player.crouched or player.sliding then
+  if player.rollT then
+    -- Wrapped round the ball, not trailing
+    tailX, tailY = hipX - f * 2.2, hipY + 2.5
+  elseif player.crouched or player.sliding then
     tailY = math.min(tailY, fy - 0.5) -- drapes on the ground
   end
   local outline = {
@@ -728,13 +743,54 @@ function anim.eyes(player)
   return hx + 0.5, hy + 1.5
 end
 
--- The eyes again, after the lighting, so they glow even in the dark
+-- How the whole figure is turned this frame: toppling over when dead, a
+-- twirl on a double jump, a forward somersault in a dodge roll.
+-- Returns the angle and the point it turns about.
+local function bodyTurn(player)
+  local a, b = player.anim, player.body
+  local cx, fy = b.x + b.w / 2, b.y + b.h
+  if player.dead and a.deathT then
+    local k = clamp(a.deathT / 0.75, 0, 1)
+    local theta = a.deathDir * (math.pi / 2) * k * k
+    -- A small bounce as he lands
+    if a.deathT > 0.75 then
+      theta = theta - a.deathDir * 0.1 * math.exp(-(a.deathT - 0.75) * 9) * math.abs(math.sin((a.deathT - 0.75) * 14))
+    end
+    return theta, cx, fy
+  elseif player.rollT then
+    -- One full turn, quick through the middle, about the middle of the ball
+    local k = clamp(player.rollT / cfg.rollTime, 0, 1)
+    return player.rollDir * math.pi * 2 * smooth(k), cx + player.rollDir * 1.5, fy - 7.5
+  elseif a.flip then
+    return player.facing * math.pi * 2 * smooth(a.flip), cx, fy - 9
+  end
+  return 0, cx, fy
+end
+
+local function turned(player, draw)
+  local theta, px, py = bodyTurn(player)
+  if theta == 0 then
+    draw()
+    return
+  end
+  love.graphics.push()
+  love.graphics.translate(px, py)
+  love.graphics.rotate(theta)
+  love.graphics.translate(-px, -py)
+  draw()
+  love.graphics.pop()
+end
+
+-- The eyes again, after the lighting, so they glow even in the dark (turned
+-- with the body, so they stay in the face through a roll or a twirl)
 function anim.drawEyes(player)
-  local _, _, _, _, neckX, neckY = torso(player)
-  local f = player.facing
-  local hx, hy = headOrigin(neckX, neckY, f)
-  pixel(hx, hy + 1, COLORS.eye)
-  pixel(hx - f * 2, hy + 1, COLORS.eye)
+  turned(player, function()
+    local _, _, _, _, neckX, neckY = torso(player)
+    local f = player.facing
+    local hx, hy = headOrigin(neckX, neckY, f)
+    pixel(hx, hy + 1, COLORS.eye)
+    pixel(hx - f * 2, hy + 1, COLORS.eye)
+  end)
 end
 
 local function drawFigure(player)
@@ -788,20 +844,26 @@ local function drawFigure(player)
     -- Arms hang limp (the gun is gone)
     gripX, gripY = sx + f * 1.5, sy + 6.5
     supX, supY = sx - f * 1.0, sy + 6.8
+  elseif player.rollT then
+    -- Arms wrapped round the knees, the gun tucked away for the moment
+    gripX, gripY = cx + f * 3.2, fy - 3.6
+    supX, supY = cx + f * 2.4, fy - 3.0
   end
 
   local fx1, fy1, fx2, fy2, bend = footTargets(player, cx, fy)
 
   -- Back to front: mantle tail, back arm, legs, coat over the thighs, mantle,
   -- head, gun, front arm
-  drawMantleTail(player)
+  if not player.rollT then
+    drawMantleTail(player) -- (its cloth trails in the world, so it would flail in a somersault)
+  end
   drawArm(sx - f * 0.6, sy, supX, supY, COLORS.coatDark)
   drawLeg(hipX - f * 0.6, hipY, fx2, fy2, bend, COLORS.trousersDark, COLORS.bootsDark)
   drawLeg(hipX + f * 0.6, hipY, fx1, fy1, bend, COLORS.trousers, COLORS.boots)
   drawCoat(player, fy, hipX, hipY, neckX, neckY)
   drawMantle(player, neckX, neckY)
   drawHead(neckX, neckY, f, dead)
-  if not dead then
+  if not dead and player.gun and not player.rollT then
     drawGun(player.gun, gripX, gripY, gunAngle, f)
   end
   drawArm(sx + f * 0.6, sy, gripX, gripY, COLORS.coat)
@@ -814,32 +876,11 @@ local function drawFigure(player)
 end
 
 -- Draws the hunter. A dying hunter topples over from the feet; a double
--- jump twirls him around his middle.
+-- jump twirls him around his middle; a dodge roll somersaults him forward.
 function anim.draw(player)
-  local a, b = player.anim, player.body
-  local cx, fy = b.x + b.w / 2, b.y + b.h
-  local theta, pivotY = 0, fy
-  if player.dead and a.deathT then
-    local k = clamp(a.deathT / 0.75, 0, 1)
-    theta = a.deathDir * (math.pi / 2) * k * k
-    -- A small bounce as he lands
-    if a.deathT > 0.75 then
-      theta = theta - a.deathDir * 0.1 * math.exp(-(a.deathT - 0.75) * 9) * math.abs(math.sin((a.deathT - 0.75) * 14))
-    end
-  elseif a.flip then
-    theta = player.facing * math.pi * 2 * smooth(a.flip)
-    pivotY = fy - 9
-  end
-  if theta == 0 then
+  turned(player, function()
     drawFigure(player)
-    return
-  end
-  love.graphics.push()
-  love.graphics.translate(cx, pivotY)
-  love.graphics.rotate(theta)
-  love.graphics.translate(-cx, -pivotY)
-  drawFigure(player)
-  love.graphics.pop()
+  end)
 end
 
 return anim

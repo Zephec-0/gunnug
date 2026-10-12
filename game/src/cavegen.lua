@@ -2,7 +2,9 @@
 -- into a region of the shared world below the surface: an entrance chamber at
 -- the top (under the mine shaft), organic caves, large open caverns, several
 -- routes of drops and level corridors that cross each other on the way down,
--- and the shop room at the bottom.
+-- and the shop room at the bottom. The lowest part of the area narrows into a
+-- funnel toward the shop, ending in a bowl-shaped antechamber over it, so
+-- whichever way the hunter comes down he is drawn toward the shop.
 --
 -- Generation is long-running, so every heavy loop calls tick() once per row:
 -- the caller can yield there to spread the work over frames.
@@ -19,7 +21,28 @@ local cavegen = {}
 local BORDER = 13 -- bedrock thickness at the sides and bottom
 local CELL = 10 -- cellular-automata cave grid resolution, in pixels
 local BLEND = 24 -- the cave rock meets the surface's rock along a wavy line this tall
-local PATHS = 3 -- routes from the entrance down to the shop
+local PATHS = 4 -- routes from the entrance down to the shop
+local REF_AREA = 1920 * 3680 -- the area size the counts below were tuned for
+local FUNNEL = 0.3 -- the bottom part of the area (of its height) that narrows toward the shop
+local FUNNEL_NECK = 270 -- half-width of the funnel at its bottom
+local POOL_CELL = 4 -- gas and water pools are flood-filled on a grid of this many pixels (src.fluids' grid)
+
+-- Sizes of the monsters (w, h) and whether they stand on the floor (else they
+-- hang or float at the spot), for finding room to put them
+local SIZES = {
+  ghoul = { 12, 19, true },
+  hopper = { 12, 9, true },
+  bat = { 10, 7 },
+  swarmbat = { 10, 7 },
+  spitter = { 10, 8 },
+  bloater = { 14, 14 },
+  wisp = { 8, 8 },
+  queen = { 84, 84 },
+  warden = { 24, 38, true }, -- the bosses
+  matron = { 24, 18, true },
+  behemoth = { 28, 28 },
+  dreadbat = { 30, 21, false, true }, -- (the fourth entry: hangs from a ceiling)
+}
 local ENTRANCE_GAP = 26 -- half-width of the opening down from the entrance chamber
 
 local PLAYER_W, PLAYER_H = config.player.width, config.player.height
@@ -33,9 +56,19 @@ local PLAYER_W, PLAYER_H = config.player.width, config.player.height
 --                  down to it, and the bottom is left open (no bedrock floor)
 --   shaftX0/X1     x range of the shaft that drops into the entrance chamber
 --   shaftTop       y where that shaft starts (default: just above y0)
---   glowCount      how many glowing mushroom clusters to scatter (default 150) tick: optional,
--- called regularly so a coroutine can yield. Returns a description:
---   { seed, area, spawnX, spawnY, shop = {x, y, w, h}, crates, ironCrates, chests, glows, enemies }
+--   glowCount      how many glowing mushroom clusters to scatter (default 150)
+--   gasPools       how many pools of poison gas to settle in low spots (default 0)
+--   waterPools     how many pools of water to settle in low spots (default 0)
+--   monsters       { kind = count } per 1920x3680 of area (default ghoul 60, bat 40, spitter 26)
+--   boss           kind of the area's one boss (see src.enemies), if any; a
+--                  list picks one of them at random for each run
+--   swarms         { kind = count } per 1920x3680: colonies of swarmbat (8-12) or wisp (4-6)
+--   arena          true: a boss arena (a huge flat-floored chamber over 2000 px wide) fills
+--                  the last quarter, all the routes lead into it, and its floor has two
+--                  gated shafts, left and right, each dropping into its own shop (the
+--                  returned info.shops); the boss (area.boss) waits in the middle
+-- tick: optional, called regularly so a coroutine can yield. Returns a description:
+--   { seed, area, spawnX, spawnY, shop = {x, y, w, h}, crates, ironCrates, chests, glows, breakables, enemies, gas }
 -- (spots are { x, groundY }). Never fails: if the reachability check can't
 -- find a way down, a straight emergency tunnel is carved.
 function cavegen.generate(world, area, seed, tick)
@@ -47,10 +80,61 @@ function cavegen.generate(world, area, seed, tick)
   local level = area.level or 1
   local ROCKID = area.palette and area.palette.rock or ROCK
   local DIRTID = area.palette and area.palette.dirt or DIRT
+  -- Counts below scale with the area's size
+  local scale = W * H / REF_AREA
+  local function scaled(n)
+    return math.floor(n * scale + 0.5)
+  end
 
-  -- Carving never touches the bedrock shell or anything above the cave
+  -- The shop sits somewhere along the bottom; the funnel narrows toward it
+  local shopX = X0 + 420 + rng:random() * (W - 840) -- (the room is 700 wide)
+  local shopFloor = Y1 - BORDER - 48
+  local tunnelEndY = shopFloor - 86 - 38
+  local antechamberY = tunnelEndY - 70 -- centre of the bowl over the shop
+  local funnel = {
+    x = shopX,
+    top = antechamberY - math.floor(H * FUNNEL),
+    bottom = antechamberY,
+    wide = math.max(shopX - X0, X1 - shopX),
+  }
+
+  -- The boss arena: a boxy chamber starting at the last quarter of the area
+  local arena
+  local shopXs = { shopX }
+  if area.arena then
+    arena = { cx = X0 + W / 2, w = math.floor(W * 0.52), top = Y0 + math.floor(H * 0.75), h = 400 }
+    arena.floorY = arena.top + arena.h
+    arena.x0 = math.floor(arena.cx - arena.w / 2)
+    arena.x1 = arena.x0 + arena.w - 1
+    shopXs = { X0 + W * 0.3, X0 + W * 0.7 } -- a shop at each lower corner
+    funnel.top = math.huge -- (no funnel: the arena is the gathering place)
+  end
+  local function inArena(x, y, margin)
+    return arena and x > arena.x0 - margin and x < arena.x1 + margin and y > arena.top - margin and y < arena.floorY + margin
+  end
+
+  -- Half-width of the open funnel at depth y (the whole area above it)
+  local function funnelHalf(y)
+    if y < funnel.top then
+      return math.huge
+    end
+    local t = math.min(1, (y - funnel.top) / (funnel.bottom - funnel.top))
+    return funnel.wide + (FUNNEL_NECK - funnel.wide) * t
+  end
+
+  -- Inside the funnel, with a ragged edge
+  local function inFunnel(x, y)
+    if y < funnel.top then
+      return true
+    end
+    local wobble = love.math.noise(y * 0.012, x * 0.004, noiseSeed + 90) * 44 - 10
+    return math.abs(x - funnel.x) <= funnelHalf(y) + wobble
+  end
+
+  -- Carving never touches the bedrock shell, anything above the cave, or the
+  -- rock walls of the funnel
   local function carvable(x, y)
-    return x >= X0 + BORDER and x <= X1 - BORDER and y >= Y0 and y <= Y1 - BORDER
+    return x >= X0 + BORDER and x <= X1 - BORDER and y >= Y0 and y <= Y1 - BORDER and inFunnel(x, y)
   end
 
   local function carveCircle(cx, cy, r)
@@ -130,7 +214,7 @@ function cavegen.generate(world, area, seed, tick)
         local top = cell(gx, gy) * (1 - tx) + cell(gx + 1, gy) * tx
         local bottom = cell(gx, gy + 1) * (1 - tx) + cell(gx + 1, gy + 1) * tx
         local v = top * (1 - ty) + bottom * ty + (love.math.noise(x * 0.094, y * 0.094, noiseSeed + 7) - 0.5) * 0.35
-        if v > threshold then
+        if v > threshold and inFunnel(x, y) then
           world:setRaw(x, y, AIR)
         end
       end
@@ -141,7 +225,7 @@ function cavegen.generate(world, area, seed, tick)
   -- Large open caverns with ragged edges and flatter floors, each with a few
   -- rock ledges to climb on. They break up the cramped tunnels.
   local function carveCaverns()
-    local count = 6 + rng:random(0, 2)
+    local count = scaled(6 + rng:random(0, 2))
     for c = 1, count do
       local rx = 170 + rng:random() * 150
       local ry = 100 + rng:random() * 90
@@ -149,6 +233,11 @@ function cavegen.generate(world, area, seed, tick)
       -- Spread them down the whole cave, one per band, with some jitter
       local band = (H - 600) / count
       local cy = Y0 + 320 + (c - 1 + 0.25 + rng:random() * 0.5) * band
+      -- Down in the funnel, keep them inside it
+      if cy > funnel.top then
+        local half = funnelHalf(cy) * 0.6
+        cx = math.max(funnel.x - half, math.min(funnel.x + half, cx))
+      end
       for y = math.floor(cy - ry * 1.3), math.ceil(cy + ry * 1.3) do
         local dy = (y - cy) / (y > cy and ry * 0.75 or ry) -- flatter below the middle
         for x = math.floor(cx - rx * 1.3), math.ceil(cx + rx * 1.3) do
@@ -200,8 +289,12 @@ function cavegen.generate(world, area, seed, tick)
     end
   end
 
-  local function clampX(x)
-    return math.max(X0 + 100, math.min(X1 - 100, x))
+  -- Keeps a route away from the side walls and inside the funnel at depth y
+  -- (with room for the passage's width and wander, so the funnel's rock walls
+  -- never cut it)
+  local function clampX(x, y)
+    local half = math.min(W, funnelHalf(y)) - 64
+    return math.max(X0 + 100, math.min(X1 - 100, math.max(funnel.x - half, math.min(funnel.x + half, x))))
   end
 
   -- A route to the shop built from drops and level corridors (now and then a
@@ -213,8 +306,10 @@ function cavegen.generate(world, area, seed, tick)
       local drop = 220 + rng:random() * 260
       local nx = x
       if rng:random() < 0.3 then
-        nx = clampX(x + (rng:random() * 2 - 1) * 220) -- a slanting drop
+        nx = x + (rng:random() * 2 - 1) * 220 -- a slanting drop
       end
+      -- (a drop into the funnel may have to slant inward)
+      nx = clampX(nx, y + drop)
       carveSegment(x, y, nx, y + drop, r, wanderSeed)
       x, y = nx, y + drop
       if y < toY - 320 then
@@ -222,33 +317,98 @@ function cavegen.generate(world, area, seed, tick)
         if x + dir * 300 > X1 - 100 or x + dir * 300 < X0 + 100 then
           dir = -dir
         end
-        nx = clampX(x + dir * (300 + rng:random() * 700))
+        -- In the funnel, corridors head toward the shop
+        if y > funnel.top then
+          dir = toX > x and 1 or -1
+        end
+        nx = clampX(x + dir * (300 + rng:random() * 700), y)
         carveSegment(x, y, nx, y, r, wanderSeed + 1)
         x = nx
       end
     end
     -- Last corridor over to above the shop, then down into it
     local lastY = math.max(y, toY - 200)
-    carveSegment(x, y, x, lastY, r, wanderSeed)
-    carveSegment(x, lastY, toX, lastY, r, wanderSeed + 1)
+    local lx = clampX(x, lastY)
+    carveSegment(x, y, lx, lastY, r, wanderSeed)
+    carveSegment(lx, lastY, toX, lastY, r, wanderSeed + 1)
     carveSegment(toX, lastY, toX, toY, r, wanderSeed)
   end
 
   -- Extra corridors and drops scattered across the cave. They cut across
   -- the routes, so the routes join up and you can switch between them.
   local function carveCrossings()
-    for i = 1, 10 do
+    for i = 1, scaled(10) do
       local y = Y0 + 200 + rng:random() * (H - 500)
       local len = 400 + rng:random() * 700
       local x = X0 + 100 + rng:random() * (W - 200 - len)
       carveSegment(x, y, x + len, y, 14 + rng:random() * 4, noiseSeed + 50 + i)
     end
-    for i = 1, 6 do
+    for i = 1, scaled(6) do
       local x = X0 + 120 + rng:random() * (W - 240)
       local len = 350 + rng:random() * 550
       local y = Y0 + 150 + rng:random() * (H - 400 - len)
       carveSegment(x, y, x, y + len, 14 + rng:random() * 4, noiseSeed + 70 + i)
     end
+  end
+
+  -- The bowl at the bottom of the funnel, right over the shop: its floor
+  -- curves down from both sides to the drop into the shop's ceiling
+  local function carveAntechamber()
+    local cx, cy = funnel.x, antechamberY
+    local rx, ryUp, ryDown = FUNNEL_NECK - 20, 70, 62
+    for y = cy - ryUp - 20, cy + ryDown + 10 do
+      for x = math.floor(cx - rx - 20), math.ceil(cx + rx + 20) do
+        local dx = (x - cx) / rx
+        local dy = (y - cy) / (y > cy and ryDown or ryUp)
+        local edge = (love.math.noise(x * 0.03, y * 0.03, noiseSeed + 33) - 0.5) * 0.35
+        if dx * dx + dy * dy + edge < 1 and carvable(x, y) then
+          world:setRaw(x, y, AIR)
+        end
+      end
+      tick()
+    end
+    -- Down from the bowl's lowest point to the shop
+    carveSegment(cx, cy + ryDown - 10, cx, tunnelEndY + 10, 18, noiseSeed + 44)
+  end
+
+  -- The arena: a wide boxy chamber (a superellipse), a flat slab for a floor,
+  -- and a V of platforms above it
+  local function carveArena()
+    local a = arena
+    local cx, cy = a.cx, a.top + a.h / 2
+    local rx, ry = a.w / 2, a.h / 2
+    for y = a.top - 4, a.floorY + 2 do
+      for x = a.x0 - 4, a.x1 + 4 do
+        local nx, ny = (x - cx) / rx, (y - cy) / ry
+        local edge = (love.math.noise(x * 0.02, y * 0.02, noiseSeed + 61) - 0.5) * 0.12
+        if nx ^ 8 + ny ^ 2 + edge < 1 and carvable(x, y) then
+          world:setRaw(x, y, AIR)
+        end
+      end
+      tick()
+    end
+    world:fillRect(a.x0 - 4, a.floorY, a.x1 + 4, a.floorY + 16, ROCKID)
+    -- Platforms in a V from the middle: a low pair just either side of the
+    -- centre, then each one further out a step higher (32 px: within a
+    -- jump) and a short hop across, six to a side, so the hunter can climb
+    -- either arm
+    -- They are one-way slabs, not terrain (see src.world platforms): stood on
+    -- from above, jumped up through, and shot, flown and gassed through
+    a.platforms = {}
+    for side = -1, 1, 2 do
+      for i = 0, 5 do
+        local lx = a.cx + side * (70 + i * 120)
+        local ly = a.floorY - 36 - i * 32
+        a.platforms[#a.platforms + 1] = { x0 = math.floor(lx - 42), x1 = math.floor(lx + 42), y = math.floor(ly) }
+      end
+    end
+    -- Braziers: fire bowls along the floor that keep burning (src.fluids)
+    a.braziers = {}
+    for _, f in ipairs({ -0.30, -0.15, 0, 0.15, 0.30 }) do
+      local bx = math.floor(a.cx + f * a.w)
+      a.braziers[#a.braziers + 1] = { x = bx, y = world:findGround(bx, a.floorY - 40) }
+    end
+    a.gates = {}
   end
 
   -- Chamber the player arrives in from the shaft. Timber ledges either side,
@@ -280,14 +440,14 @@ function cavegen.generate(world, area, seed, tick)
   -- another area lies below) the hatch: an iron plate set into the floor near
   -- the right end, held shut by a chain the hunter has to shoot.
   local function buildShop(cx, floorY)
-    local w, h = 620, 86
+    local w, h = 700, 86 -- (the DPS dummy's range at the left end, then the goods)
     local x0, y0 = math.floor(cx - w / 2), floorY - h
     local x1, y1 = x0 + w - 1, floorY - 1
     world:fillRect(x0 - 8, y0 - 8, x1 + 8, y1 + 8, BRICK)
     world:fillRect(x0, y0, x1, y1, AIR)
     -- Opening in the ceiling, with a short drop shaft up to where the tunnels end
     world:fillRect(math.floor(cx) - 21, y0 - 54, math.floor(cx) + 21, y0 - 1, AIR)
-    local room = { x = x0, y = y0, w = w, h = h }
+    local room = { x = x0, y = y0, w = w, h = h, cx = math.floor(cx) }
     if area.hasNext then
       local hx = x0 + w - 28
       world:fillRect(hx - 19, floorY, hx + 19, floorY + 3, IRON)
@@ -439,7 +599,7 @@ function cavegen.generate(world, area, seed, tick)
   -- Veins of gold ore: wandering blobs in solid rock and dirt, some right
   -- at a cave wall (glinting where they can be seen) and some buried deep
   local function placeOre()
-    for _ = 1, 150 do
+    for _ = 1, scaled(150) do
       tick()
       local x = X0 + BORDER + 20 + rng:random() * (W - 2 * BORDER - 40)
       local y = Y0 + 140 + rng:random() * (H - 300)
@@ -462,17 +622,40 @@ function cavegen.generate(world, area, seed, tick)
   carveCaverns()
 
   local entranceX, entranceY = area.entranceX, area.entranceY
-  local shopX = X0 + 340 + rng:random() * (W - 680)
-  local shopFloor = Y1 - BORDER - 48
-  local tunnelEndY = shopFloor - 86 - 38
   -- One wide main route and narrower side routes; they wander independently,
   -- so they cross each other on the way down
   for p = 1, PATHS do
-    carveRoute(entranceX, entranceY, shopX, tunnelEndY, p == 1 and 21 or 17, noiseSeed + p * 13)
+    if arena then
+      carveRoute(entranceX, entranceY, arena.cx + (p - 2.5) * 300, arena.top + 24, p == 1 and 21 or 17, noiseSeed + p * 13)
+    else
+      carveRoute(entranceX, entranceY, shopX, tunnelEndY, p == 1 and 21 or 17, noiseSeed + p * 13)
+    end
   end
   carveCrossings()
+  if arena then
+    carveArena()
+  else
+    carveAntechamber()
+  end
   carveEntrance(entranceX, entranceY)
-  local shop = buildShop(shopX, shopFloor)
+  local shops = {}
+  for _, sx in ipairs(shopXs) do
+    shops[#shops + 1] = buildShop(sx, shopFloor)
+  end
+  local shop = shops[1]
+  if arena then
+    -- A shaft from the arena floor down into each shop's ceiling, shut by an
+    -- iron gate until the boss is dead (and rubble-filled later if the other
+    -- shop is chosen, see src.scenes.catacombs)
+    for _, room in ipairs(shops) do
+      local x0, x1 = room.cx - 21, room.cx + 21
+      world:fillRect(x0, arena.floorY - 40, x1, room.y - 55, AIR) -- (up through the curve of the arena floor)
+      local gate = { x0 = x0 - 1, x1 = x1 + 1, y0 = arena.floorY + 4, y1 = arena.floorY + 7 }
+      world:fillRect(gate.x0, gate.y0, gate.x1, gate.y1, IRON)
+      arena.gates[#arena.gates + 1] = gate
+      room.shaft = { x0 = x0, x1 = x1, y0 = arena.floorY + 10, y1 = room.y - 56 }
+    end
+  end
 
   -- Bedrock shell at the sides, and at the bottom of the last area (the
   -- surface's rock, or the previous area, is above)
@@ -486,19 +669,29 @@ function cavegen.generate(world, area, seed, tick)
   local spawnX = math.floor(entranceX - ENTRANCE_GAP - 22)
   local spawnY = world:findGroundUnder(spawnX, PLAYER_W, entranceY) - PLAYER_H
 
-  if not isReachable(spawnX, spawnY, shop) then
-    local len = math.sqrt((shopX - entranceX) ^ 2 + (tunnelEndY - entranceY) ^ 2)
+  -- What the hunter must be able to reach: the shop, or the arena's floor
+  local goal = shop
+  local goalX, goalY = shopX, tunnelEndY
+  if arena then
+    goal = { x = arena.cx - 150, y = arena.floorY - 80, w = 300, h = 78 }
+    goalX, goalY = arena.cx, arena.top + 24
+  end
+  if not isReachable(spawnX, spawnY, goal) then
+    local len = math.sqrt((goalX - entranceX) ^ 2 + (goalY - entranceY) ^ 2)
     for d = 0, len, 3 do
       local t = d / len
-      carveCircle(entranceX + (shopX - entranceX) * t, entranceY + (tunnelEndY - entranceY) * t, 19)
+      carveCircle(entranceX + (goalX - entranceX) * t, entranceY + (goalY - entranceY) * t, 19)
     end
     print("cavegen: no route found, carved an emergency tunnel (seed " .. seed .. ")")
   end
 
   local function avoid(x, y)
     local nearSpawn = math.abs(x - entranceX) < 80 and y < entranceY + 64
-    local inShop = x > shop.x - 16 and x < shop.x + shop.w + 16 and y > shop.y - 16
-    return nearSpawn or inShop
+    local inShop = false
+    for _, room in ipairs(shops) do
+      inShop = inShop or (x > room.x - 16 and x < room.x + room.w + 16 and y > room.y - 16)
+    end
+    return nearSpawn or inShop or inArena(x, y, 20)
   end
   world:repaintRect(X0, math.min(Y0 - BLEND - 16, (area.shaftTop or math.huge) - 16), X1, Y1, tick)
 
@@ -506,10 +699,33 @@ function cavegen.generate(world, area, seed, tick)
   -- tougher, the deeper you go.
   local function avoidForEnemies(x, y)
     local nearEntrance = math.abs(x - entranceX) < 260 and y < entranceY + 220
-    local inShop = x > shop.x - 60 and x < shop.x + shop.w + 60 and y > shop.y - 120
-    return nearEntrance or inShop
+    local inShop = false
+    for _, room in ipairs(shops) do
+      inShop = inShop or (x > room.x - 60 and x < room.x + room.w + 60 and y > room.y - 120)
+    end
+    return nearEntrance or inShop or inArena(x, y, 60)
   end
   local enemies = {}
+  -- Room for a w x h monster standing on (floor) or hanging from (else) the spot
+  local function fits(kind, x, y)
+    local sz = SIZES[kind]
+    local w, h = sz[1], sz[2]
+    local top = sz[3] and y - h or y
+    -- (a few rows at the foot, or the ceiling, may touch sloped rock)
+    local from, to = sz[3] and top or top + 2, sz[3] and top + h - 5 or top + h - 1
+    for yy = from, to do
+      for xx = math.floor(x - w / 2), math.floor(x - w / 2) + w - 1 do
+        if world:isSolid(xx, yy) then
+          return false
+        end
+      end
+    end
+    return true
+  end
+  -- Tougher the deeper in an area, and a lot tougher with each area
+  local function toughnessAt(y)
+    return 1 + ((y - Y0) / H) * 0.6 + (level - 1) * 0.9
+  end
   local function place(kind, spots)
     for _, s in ipairs(spots) do
       local depth = (s[2] - Y0) / H
@@ -519,28 +735,172 @@ function cavegen.generate(world, area, seed, tick)
           crowded = true -- keep them spread out instead of in clumps
         end
       end
-      if not crowded and rng:random() < 0.35 + 0.65 * depth then
-        enemies[#enemies + 1] = { kind = kind, x = s[1], y = s[2], toughness = 1 + depth * 0.6 + (level - 1) * 0.6 }
+      if not crowded and rng:random() < 0.35 + 0.65 * depth and fits(kind, s[1], s[2]) then
+        enemies[#enemies + 1] = { kind = kind, x = s[1], y = s[2], toughness = toughnessAt(s[2]) }
       end
     end
   end
-  place("ghoul", findFloorSpots(60, 18, avoidForEnemies))
-  place("bat", findCeilingSpots(40, 24, avoidForEnemies))
-  place("spitter", findCeilingSpots(26, 30, avoidForEnemies))
+  local counts = area.monsters or { ghoul = 60, bat = 40, spitter = 26 }
+  if counts.ghoul then
+    place("ghoul", findFloorSpots(scaled(counts.ghoul), 20, avoidForEnemies))
+  end
+  if counts.hopper then
+    place("hopper", findFloorSpots(scaled(counts.hopper), 14, avoidForEnemies))
+  end
+  if counts.bat then
+    place("bat", findCeilingSpots(scaled(counts.bat), 24, avoidForEnemies))
+  end
+  if counts.spitter then
+    place("spitter", findCeilingSpots(scaled(counts.spitter), 30, avoidForEnemies))
+  end
+  if counts.bloater then
+    place("bloater", findCeilingSpots(scaled(counts.bloater), 34, avoidForEnemies))
+  end
+  if counts.wisp then
+    place("wisp", findCeilingSpots(scaled(counts.wisp), 26, avoidForEnemies))
+  end
 
-  return {
+  -- Swarms: colonies that hang together under a ceiling and wake as one
+  local SWARM_SIZE = { swarmbat = { 8, 12 }, wisp = { 4, 6 } }
+  local swarmId = 0
+  for kind, count in pairs(area.swarms or {}) do
+    for _, s in ipairs(findCeilingSpots(scaled(count), 40, avoidForEnemies)) do
+      swarmId = swarmId + 1
+      local range = SWARM_SIZE[kind]
+      local n = rng:random(range[1], range[2])
+      for _ = 1, n * 3 do
+        if n <= 0 then
+          break
+        end
+        local mx, my = s[1] + (rng:random() - 0.5) * 56, s[2] + rng:random() * 28
+        if fits(kind, mx, my) then
+          n = n - 1
+          enemies[#enemies + 1] = { kind = kind, x = mx, y = my, toughness = toughnessAt(s[2]), swarm = swarmId }
+        end
+      end
+      tick()
+    end
+  end
+
+  -- The area's one boss, somewhere in the lower two thirds of the cave on a
+  -- cavern floor with room for it (floaters hover a little above the floor)
+  local bossKind = type(area.boss) == "table" and area.boss[rng:random(1, #area.boss)] or area.boss
+  if bossKind and arena then
+    local sz = SIZES[bossKind]
+    enemies[#enemies + 1] = { kind = bossKind, x = arena.cx, y = arena.top + 120, toughness = 1 + (level - 1) * 0.5, boss = true, arena = true }
+  elseif bossKind then
+    local sz = SIZES[bossKind]
+    local best
+    local spots
+    if sz[4] then
+      spots = findCeilingSpots(80, sz[2] + 20, avoidForEnemies) -- hangs under a ceiling
+    else
+      spots = findFloorSpots(60, sz[2] + 12, avoidForEnemies)
+    end
+    for _, s in ipairs(spots) do
+      local y = (sz[3] or sz[4]) and s[2] or s[2] - sz[2] - 14
+      if not best and s[2] > Y0 + H * 0.35 and s[2] < Y1 - H * 0.2 and fits(bossKind, s[1], y) then
+        best = { kind = bossKind, x = s[1], y = y, toughness = 1 + (level - 1) * 0.5, boss = true }
+      end
+    end
+    if best then
+      enemies[#enemies + 1] = best
+    end
+  end
+
+  -- Pools of poison gas and of water, settled in low spots: each is
+  -- flood-filled over a grid from a floor spot up to a level a little above
+  -- it. A fill that runs away (pouring down a shaft) or spreads too wide is
+  -- dropped, so pools only form in real basins. Kept away from the entrance
+  -- and the shop.
+  local taken = {}
+  local function makePools(wanted, minDepth, maxDepth, vents)
+    local pools = {}
+    if (wanted or 0) <= 0 then
+      return pools
+    end
+    local C = POOL_CELL
+    local function open(gx, gy)
+      local x, y = gx * C + C / 2, gy * C + C / 2
+      return x > X0 + BORDER and x < X1 - BORDER and y > Y0 + 60 and y < Y1 - BORDER and not world:isSolid(x, y)
+    end
+    local function avoidForPools(x, y)
+      local nearEntrance = math.abs(x - entranceX) < 300 and y < entranceY + 260
+      local nearShop = not arena and math.abs(x - funnel.x) < FUNNEL_NECK + 200 and y > antechamberY - 260
+      return nearEntrance or nearShop or inArena(x, y, 60)
+    end
+    -- (most floor spots aren't basins, so plenty are tried)
+    for _, s in ipairs(findFloorSpots(wanted * 8, 24, avoidForPools)) do
+      if #pools >= wanted then
+        break
+      end
+      local gx0, gy0 = math.floor(s[1] / C), math.floor((s[2] - 2) / C)
+      local key0 = gy0 * 100000 + gx0
+      if not taken[key0] and open(gx0, gy0) then
+        local level = s[2] - minDepth - rng:random() * (maxDepth - minDepth)
+        local seen, cells = { [key0] = true }, { gx0, gy0 }
+        local head, ok = 1, true
+        while head < #cells do
+          local gx, gy = cells[head], cells[head + 1]
+          head = head + 2
+          if gy * C > s[2] + 90 or #cells > 4000 then
+            ok = false -- runs away down a hole, or far too wide
+            break
+          end
+          for i = 1, 4 do
+            local nx = gx + (i == 1 and 1 or i == 2 and -1 or 0)
+            local ny = gy + (i == 3 and 1 or i == 4 and -1 or 0)
+            local k = ny * 100000 + nx
+            if not seen[k] and not taken[k] and ny * C + C / 2 >= level and open(nx, ny) then
+              seen[k] = true
+              cells[#cells + 1] = nx
+              cells[#cells + 1] = ny
+            end
+          end
+        end
+        if ok and #cells >= 54 then
+          local pool = { cells = {}, vent = vents and { s[1], s[2] } or nil, level = level }
+          for i = 1, #cells, 2 do
+            local gx, gy = cells[i], cells[i + 1]
+            taken[gy * 100000 + gx] = true
+            pool.cells[#pool.cells + 1] = gx * C
+            pool.cells[#pool.cells + 1] = gy * C
+          end
+          pools[#pools + 1] = pool
+        end
+      end
+      tick()
+    end
+    return pools
+  end
+  local gas = makePools(area.gasPools, 22, 52, true)
+  local water = makePools(area.waterPools, 14, 44, false)
+  local result = {
     seed = seed,
     area = area,
     spawnX = spawnX,
     spawnY = spawnY,
     shop = shop,
-    crates = findFloorSpots(40, 16, avoid),
-    ironCrates = findFloorSpots(12, 19, avoid),
-    chests = findFloorSpots(12, 22, avoidForEnemies), -- weapon chests, away from the entrance and shop
-    glows = findFloorSpots(area.glowCount or 150, 6, avoid), -- glowing fungus clusters
+    shops = shops, -- one, or two (left, right) in a boss area
+    arena = arena, -- { x0, x1, top, floorY, cx, braziers = { {x, y} }, gates = { {x0, y0, x1, y1} } }
+    crates = findFloorSpots(scaled(40), 16, avoid),
+    ironCrates = findFloorSpots(scaled(12), 19, avoid),
+    chests = findFloorSpots(scaled(12), 22, avoidForEnemies), -- weapon chests, away from the entrance and shop
+    glows = findFloorSpots(scaled(area.glowCount or 150), 6, avoid), -- glowing fungus clusters
     level = level,
-    enemies = enemies, -- { kind, x, y, toughness }: ghouls stand at y, the others hang from it
+    enemies = enemies, -- { kind, x, y, toughness, boss }: ground monsters stand at y, the others hang from it
+    gas = gas, -- pools: { cells = { x, y, ... } (POOL_CELL squares), vent = { x, groundY }, level }
+    water = water, -- the same, without vents
+    gasCell = POOL_CELL,
   }
+
+  -- Small breakables (urns, pouches, lamps) from the area's list { name, count per
+  -- reference area }, placed last so the rest of the layout is unchanged
+  result.breakables = {} -- { { name, spots = { {x, groundY} } } }
+  for _, b in ipairs(area.breakables or {}) do
+    result.breakables[#result.breakables + 1] = { name = b[1], spots = findFloorSpots(scaled(b[2]), 16, avoid) }
+  end
+  return result
 end
 
 return cavegen

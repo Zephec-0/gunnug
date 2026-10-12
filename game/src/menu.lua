@@ -133,10 +133,12 @@ function menu.draw(scale)
   local mid = hud.font(scale * 1.2)
   local small = hud.font(scale)
   local y = math.floor(wh * 0.2)
-  shadowText(layout.title, (ww - big:getWidth(layout.title)) / 2, y, big, state == "title" and { 0.9, 0.18, 0.22 } or { 1, 0.86, 0.45 })
+  shadowText(layout.title, (ww - big:getWidth(layout.title)) / 2, y, big, { 0.98, 0.99, 1 })
   y = y + big:getHeight()
+  local ruleColor = { 0.46, 0.62, 0.9 }
+  require("src.fonts").rule(ww / 2, y + 2 * scale, math.max(big:getWidth(layout.title) * 1.2, 90 * scale), math.max(1, math.floor(scale * 0.5)), ruleColor[1], ruleColor[2], ruleColor[3])
   if layout.subtitle then
-    shadowText(layout.subtitle, (ww - small:getWidth(layout.subtitle)) / 2, y + 2 * scale, small, { 0.8, 0.76, 0.72 })
+    shadowText(layout.subtitle, (ww - small:getWidth(layout.subtitle)) / 2, y + 6 * scale, small, { 0.72, 0.8, 0.92 })
   end
 
   hitboxes = {}
@@ -149,19 +151,19 @@ function menu.draw(scale)
     love.graphics.rectangle("fill", bx, by, bw, bh, scale, scale)
     love.graphics.setLineWidth(math.max(1, scale * 0.5))
     if isSel then
-      love.graphics.setColor(1, 0.82, 0.35)
+      love.graphics.setColor(0.55, 0.75, 1)
     else
       love.graphics.setColor(0.55, 0.48, 0.42, 0.9)
     end
     love.graphics.rectangle("line", bx, by, bw, bh, scale, scale)
     local label = item[1]
-    shadowText(label, bx + (bw - mid:getWidth(label)) / 2, by + (bh - mid:getHeight()) / 2, mid, isSel and { 1, 0.9, 0.6 } or { 0.85, 0.82, 0.78 })
+    shadowText(label, bx + (bw - mid:getWidth(label)) / 2, by + (bh - mid:getHeight()) / 2, mid, isSel and { 0.98, 0.99, 1 } or { 0.72, 0.78, 0.88 })
     hitboxes[i] = { x = bx, y = by, w = bw, h = bh }
     by = by + bh + gap
   end
 
   local hint = state == "title" and "W/S or arrows and Enter, or click" or "Esc: resume"
-  shadowText(hint, (ww - small:getWidth(hint)) / 2, wh - 24 * scale, small, { 0.6, 0.57, 0.55 })
+  shadowText(hint, (ww - small:getWidth(hint)) / 2, wh - 24 * scale, small, { 0.55, 0.62, 0.74 })
 end
 
 return menu

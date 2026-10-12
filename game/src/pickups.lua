@@ -97,6 +97,26 @@ function pickups.remove(p)
   end
 end
 
+-- Everything lying about (for tests)
+function pickups.all()
+  return list
+end
+
+-- The weapon lying under a world point (so hovering the mouse over it can
+-- show what it is). Returns the gun and the point to float its card above.
+function pickups.weaponAt(wx, wy)
+  for _, p in ipairs(list) do
+    if p.kind == "weapon" then
+      local icon = itembar.weaponIcon(p.gun.def)
+      local w, h = icon:getWidth(), icon:getHeight()
+      if math.abs(wx - p.x) <= w / 2 + 4 and wy >= p.y - h - 5 and wy <= p.y + 5 then
+        return p.gun, p.x, p.y - h - 4
+      end
+    end
+  end
+  return nil
+end
+
 -- Chance-based drop of a random item
 function pickups.maybeDropItem(x, y, chance)
   if love.math.random() < chance then
@@ -136,13 +156,11 @@ end
 local function collect(p, player)
   local inv = player.inventory
   if p.kind == "weapon" then
-    for i = 1, inventory.WEAPON_SLOTS do
-      if not inv.weapons[i] then
-        inv.weapons[i] = p.gun
-        audio.play("pickup")
-        effects.popup(p.x, p.y - 6, p.gun.name, { 1, 0.9, 0.6 })
-        return true
-      end
+    local slot = inv:freeWeaponSlot()
+    if slot then
+      inv.weapons[slot] = p.gun
+      audio.play("pickup")
+      return true
     end
     if pickups.onWeaponFull then
       pickups.onWeaponFull(p)

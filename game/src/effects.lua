@@ -1,5 +1,6 @@
 -- Visual effects: pixel particles, muzzle flashes and floating damage numbers.
 local audio = require("src.audio")
+local gunInfo = require("src.gunInfo")
 
 local effects = {}
 
@@ -135,7 +136,23 @@ function effects.popup(x, y, text, color)
   }
 end
 
+-- A vertical card that floats up from (x, y) and fades: the weapon's name,
+-- its grade and a few stats. Shown when a weapon is picked up or bought.
+local cards = {}
+
+function effects.weaponCard(x, y, gun)
+  cards[#cards + 1] = { x = x, y = y, gun = gun, life = 3.4, maxLife = 3.4 }
+end
+
 function effects.update(dt, world)
+  for i = #cards, 1, -1 do
+    local c = cards[i]
+    c.life = c.life - dt
+    c.y = c.y - 9 * dt
+    if c.life <= 0 then
+      table.remove(cards, i)
+    end
+  end
   for i = #particles, 1, -1 do
     local p = particles[i]
     p.life = p.life - dt
@@ -333,8 +350,43 @@ function effects.addLights(lighting)
 end
 
 -- Drawn at full resolution, after the canvas is scaled up
+-- Draws the weapon card for a gun, its bottom centre at screen (sx, sy): the
+-- name, the grade letter in the grade's colour, and a few stats, in a box
+-- bordered in that colour
+function effects.drawWeaponCard(sx, sy, gun, font, alpha)
+  alpha = alpha or 1
+  local info = gunInfo.summary(gun)
+  local fh = font:getHeight()
+  local pad = fh * 0.45
+  local w = font:getWidth(info.title)
+  for _, l in ipairs(info.lines) do
+    w = math.max(w, font:getWidth(l))
+  end
+  w = w + pad * 3 + font:getWidth(info.grade.letter) + fh * 0.4
+  local h = fh * (1 + #info.lines) + pad * 2
+  local x, y = math.floor(sx - w / 2), math.floor(sy - h)
+  love.graphics.setFont(font)
+  love.graphics.setColor(0.04, 0.03, 0.07, 0.94 * alpha)
+  love.graphics.rectangle("fill", x, y, w, h, 3, 3)
+  love.graphics.setLineWidth(2)
+  love.graphics.setColor(info.grade.color[1], info.grade.color[2], info.grade.color[3], alpha)
+  love.graphics.rectangle("line", x, y, w, h, 3, 3)
+  love.graphics.setColor(0.98, 0.99, 1, alpha)
+  love.graphics.print(info.title, x + pad, y + pad)
+  love.graphics.setColor(info.grade.color[1], info.grade.color[2], info.grade.color[3], alpha)
+  love.graphics.print(info.grade.letter, x + w - pad - font:getWidth(info.grade.letter), y + pad)
+  for n, l in ipairs(info.lines) do
+    love.graphics.setColor(0.80, 0.85, 0.96, alpha)
+    love.graphics.print(l, x + pad, y + pad + fh * n)
+  end
+end
+
 function effects.drawScreen(toScreen, font)
   love.graphics.setFont(font)
+  for _, c in ipairs(cards) do
+    local sx, sy = toScreen(c.x, c.y)
+    effects.drawWeaponCard(sx, sy, c.gun, font, math.min(1, c.life / 0.6, (c.maxLife - c.life) / 0.12 + 0.2))
+  end
   for _, p in ipairs(popups) do
     local sx, sy = toScreen(p.x, p.y)
     local alpha = math.min(1, p.life / p.maxLife * 2)

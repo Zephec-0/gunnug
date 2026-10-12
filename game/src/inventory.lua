@@ -43,22 +43,30 @@ function Inventory:selectedGun()
   return self.weapons[self.selected]
 end
 
--- Selects a weapon slot if it holds a weapon
+-- Selects a weapon slot, empty or not: an empty slot means bare hands
 function Inventory:select(index)
-  if self.weapons[index] then
+  if index >= 1 and index <= inventory.WEAPON_SLOTS then
     self.selected = index
   end
 end
 
--- Steps to the next/previous filled weapon slot (mouse wheel)
+-- Steps to the next/previous weapon slot (mouse wheel), empty ones included
 function Inventory:cycle(dir)
-  for step = 1, inventory.WEAPON_SLOTS do
-    local i = (self.selected - 1 + dir * step) % inventory.WEAPON_SLOTS + 1
-    if self.weapons[i] then
-      self.selected = i
-      return
+  self.selected = (self.selected - 1 + dir) % inventory.WEAPON_SLOTS + 1
+end
+
+-- Where a picked-up weapon goes: the selected slot if it is empty, else the
+-- first empty one (nil if all are full)
+function Inventory:freeWeaponSlot()
+  if not self.weapons[self.selected] then
+    return self.selected
+  end
+  for i = 1, inventory.WEAPON_SLOTS do
+    if not self.weapons[i] then
+      return i
     end
   end
+  return nil
 end
 
 -- Only the held gun reloads. Switching away mid-reload cancels it (it starts
@@ -137,9 +145,6 @@ function Inventory:move(from, to)
     elseif self.selected == to.index then
       self.selected = from.index
     end
-  end
-  if not self.weapons[self.selected] then
-    self:cycle(1)
   end
   return true
 end

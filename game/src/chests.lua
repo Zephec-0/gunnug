@@ -145,7 +145,7 @@ function chests.drawScreen(toScreen, font, player)
   local x, y = math.floor(sx - font:getWidth(text) / 2), math.floor(sy - font:getHeight())
   love.graphics.setColor(0, 0, 0, 0.85)
   love.graphics.print(text, x + 2, y + 2)
-  love.graphics.setColor(1, 0.9, 0.6)
+  love.graphics.setColor(0.97, 0.98, 1)
   love.graphics.print(text, x, y)
 end
 

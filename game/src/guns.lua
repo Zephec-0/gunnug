@@ -25,16 +25,17 @@ guns.defs = {
     length = 8.8, -- grip to muzzle, in pixels
     kick = 1, -- strength of the cosmetic recoil kick in the hands
     flash = 1, -- muzzle flash size
-    -- Inventory icon: L light steel, # dark steel, c cylinder, w wood grip
+    -- Inventory icon: L light steel, # dark steel, k black, c the part that
+    -- moves when reloading (cylinder, drum or magazine), w dark and W light wood
     icon = {
       "                ",
-      "   LLLLLLLLLLLLL",
-      "  #############L",
-      "  ####ccc###    ",
-      "  ##  ccc  #    ",
-      " www###  ##     ",
-      "wwww            ",
-      "www             ",
+      "     k  LLLLLLLL",
+      "   kkLL#########",
+      "  ###kcccccc####",
+      "  ##Wkcccccc### ",
+      " wWW###kkkk#    ",
+      " wWWW   ##      ",
+      " wWW            ",
     },
   },
 
@@ -65,11 +66,11 @@ guns.defs = {
       "                ",
       "                ",
       "     LLLLLLLLLLL",
-      "www#############",
-      "wwwwww##c       ",
-      "wwww   #        ",
+      "  wwk###########",
+      " wWWWkcc#WWWW## ",
+      "wWWW  cc  WW    ",
+      "wWW             ",
       "ww              ",
-      "                ",
     },
   },
 
@@ -95,13 +96,13 @@ guns.defs = {
     flash = 0.9,
     icon = {
       "                ",
-      "   ############ ",
-      "  LLLLLLLLLLLLL#",
-      "  ####cc########",
-      "  ##   ##  #    ",
-      " www#  ##       ",
-      "wwww# ###       ",
-      "www   ##        ",
+      "   ###########  ",
+      "  LLLLLLLLLLLL##",
+      "  ##k##########L",
+      "  ##  ccc  #    ",
+      " wWW# ccc       ",
+      "wWWW  ccc       ",
+      "wWW             ",
     },
   },
 
@@ -129,13 +130,13 @@ guns.defs = {
     kick = 0.45,
     flash = 0.7,
     icon = {
-      "                ",
-      "     ##         ",
-      "LL#############L",
-      "  #######cccccLL",
-      "ww###  ##       ",
-      "www#   ###      ",
-      "ww     ###      ",
+      "    ccccc       ",
+      "   ccccccc      ",
+      "LL##ccccc######L",
+      "kkLLLLLLLLLLLL##",
+      "wwW##  ##    #  ",
+      "wWW#   ###      ",
+      "wW     ##       ",
       "        #       ",
     },
   },

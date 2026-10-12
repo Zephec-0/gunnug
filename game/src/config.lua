@@ -79,6 +79,16 @@ local config = {
     hurtKnockback = 170, -- sideways speed away from what hit him
     hurtLift = 120,
 
+    -- Dodge roll (Shift): a quick tucked roll along the ground, the way the
+    -- hunter is moving (or facing). Hits can't land for part of it.
+    rollSpeed = 250, -- speed at the start of the roll...
+    rollEndSpeed = 90, -- ...easing down to this by the end
+    rollTime = 0.38,
+    rollIFrameStart = 0.03, -- invulnerable from this far into the roll...
+    rollIFrameEnd = 0.27, -- ...until this far in
+    rollCooldown = 0.55, -- from the start of one roll to the next
+    rollBuffer = 0.12, -- a press this long before landing still rolls on touchdown
+
     kickRange = 14,
     kickForce = 272,
     kickLift = 112,

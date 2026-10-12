@@ -124,6 +124,8 @@ function testroom.populate(world)
   enemies.spawn("ghoul", 760, world:findGround(760, BORDER + 160))
   enemies.spawn("bat", 880, 391)
   enemies.spawn("spitter", 960, 391)
+  -- A DPS dummy, like the one in every shop
+  enemies.spawn("dummy", 290, world:findGround(290, BORDER + 160))
 end
 
 return testroom

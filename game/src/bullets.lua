@@ -7,6 +7,7 @@
 local audio = require("src.audio")
 local destruction = require("src.destruction")
 local effects = require("src.effects")
+local fluids = require("src.fluids")
 local enemies = require("src.enemies")
 local materials = require("src.materials")
 local props = require("src.props")
@@ -73,6 +74,7 @@ local function explode(b, w, x, y)
   local damage = (10 + 4 * (count - 1)) * scale
   destruction.dig(w, x, y, math.max(3, radius * 0.25), 1.5, b.dx, b.dy)
   effects.explosion(x, y, radius)
+  fluids.explosion(x, y, radius) -- lights any gas it reaches
   audio.play("explosion")
   shop.explosion(x, y, radius)
   -- The hunter is caught in it too
@@ -188,6 +190,9 @@ local function trailFx(b, dt)
   if has(fx, "gravity") and r() < dt * 50 then
     local a = r() * math.pi * 2
     effects.particle(x + math.cos(a) * 7, y + math.sin(a) * 7, -math.cos(a) * 30, -math.sin(a) * 30, 0.22, { 0.6, 0.35, 0.95 }, 0, true) -- drawn inward
+  end
+  if b.burn then
+    fluids.ignite(b.x, b.y, 0.6, true) -- incendiary rounds light gas as they pass through it
   end
   if b.burn and r() < dt * 45 then
     effects.particle(x, y, (r() - 0.5) * 10, -10, 0.35, { 1, 0.55 + r() * 0.3, 0.15 }, -60, true) -- embers

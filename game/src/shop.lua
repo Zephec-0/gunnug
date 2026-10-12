@@ -1,5 +1,7 @@
 -- The shop rooms (design doc §9). At the end of each area the shop has:
---   * three perk pedestals at the far left (free: take one and the others
+--   * a DPS dummy at the far left end, a practice range for checking guns
+--     (an enemy of kind "dummy", spawned by the area; see src.enemies);
+--   * three perk pedestals to its right (free: take one and the others
 --     vanish; the perks are rolled when the hunter walks in);
 --   * a healing pedestal to their right (ivory, with a glowing heart): each E
 --     buys 10% of max health, priced by how much health is missing;
@@ -13,9 +15,11 @@
 -- A weapon bought with all three weapon slots full opens the compare prompt
 -- first, and is only paid for once you pick which gun to replace.
 local audio = require("src.audio")
+local fontFace = require("src.fonts")
 local compare = require("src.compare")
 local effects = require("src.effects")
 local guns = require("src.guns")
+local gunInfo = require("src.gunInfo")
 local inventory = require("src.inventory")
 local icons = require("src.icons")
 local itembar = require("src.itembar")
@@ -33,9 +37,15 @@ local SPACING = 20
 local ITEMS = 8
 local HEAL_FRACTION = 0.1 -- of max health per purchase
 local HATCH_DELAY = 0.7 -- seconds between the chain breaking and the plate dropping
+local RANGE = 80 -- the DPS dummy's range at the left end; the goods start after it
 
--- Set by the scene: called with the shop's area number when its hatch is about
--- to open, so the area below can be made sure to exist
+-- Where the DPS dummy stands in a shop room (x centre, floor y)
+function shop.dummySpot(room)
+  return room.x + 26, room.y + room.h
+end
+
+-- Set by the scene: called with the index of the area below when a shop's hatch
+-- is about to open, so that area can be made sure to exist
 shop.onHatchBreak = nil
 
 function shop.clear()
@@ -54,17 +64,20 @@ local function priceOf(entry)
   return math.max(5, roundTo5(entry.price * perks.prod("shopPrice")))
 end
 
--- Creates the shop for the room rectangle { x, y, w, h, hatch? } of area `level`
-function shop.populate(room, world, level)
+-- Creates the shop for the room rectangle { x, y, w, h, hatch? } of an area
+-- `level` deep (the heal price rises with it); child: the index of the area
+-- its hatch drops into
+function shop.populate(room, world, level, child)
   local s = {
     room = room,
     world = world,
     level = level,
+    child = child,
     floorY = room.y + room.h,
     stock = {},
     locked = false,
     entered = false,
-    heal = { x = room.x + 105 },
+    heal = { x = room.x + RANGE + 105 },
   }
   shops[#shops + 1] = s
   local function add(entry, x)
@@ -77,7 +90,7 @@ function shop.populate(room, world, level)
 
   -- Three perk pedestals at the far left; what they hold is rolled on entry
   for i = 1, 3 do
-    add({ kind = "perk", name = "", price = 0, hidden = true }, room.x + 30 + (i - 1) * 25)
+    add({ kind = "perk", name = "", price = 0, hidden = true }, room.x + RANGE + 30 + (i - 1) * 25)
   end
 
   -- Two weapons, then the ammo types and attachments to their right
@@ -89,7 +102,7 @@ function shop.populate(room, world, level)
         fitted = fitted + 1
       end
     end
-    add({ kind = "weapon", gun = gun, name = gun.name, price = roundTo5(45 + 25 * fitted + 8 * math.max(0, gun.slotCount - gun.def.slots) + love.math.random(0, 20)) }, room.x + 155 + (w - 1) * 30)
+    add({ kind = "weapon", gun = gun, name = gun.name, price = roundTo5(45 + 25 * fitted + 8 * math.max(0, gun.slotCount - gun.def.slots) + 12 * (gunInfo.gradeIndex(gun) - 1) + love.math.random(0, 20)) }, room.x + RANGE + 155 + (w - 1) * 30)
   end
   local used = {}
   for i = 1, ITEMS do
@@ -99,7 +112,7 @@ function shop.populate(room, world, level)
     until not used[item.id]
     used[item.id] = true
     local range = items.rarities[item.rarity].price
-    add({ kind = "item", item = item, name = item.name, price = roundTo5(love.math.random(range[1], range[2])) }, room.x + 235 + (i - 1) * SPACING)
+    add({ kind = "item", item = item, name = item.name, price = roundTo5(love.math.random(range[1], range[2])) }, room.x + RANGE + 235 + (i - 1) * SPACING)
   end
 
   local h = room.hatch
@@ -166,6 +179,18 @@ local function takePerk(s, e, player)
   end
 end
 
+-- The weapon on a pedestal under a world point (for the hover card)
+function shop.weaponAt(wx, wy)
+  for _, s in ipairs(shops) do
+    for _, e in ipairs(s.stock) do
+      if e.kind == "weapon" and not e.sold and math.abs(wx - e.x) <= 12 and wy >= s.floorY - 20 and wy <= s.floorY then
+        return e.gun, e.x, s.floorY - 22
+      end
+    end
+  end
+  return nil
+end
+
 -- What the hunter is next to: returns shop, kind ("stock" or "heal"), entry
 local function nearest(player)
   local px, py = player:center()
@@ -188,11 +213,15 @@ local function nearest(player)
   return bs, bk, be
 end
 
--- Healing is priced by how much health is missing: 5g when nearly full up to
--- 25g when nearly dead, for each 10% of max health
-local function healCost(player)
+-- Healing is priced by how much health is missing: 8g when nearly full up to
+-- 40g when nearly dead, for each 10% of max health, and 80% dearer with each
+-- area further down (shop s of area s.level)
+local HEAL_AREA_RISE = 0.8
+
+local function healCost(player, s)
   local missing = (player.maxHp - player.hp) / player.maxHp
-  return roundTo5((5 + 20 * missing) * perks.prod("healPrice"))
+  local area = 1 + (s.level - 1) * HEAL_AREA_RISE
+  return roundTo5((8 + 32 * missing) * area * perks.prod("healPrice"))
 end
 
 local function healAmount(player)
@@ -222,7 +251,7 @@ function shop.interact(player)
       audio.play("deny", 0.6)
       return true
     end
-    local cost = healCost(player)
+    local cost = healCost(player, s)
     if inv.gold < cost then
       say("Not enough gold", { 1, 0.45, 0.4 })
       audio.play("deny")
@@ -257,14 +286,12 @@ function shop.interact(player)
     audio.play("buy")
     say(e.name, e.item.color)
   else
-    for i = 1, inventory.WEAPON_SLOTS do
-      if not inv.weapons[i] then
-        inv.weapons[i] = e.gun
-        shop.take(e, inv)
-        audio.play("buy")
-        say(e.name, { 1, 0.9, 0.6 })
-        return true
-      end
+    local slot = inv:freeWeaponSlot()
+    if slot then
+      inv.weapons[slot] = e.gun
+      shop.take(e, inv)
+      audio.play("buy")
+      return true
     end
     compare.open(e.gun, e) -- paid for when a weapon to replace is chosen
   end
@@ -299,7 +326,7 @@ function shop.breakChain(s)
   end
   -- The area below must exist before the floor opens onto it
   if shop.onHatchBreak then
-    shop.onHatchBreak(s.level)
+    shop.onHatchBreak(s.child)
   end
 end
 
@@ -455,13 +482,18 @@ end
 local function drawFloorDressing(s)
   local r, f = s.room, s.floorY
   love.graphics.setColor(0.40, 0.09, 0.12)
-  rect(r.x + 14, f - 1, 415, 1)
+  rect(r.x + RANGE + 14, f - 1, 415, 1)
   love.graphics.setColor(0.80, 0.62, 0.24)
-  for x = r.x + 14, r.x + 428, 7 do
+  for x = r.x + RANGE + 14, r.x + RANGE + 428, 7 do
     rect(x, f - 1, 3, 1)
   end
-  -- Barrel against the left wall
-  local bx = r.x + 6
+  -- A chalk line marking the end of the dummy's range
+  love.graphics.setColor(0.62, 0.60, 0.56)
+  for x = r.x + RANGE - 30, r.x + RANGE - 26 do
+    rect(x, f - 1, 1, 1)
+  end
+  -- Barrel at the edge of the range
+  local bx = r.x + RANGE - 6
   love.graphics.setColor(0.36, 0.24, 0.14)
   rect(bx, f - 11, 9, 11)
   love.graphics.setColor(0.46, 0.32, 0.20)
@@ -470,7 +502,7 @@ local function drawFloorDressing(s)
   rect(bx, f - 9, 9, 1)
   rect(bx, f - 3, 9, 1)
   -- Crates stacked between the merchant and the hatch
-  local cx = r.x + 520
+  local cx = r.x + RANGE + 520
   for i = 0, 1 do
     local y = f - 10 - i * 10
     love.graphics.setColor(0.42, 0.30, 0.18)
@@ -486,7 +518,7 @@ end
 
 -- The merchant: a hooded figure behind a counter, breathing slowly
 local function merchantX(s)
-  return s.room.x + 455
+  return s.room.x + RANGE + 455
 end
 
 local function drawMerchant(s)
@@ -714,7 +746,12 @@ function shop.drawScreen(toScreen, font, player)
   local gold = player.inventory.gold
   local sw, sh = love.graphics.getDimensions()
 
-  local function label(text, sx, sy, color)
+  local function label(text, sx, sy, color, grade)
+    if grade then
+      local x, y = math.floor(sx - fontFace.gradedWidth(font, text, grade) / 2), math.floor(sy - font:getHeight())
+      fontFace.printGraded(font, text, grade, x, y, color, 2)
+      return y
+    end
     local x, y = math.floor(sx - font:getWidth(text) / 2), math.floor(sy - font:getHeight())
     love.graphics.setColor(0, 0, 0, 0.85)
     love.graphics.print(text, x + 2, y + 2)
@@ -731,13 +768,13 @@ function shop.drawScreen(toScreen, font, player)
         local amount = healAmount(player)
         local price
         if amount > 0 then
-          price = healCost(player)
-          label(price .. "g", hx, hy, gold >= price and { 1, 0.86, 0.45 } or { 0.85, 0.4, 0.38 })
+          price = healCost(player, s)
+          label(price .. "g", hx, hy, gold >= price and { 0.95, 0.97, 1 } or { 0.85, 0.4, 0.38 })
         else
           label("Full health", hx, hy, { 0.7, 0.85, 0.7 })
         end
         if ns == s and nkind == "heal" then
-          label("[E] Heal +" .. math.max(amount, 0) .. " HP", hx, hy - font:getHeight() - 4, { 1, 0.95, 0.75 })
+          label("[E] Heal +" .. math.max(amount, 0) .. " HP", hx, hy - font:getHeight() - 4, { 0.98, 0.99, 1 })
         end
       end
       for _, e in ipairs(s.stock) do
@@ -747,7 +784,7 @@ function shop.drawScreen(toScreen, font, player)
             local price = priceOf(e)
             local y = sy
             if e.kind ~= "perk" then
-              y = label(price .. "g", sx, sy, gold >= price and { 1, 0.86, 0.45 } or { 0.85, 0.4, 0.38 })
+              y = label(price .. "g", sx, sy, gold >= price and { 0.95, 0.97, 1 } or { 0.85, 0.4, 0.38 })
             end
             if e == nentry then
               local thing = e.perk or e.item
@@ -755,7 +792,7 @@ function shop.drawScreen(toScreen, font, player)
               if thing and thing.rarity ~= "common" then
                 title = title .. " (" .. items.rarities[thing.rarity].name .. ")"
               end
-              y = label(title, sx, y - 2, thing and thing.rarity == "cursed" and { 1, 0.55, 0.5 } or { 1, 0.95, 0.75 })
+              y = label(title, sx, y - 2, thing and thing.rarity == "cursed" and { 1, 0.55, 0.5 } or { 0.98, 0.99, 1 }, e.kind == "weapon" and gunInfo.grade(e.gun) or nil)
               if thing and thing.desc then
                 -- The effect, wrapped in a box above the prompt
                 local width = 460

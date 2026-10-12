@@ -6,9 +6,12 @@
 --   build(opts) -> world, spawnX, spawnY
 --   populate(world)               place targets/props (after physics exists)
 -- and optionally:
---   update(dt, player, game, effects)  triggers, ambient effects, background work
+--   update(dt, player, game, effects)  triggers, ambient effects
+--   background()                  work that keeps going even while paused
+--                                 (menus, the weapon panel), such as generation
 --   ambient                       light level colour (default: fully lit)
 --   addLights(lighting, camX, camY) light sources (lanterns, candles, moon)
+--   drawFront(camX, camY)         world-space layer in front of the player (lit)
 --   drawEmissive(camX, camY)      world-space glows drawn after the lighting
 --   drawBackground(camX, camY)    on the low-res canvas, behind everything
 --   drawDecor(camX, camY)         world-space decorations behind the player
@@ -104,11 +107,16 @@ function game.load()
     end
     local px, py = player:center()
     pickups.dropWeapon(px + player.facing * 6, py, old, player.facing * 70, -50)
-    effects.popup(px, py - 14, newGun.name, { 1, 0.9, 0.6 })
+    effects.weaponCard(px, py - 22, newGun)
   end
   -- With all weapon slots full, picking up a weapon asks which to replace
   pickups.onWeaponFull = function(p)
     compare.open(p.gun, p)
+  end
+  -- So do weapons dragged off the bar
+  itembar.onDropWeapon = function(gun)
+    local px, py = player:center()
+    pickups.dropWeapon(px + player.facing * 6, py, gun, player.facing * 70, -50)
   end
   -- Items dragged out of the inventory land on the ground by the hunter's feet
   itembar.onDrop = function(item)
@@ -171,6 +179,9 @@ function game.update(dt)
   love.mouse.setVisible(itembar.isOpen() or menu.isOpen() or compare.isOpen())
   menu.update()
   compare.update()
+  if scene.background then
+    scene.background()
+  end
   if itembar.isOpen() or menu.isOpen() or compare.isOpen() then
     return
   end
@@ -230,6 +241,7 @@ function game.draw()
   player:addLights(lighting)
   enemies.addLights(lighting, view)
   pickups.addLights(lighting, view)
+  props.addLights(lighting, view)
   chests.addLights(lighting, view)
   shop.addLights(lighting, view)
   bullets.addLights(lighting)
@@ -237,7 +249,9 @@ function game.draw()
   if scene.addLights then
     scene.addLights(lighting, camX, camY)
   end
-  lighting.render(camX, camY)
+  lighting.render(camX, camY, function()
+    world:draw(camX, camY, config.VIRTUAL_W, config.VIRTUAL_H)
+  end)
 
   render.beginWorld()
   if scene.drawBackground then
@@ -250,14 +264,18 @@ function game.draw()
   end
   world:draw(camX, camY, config.VIRTUAL_W, config.VIRTUAL_H)
   targets.draw()
-  props.draw()
+  props.draw(view)
   chests.draw(view)
   shop.draw(view)
   enemies.draw(view)
   player:draw()
   effects.drawWorld()
+  if scene.drawFront then
+    scene.drawFront(camX, camY)
+  end
   love.graphics.pop()
 
+  lighting.drawMotes(camX, camY)
   lighting.apply()
 
   -- Emissive pass: glows that ignore the darkness
@@ -268,6 +286,7 @@ function game.draw()
   end
   player:drawEmissive()
   enemies.drawEmissive(view)
+  props.drawEmissive(view)
   pickups.drawEmissive(view)
   chests.drawEmissive(view)
   shop.drawEmissive(view)
@@ -300,9 +319,23 @@ function game.draw()
     scene.drawScreen(toScreen, font)
   end
   effects.drawScreen(toScreen, font)
+  enemies.drawScreen(toScreen, font)
   pickups.drawScreen(toScreen, font, player)
   chests.drawScreen(toScreen, font, player)
   shop.drawScreen(toScreen, font, player)
+  -- Hovering the mouse over a weapon lying about, or on a shop pedestal, shows
+  -- what it is before you take it
+  if not (itembar.isOpen() or menu.isOpen() or compare.isOpen()) then
+    local wx, wy = mouseVX + camX, mouseVY + camY
+    local gun, gx, gy = pickups.weaponAt(wx, wy)
+    if not gun then
+      gun, gx, gy = shop.weaponAt(wx, wy)
+    end
+    if gun then
+      local sx, sy = toScreen(gx, gy)
+      effects.drawWeaponCard(sx, sy, gun, font)
+    end
+  end
   -- The title screen stands alone; a pause menu keeps the HUD but hides the
   -- area banner, which would show through it
   if menu.state() ~= "title" then
@@ -349,6 +382,8 @@ function game.keypressed(key)
     player:pressJump()
   elseif key == "f" and not player.dead then
     player:kick()
+  elseif (key == "lshift" or key == "rshift") and not player.dead then
+    player:pressRoll()
   elseif key == "e" and not player.dead then
     if not chests.interact(player) and not shop.interact(player) then
       pickups.interact(player)
@@ -358,13 +393,17 @@ function game.keypressed(key)
     local gun = guns.generate()
     inv.weapons[inv.selected] = gun
     local px, py = player:center()
-    effects.popup(px, py - 14, gun.name, { 1, 0.9, 0.6 })
+    effects.weaponCard(px, py - 22, gun)
   elseif key == "r" then
     newRun()
   elseif key == "f9" then
     game.enter("testroom")
   elseif key == "f10" then
     game.enter("overworld", { atCave = true }) -- a fresh world, starting at the catacombs' entrance
+  elseif key == "f8" and scene.toArena and not player.dead then
+    -- Testing: straight to the Sulfur Queen's arena
+    scene.toArena(player)
+    camera.snap(player:center())
   elseif key == "f2" then
     showPhysics = not showPhysics
   else

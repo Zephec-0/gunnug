@@ -20,6 +20,11 @@ local materials = {
   IRON = 10,
   SLATE = 11,
   BLUECLAY = 12,
+  SULFUR = 13,
+  BILECLAY = 14,
+  TAILINGS = 15,
+  BASALT = 16,
+  ASH = 17,
 }
 
 materials.defs = {
@@ -141,6 +146,56 @@ materials.defs = {
     color = { 0.20, 0.28, 0.43 },
     topColor = { 0.24, 0.46, 0.44 }, -- a cold green moss
     variation = 0.07,
+  },
+  -- Area 3 palette: crusted yellow sulfur rock and olive bile clay
+  [13] = {
+    name = "sulfur rock",
+    solid = true,
+    hardness = 3,
+    density = 2.3,
+    color = { 0.50, 0.44, 0.15 },
+    topColor = { 0.84, 0.74, 0.24 }, -- a crust of bright sulfur
+    variation = 0.06,
+    bands = 0.05,
+  },
+  [14] = {
+    name = "bile clay",
+    solid = true,
+    hardness = 1,
+    density = 1.6,
+    color = { 0.22, 0.30, 0.12 },
+    topColor = { 0.42, 0.62, 0.16 }, -- sickly green moss
+    variation = 0.07,
+  },
+  -- Grey-brown spoil dug out of the old mine (the overworld's tailings)
+  [15] = {
+    name = "tailings",
+    solid = true,
+    hardness = 1,
+    density = 1.7,
+    color = { 0.40, 0.35, 0.31 },
+    topColor = { 0.50, 0.45, 0.39 },
+    variation = 0.09,
+  },
+  -- Area 4a palette: scorched basalt and ash (the Cinder Warrens)
+  [16] = {
+    name = "basalt",
+    solid = true,
+    hardness = 3,
+    density = 2.7,
+    color = { 0.27, 0.18, 0.18 },
+    topColor = { 0.52, 0.30, 0.22 }, -- hot at the edges
+    variation = 0.06,
+    bands = 0.04,
+  },
+  [17] = {
+    name = "ash",
+    solid = true,
+    hardness = 1,
+    density = 1.2,
+    color = { 0.30, 0.28, 0.28 },
+    topColor = { 0.46, 0.41, 0.38 },
+    variation = 0.08,
   },
 }
 

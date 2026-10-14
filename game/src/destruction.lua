@@ -1,6 +1,7 @@
 -- Destructible terrain: digging craters, and turning chunks of terrain that
 -- have been cut loose into falling physics debris (design doc §6).
 local effects = require("src.effects")
+local fluids = require("src.fluids")
 local materials = require("src.materials")
 local physics = require("src.physics")
 local pickups = require("src.pickups")
@@ -44,6 +45,7 @@ local function clearPixels(world, pixels)
   end
   world:repaintRegion(x0, y0, x1, y1) -- recolour and re-shade around the hole once
   physics.rebuildRegion(x0, y0, x1, y1)
+  fluids.wake(x0, y0, x1, y1) -- water next to the hole starts to run at once
 end
 
 -- Splits the chunk's pixel mask into rectangles for Box2D fixtures:

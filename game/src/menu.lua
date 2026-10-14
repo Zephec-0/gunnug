@@ -1,169 +1,1604 @@
--- Title screen and pause menu (design doc §9b). While a menu is open the game
--- is paused; the world is drawn dimmed behind it. Navigate with W/S or the
--- arrow keys and Enter, or the mouse (buttons fire on release, so the click
--- that picks one never reaches the game as a shot).
+-- The menus (design doc §9b): the title screen and its pages (save files,
+-- compendium, settings), and the pause menu. While a menu is open the game is
+-- paused. The title screen stands over the black hole (src.menubg); the pause
+-- menu over the dimmed world.
 --
--- The menu only reports which action was chosen; src.game carries it out:
---   "play", "resume", "restart", "title", "quit"
+-- Navigation: arrows or WASD move between controls (spatially, so grids and
+-- rows work as you'd expect), Enter/Space chooses, left/right change sliders
+-- and switches, Q/E (or [ ]) change tabs, Esc/Backspace or the right mouse
+-- button go back. The mouse hovers to select and clicks on release (so the
+-- click that picks "Play" never reaches the game as a shot).
+--
+-- The menu carries out its own pages; for anything that changes the game it
+-- calls menu.onAction(action, arg), set by src.game:
+--   "play" (slot), "resume", "restart", "title", "quit"
 local audio = require("src.audio")
-local hud = require("src.hud")
+local compendium = require("src.compendium")
+local fonts = require("src.fonts")
+local input = require("src.input")
+local render = require("src.render")
+local save = require("src.save")
+local settings = require("src.settings")
 
 local menu = {}
 
-local LAYOUTS = {
-  title = {
-    title = "GUNNUG",
-    subtitle = "A hunter's descent into the catacombs",
-    items = { { "Play", "play" }, { "Quit", "quit" } },
-  },
-  pause = {
-    title = "Paused",
-    items = { { "Resume", "resume" }, { "Restart run", "restart" }, { "Title screen", "title" }, { "Quit", "quit" } },
-  },
+menu.onAction = nil
+
+local root -- nil (closed), "title" or "pause"
+local stack = {} -- pages over the root: "slots", "compendium", "settings", "confirm"
+local focusId -- id of the focused control
+local widgets = {} -- the controls drawn last frame
+local pressedId -- the control the mouse went down on
+local dragging -- a slider being dragged
+local mouseX, mouseY = -1, -1
+local listening -- { action, slot } while waiting for a key to bind
+local confirmBox -- { text, detail, yes, yesLabel, noLabel, danger }
+local reveal = false -- scroll the focused control into view (after keyboard moves)
+local clock = 0
+local enterT = 0 -- time since the page changed (for the fade-in)
+
+-- Compendium page state
+local comp = { tab = 1, slot = nil, scroll = 0, target = 0, entry = nil }
+-- Settings page state
+local settingsTab = 1
+
+-- Colours
+local TEXT = { 0.94, 0.95, 1.0 }
+local DIM = { 0.66, 0.70, 0.80 }
+local FAINT = { 0.42, 0.44, 0.54 }
+local ACCENT = { 0.55, 0.75, 1.0 }
+local WARM = { 0.98, 0.72, 0.42 }
+local BORDER = { 0.55, 0.48, 0.42 }
+local DANGER = { 0.95, 0.38, 0.32 }
+local RARITY = {
+  common = { 0.72, 0.70, 0.68 },
+  rare = { 0.45, 0.72, 1.0 },
+  cursed = { 0.95, 0.30, 0.32 },
+  fused = { 0.25, 1.0, 0.82 },
 }
 
-local state -- nil (closed), "title" or "pause"
-local selected = 1
-local hitboxes = {}
-local pressed -- index of the button the mouse went down on
+-- Layout: a 400 x 225 unit space (the game's 640x360 area) centred in the window
+local u, ox, oy = 1, 0, 0
+local F = {}
 
-function menu.open(which)
-  state = which
-  selected = 1
-  pressed = nil
+local function X(x)
+  return math.floor(ox + x * u)
+end
+local function Y(y)
+  return math.floor(oy + y * u)
+end
+
+local function layout(scale)
+  u = scale
+  local ww, wh = love.graphics.getDimensions()
+  ox = (ww - 400 * u) / 2
+  oy = (wh - 225 * u) / 2
+  F.small = fonts.get(math.max(9, math.floor(u * 3.4))) -- (the face's 1x size is too small to read on a 1080p screen)
+  F.body = fonts.get(math.max(9, math.floor(u * 4)))
+  F.head = fonts.get(math.max(12, math.floor(u * 7.5)))
+end
+
+-- Pages ----------------------------------------------------------------------------
+
+local function top()
+  return stack[#stack] or root
+end
+
+local function setPage()
+  focusId = nil
+  pressedId = nil
+  dragging = nil
+  listening = nil
+  enterT = 0
+end
+
+local function push(page)
+  stack[#stack + 1] = page
+  setPage()
+  love.keyboard.setKeyRepeat(page == "name") -- (backspace repeats while typing a name)
+  audio.play("page")
+end
+
+local function pop()
+  if #stack > 0 then
+    local leaving = table.remove(stack)
+    setPage()
+    love.keyboard.setKeyRepeat(false)
+    audio.play("back")
+    -- Coming back to a list puts the focus back where it was
+    if leaving == "slots" then
+      focusId = "title:slots"
+    elseif leaving == "compendium" then
+      focusId = root .. ":compendium"
+    elseif leaving == "settings" then
+      focusId = root .. ":settings"
+    elseif leaving == "name" then
+      focusId = "title:slots"
+    end
+    return true
+  end
+  return false
+end
+
+local function act(action, arg)
+  if menu.onAction then
+    menu.onAction(action, arg)
+  end
+end
+
+local NAME_MAX = 14
+local nameState = { slot = nil, text = "" }
+
+-- Starts a run on slot i: a file with no name yet asks for one first
+local function startSlot(i)
+  local p = save.peek(i)
+  if p and p.name then
+    act("play", i)
+  else
+    nameState = { slot = i, text = "" }
+    push("name")
+  end
+end
+
+local function confirm(box)
+  confirmBox = box
+  push("confirm")
+  focusId = "confirm:no"
+end
+
+local recapData -- what the death recap tells: { name, killer, quip, discoveries }
+
+-- data: for "recap", the death to tell (see game.update)
+function menu.open(which, data)
+  root = which
+  recapData = data
+  stack = {}
+  setPage()
+  love.keyboard.setKeyRepeat(false)
+  if which == "title" then
+    comp.slot = nil
+  end
 end
 
 function menu.close()
-  state = nil
-  pressed = nil
+  root = nil
+  stack = {}
+  setPage()
+  love.keyboard.setKeyRepeat(false)
 end
 
 function menu.isOpen()
-  return state ~= nil
+  return root ~= nil
 end
 
 function menu.state()
-  return state
+  return root
 end
 
-local function items()
-  return LAYOUTS[state].items
+-- The title screen and its pages (drawn over the black hole, not the world)
+function menu.isFrontEnd()
+  return root == "title"
 end
 
-local function hitIndex(x, y)
-  for i, h in ipairs(hitboxes) do
-    if x >= h.x and x < h.x + h.w and y >= h.y and y < h.y + h.h then
-      return i
+-- Controls ---------------------------------------------------------------------------
+
+local function inside(w, x, y)
+  if w.clip then
+    local c = w.clip
+    if x < c[1] or y < c[2] or x >= c[1] + c[3] or y >= c[2] + c[4] then
+      return false
+    end
+  end
+  return x >= w.x and y >= w.y and x < w.x + w.w and y < w.y + w.h
+end
+
+local function hovered()
+  for i = #widgets, 1, -1 do
+    if inside(widgets[i], mouseX, mouseY) then
+      return widgets[i]
     end
   end
   return nil
 end
 
--- Returns an action name if the key chose one
-function menu.keypressed(key)
-  if not state then
-    return nil
-  end
-  local n = #items()
-  if key == "w" or key == "up" then
-    selected = (selected - 2) % n + 1
-    audio.play("tick")
-  elseif key == "s" or key == "down" then
-    selected = selected % n + 1
-    audio.play("tick")
-  elseif key == "return" or key == "kpenter" or key == "space" then
-    return items()[selected][2]
-  elseif key == "escape" and state == "pause" then
-    return "resume"
+local function find(id)
+  for _, w in ipairs(widgets) do
+    if w.id == id then
+      return w
+    end
   end
   return nil
 end
 
-function menu.mousepressed(x, y, button)
-  if state and button == 1 then
-    pressed = hitIndex(x, y)
-    if pressed then
-      selected = pressed
-    end
-  end
+-- Registers a control for this frame; returns true if it has the focus
+local function widget(w)
+  widgets[#widgets + 1] = w
+  return focusId == w.id
 end
 
--- Returns an action name if a button was clicked (pressed and released on it)
-function menu.mousereleased(x, y, button)
-  if not state or button ~= 1 then
-    return nil
-  end
-  local i = hitIndex(x, y)
-  local down = pressed
-  pressed = nil
-  if i and i == down then
-    return items()[i][2]
-  end
-  return nil
-end
-
--- Hovering selects
-function menu.update()
-  if state then
-    local i = hitIndex(love.mouse.getPosition())
-    if i then
-      selected = i
-    end
-  end
-end
-
-local function shadowText(text, x, y, f, color)
+local function shadowPrint(text, x, y, f, color, alpha)
   love.graphics.setFont(f)
-  love.graphics.setColor(0, 0, 0, 0.8)
-  love.graphics.print(text, math.floor(x) + 2, math.floor(y) + 2)
-  love.graphics.setColor(color)
+  local a = (color[4] or 1) * (alpha or 1)
+  love.graphics.setColor(0, 0, 0, 0.55 * a)
+  love.graphics.print(text, math.floor(x) + math.max(1, math.floor(u * 0.4)), math.floor(y) + math.max(1, math.floor(u * 0.4)))
+  love.graphics.setColor(color[1], color[2], color[3], a)
   love.graphics.print(text, math.floor(x), math.floor(y))
 end
 
-function menu.draw(scale)
-  if not state then
+local function printCentered(text, cx, y, f, color, alpha)
+  shadowPrint(text, cx - f:getWidth(text) / 2, y, f, color, alpha)
+end
+
+local function wrapped(text, x, y, width, f, color)
+  love.graphics.setFont(f)
+  love.graphics.setColor(color)
+  love.graphics.printf(text, math.floor(x), math.floor(y), math.floor(width), "left")
+  local _, lines = f:getWrap(text, width)
+  return #lines * f:getHeight() * f:getLineHeight()
+end
+
+local function panel(x, y, w, h, alpha, edge)
+  love.graphics.setColor(0.045, 0.035, 0.065, alpha or 0.9)
+  love.graphics.rectangle("fill", x, y, w, h, u, u)
+  love.graphics.setLineWidth(math.max(1, u * 0.4))
+  local e = edge or BORDER
+  love.graphics.setColor(e[1], e[2], e[3], (e[4] or 0.75))
+  love.graphics.rectangle("line", x, y, w, h, u, u)
+end
+
+-- A focus frame: a bright edge with small corner ticks, pulsing gently
+local function focusFrame(x, y, w, h, color)
+  color = color or ACCENT
+  local pulse = 0.75 + 0.25 * math.sin(clock * 5)
+  love.graphics.setLineWidth(math.max(1, u * 0.5))
+  love.graphics.setColor(color[1], color[2], color[3], pulse)
+  love.graphics.rectangle("line", x, y, w, h, u, u)
+  local t = math.max(2, math.floor(u * 2))
+  local k = math.max(1, math.floor(u * 0.6))
+  love.graphics.setColor(1, 1, 1, pulse)
+  love.graphics.rectangle("fill", x - k, y - k, t, k)
+  love.graphics.rectangle("fill", x - k, y - k, k, t)
+  love.graphics.rectangle("fill", x + w + k - t, y + h, t, k)
+  love.graphics.rectangle("fill", x + w, y + h + k - t, k, t)
+end
+
+-- A button. opts: align ("left"/"center"), sub (a second, dimmer line),
+-- danger (red when focused), disabled
+local function button(id, label, x, y, w, h, onActivate, opts)
+  opts = opts or {}
+  local focused = widget({ id = id, x = x, y = y, w = w, h = h, activate = not opts.disabled and onActivate or nil })
+  love.graphics.setColor(0.05, 0.04, 0.075, focused and 0.95 or 0.78)
+  love.graphics.rectangle("fill", x, y, w, h, u, u)
+  if focused then
+    focusFrame(x, y, w, h, opts.danger and DANGER or ACCENT)
+  else
+    love.graphics.setLineWidth(math.max(1, u * 0.4))
+    love.graphics.setColor(BORDER[1], BORDER[2], BORDER[3], 0.6)
+    love.graphics.rectangle("line", x, y, w, h, u, u)
+  end
+  local color = opts.disabled and FAINT or (focused and (opts.danger and DANGER or TEXT) or DIM)
+  local f = opts.font or F.body
+  local ty = y + (h - f:getHeight()) / 2
+  if opts.sub then
+    ty = y + h * 0.5 - f:getHeight() * 0.85
+  end
+  if opts.align == "left" then
+    local lx = x + 5 * u + (focused and u * 2 or 0)
+    if focused then
+      -- A small diamond marker
+      love.graphics.setColor(WARM)
+      local cx, cy = x + 3 * u, y + h / 2
+      love.graphics.polygon("fill", cx, cy - u, cx + u, cy, cx, cy + u, cx - u, cy)
+    end
+    shadowPrint(label, lx, ty, f, color)
+    if opts.sub then
+      shadowPrint(opts.sub, lx, ty + f:getHeight(), F.small, focused and WARM or FAINT)
+    end
+  else
+    printCentered(label, x + w / 2, ty, f, color)
+    if opts.sub then
+      printCentered(opts.sub, x + w / 2, ty + f:getHeight(), F.small, focused and WARM or FAINT)
+    end
+  end
+  return focused
+end
+
+-- A slider for a value 0..1 in tenths
+local function slider(id, x, y, w, h, value, onChange)
+  local function set(v)
+    v = math.max(0, math.min(1, math.floor(v * 10 + 0.5) / 10))
+    if v ~= value then
+      onChange(v)
+      audio.play("tick")
+    end
+  end
+  local barX, barW = x, w - 16 * u
+  local focused = widget({
+    id = id, x = x, y = y, w = w, h = h,
+    left = function()
+      set(value - 0.1)
+    end,
+    right = function()
+      set(value + 0.1)
+    end,
+    drag = function(mx)
+      set((mx - barX) / barW)
+    end,
+  })
+  local segs = 10
+  local gap = math.max(1, math.floor(u * 0.6))
+  local sw = (barW - gap * (segs - 1)) / segs
+  for i = 1, segs do
+    local on = value >= i / segs - 0.001
+    local sx = barX + (i - 1) * (sw + gap)
+    if on then
+      local k = i / segs
+      love.graphics.setColor(0.45 + 0.5 * k, 0.55 + 0.17 * k, 0.9 - 0.5 * k, focused and 1 or 0.8)
+    else
+      love.graphics.setColor(0.16, 0.14, 0.2, 0.9)
+    end
+    love.graphics.rectangle("fill", math.floor(sx), y + h * 0.25, math.ceil(sw), h * 0.5)
+  end
+  if focused then
+    focusFrame(barX - u, y + h * 0.25 - u, barW + 2 * u, h * 0.5 + 2 * u)
+  end
+  shadowPrint(math.floor(value * 100 + 0.5) .. "%", x + w - 13 * u, y + (h - F.body:getHeight()) / 2, F.body, focused and TEXT or DIM)
+end
+
+-- An on/off switch
+local function toggle(id, x, y, w, h, value, onChange)
+  local function flip()
+    onChange(not value)
+    audio.play("tick")
+  end
+  local focused = widget({ id = id, x = x, y = y, w = w, h = h, activate = flip, left = flip, right = flip })
+  local half = w / 2
+  for i = 0, 1 do
+    local on = (i == 1) == value
+    love.graphics.setColor(on and (value and { 0.35, 0.55, 0.85 } or { 0.32, 0.27, 0.3 }) or { 0.1, 0.09, 0.13 })
+    love.graphics.rectangle("fill", x + i * half, y + h * 0.15, half - u, h * 0.7, u * 0.6, u * 0.6)
+    printCentered(i == 0 and "Off" or "On", x + i * half + half / 2 - u / 2, y + (h - F.body:getHeight()) / 2, F.body, on and TEXT or FAINT)
+  end
+  if focused then
+    focusFrame(x - u, y + h * 0.15 - u, w + u, h * 0.7 + 2 * u)
+  end
+end
+
+local function rule(cx, y, width)
+  fonts.rule(cx, y, width, math.max(1, math.floor(u * 0.5)), ACCENT[1], ACCENT[2], ACCENT[3], 0.9)
+end
+
+local function pageTitle(text, x, y, center)
+  if center then
+    printCentered(text, x, y, F.head, TEXT)
+    rule(x, y + F.head:getHeight() + u, math.max(F.head:getWidth(text) * 1.4, 90 * u))
+  else
+    shadowPrint(text, x, y, F.head, TEXT)
+  end
+end
+
+
+-- Tabs along the top of a page; returns nothing (switching is handled by the caller's state)
+local function tabs(idPrefix, names, current, x, y, w, h, onSelect)
+  local tw = w / #names
+  for i, name in ipairs(names) do
+    local tx = x + (i - 1) * tw
+    local sel = i == current
+    local focused = widget({ id = idPrefix .. i, x = tx, y = y, w = tw - u, h = h, activate = function()
+      onSelect(i)
+    end })
+    love.graphics.setColor(sel and { 0.12, 0.09, 0.15, 0.95 } or { 0.05, 0.04, 0.07, 0.8 })
+    love.graphics.rectangle("fill", tx, y, tw - u, h, u, u)
+    if sel then
+      love.graphics.setColor(WARM)
+      love.graphics.rectangle("fill", tx + u, y + h - math.max(1, u * 0.6), tw - 3 * u, math.max(1, u * 0.6))
+    end
+    if focused then
+      focusFrame(tx, y, tw - u, h)
+    end
+    printCentered(name, tx + (tw - u) / 2, y + (h - F.body:getHeight()) / 2, F.body, sel and TEXT or (focused and TEXT or DIM))
+  end
+end
+
+-- The title screen -------------------------------------------------------------------
+
+-- The title's lettering: its position in game pixels, and its font (drawn
+-- scaled up by whole game pixels, so it matches the game's pixel size)
+local TITLE_X, TITLE_Y = 36, 44
+local titleFont
+
+local function lastProfileSlot()
+  local s = settings.get("lastSlot")
+  if s and save.peek(s) then
+    return s
+  end
+  return nil
+end
+
+local function anyProfileSlot()
+  local s = lastProfileSlot()
+  if s then
+    return s
+  end
+  for i = 1, save.SLOTS do
+    if save.peek(i) then
+      return i
+    end
+  end
+  return 1
+end
+
+local function slotSummary(i)
+  local p = save.peek(i)
+  if not p then
+    return nil
+  end
+  local found, total = compendium.progress(p)
+  return string.format("%sSlot %d - %s - %d%% compendium", p.name and (p.name .. " - ") or "", i, save.formatTime(p.playtime), total > 0 and math.floor(found / total * 100) or 0)
+end
+
+local PAGES = {}
+local WASH_STEPS = 24
+local washMesh
+local DEFAULT_FOCUS = { compendium = "comp:cell:", slots = "slots:", settings = "set:tab", recap = "recap:new", name = "name:confirm" }
+
+PAGES.title = function()
+  local ww, wh = love.graphics.getDimensions()
+  -- A dark wash down the left, under the menu: one smooth gradient
+  washMesh = washMesh or love.graphics.newMesh(WASH_STEPS * 2 + 2, "strip", "static")
+  for i = 0, WASH_STEPS do
+    local k = i / WASH_STEPS
+    local x = k * ww * 0.5
+    local a = 0.8 * (1 - k) ^ 1.5
+    washMesh:setVertex(i * 2 + 1, x, 0, 0, 0, 0.02, 0.015, 0.035, a)
+    washMesh:setVertex(i * 2 + 2, x, wh, 0, 0, 0.02, 0.015, 0.035, a)
+  end
+  love.graphics.setColor(1, 1, 1)
+  love.graphics.draw(washMesh)
+
+  -- The title, over the wash, at the game's pixel size; its rule and the tag line
+  local tx, ty = render.toScreen(TITLE_X, TITLE_Y)
+  titleFont = titleFont or fonts.get(44)
+  love.graphics.setFont(titleFont)
+  love.graphics.setColor(1, 1, 1)
+  love.graphics.print("GUNNUG", math.floor(tx), math.floor(ty), 0, render.scale, render.scale)
+  local tw = titleFont and titleFont:getWidth("GUNNUG") * render.scale or 160 * u
+  local th = titleFont and titleFont:getHeight() * render.scale or 30 * u
+  rule(tx + tw / 2, ty + th + 2 * u, tw * 1.15)
+  printCentered("A hunter's descent into the catacombs", tx + tw / 2, ty + th + 6 * u, F.small, DIM)
+
+  local x, y, w, h, gap = X(22), Y(104), math.floor(118 * u), math.floor(13 * u), math.floor(3.5 * u)
+  local last = lastProfileSlot()
+  if last then
+    button("title:continue", "Continue", x, y, w, math.floor(h * 1.35), function()
+      startSlot(last)
+    end, { align = "left", sub = slotSummary(last) })
+    y = y + math.floor(h * 1.35) + gap
+  end
+  local anySaves = false
+  for i = 1, save.SLOTS do
+    anySaves = anySaves or save.peek(i) ~= nil
+  end
+  button("title:slots", anySaves and "Save Files" or "New Game", x, y, w, h, function()
+    push("slots")
+  end, { align = "left" })
+  y = y + h + gap
+  button("title:compendium", "Compendium", x, y, w, h, function()
+    comp.slot = comp.slot or anyProfileSlot()
+    push("compendium")
+  end, { align = "left" })
+  y = y + h + gap
+  button("title:settings", "Settings", x, y, w, h, function()
+    push("settings")
+  end, { align = "left" })
+  y = y + h + gap
+  button("title:quit", "Quit", x, y, w, h, function()
+    act("quit")
+  end, { align = "left" })
+
+end
+
+-- The low-res part of the title screen (between render.beginWorld and
+-- endWorld): nothing at the moment (the title is drawn over the menu's wash)
+function menu.drawWorldLayer() end
+
+-- Save files ---------------------------------------------------------------------------
+
+local function deepestName(p)
+  local d = p.stats.deepest or 0
+  if d <= 0 then
+    return "The Barrens"
+  end
+  local ok, catacombs = pcall(require, "src.scenes.catacombs")
+  return ok and catacombs.areaName(d) or ("Area " .. d)
+end
+
+PAGES.slots = function()
+  pageTitle("Save Files", X(22), Y(14))
+  shadowPrint("Each file keeps its own compendium and records. Runs are not saved part-way.", X(22), Y(30), F.small, FAINT)
+  local x, w, h = X(22), math.floor(230 * u), math.floor(40 * u)
+  local y = Y(42)
+  for i = 1, save.SLOTS do
+    local p = save.peek(i)
+    local cardW = w - math.floor(36 * u)
+    local focused = widget({ id = "slots:" .. i, x = x, y = y, w = cardW, h = h, activate = function()
+      startSlot(i)
+    end })
+    panel(x, y, cardW, h, focused and 0.95 or 0.82)
+    if focused then
+      focusFrame(x, y, cardW, h)
+    end
+    local px, py = x + 5 * u, y + 4 * u
+    shadowPrint("Slot " .. i, px, py, F.body, focused and WARM or TEXT)
+    local after = px + F.body:getWidth("Slot " .. i) + 3 * u
+    if p and p.name then
+      shadowPrint(p.name, after, py, F.body, focused and TEXT or DIM)
+      after = after + F.body:getWidth(p.name) + 3 * u
+    end
+    if save.activeSlot() == i then
+      shadowPrint("(in use)", after, py + u, F.small, FAINT)
+    end
+    if p then
+      local found, total = compendium.progress(p)
+      local pct = total > 0 and found / total or 0
+      local right = x + cardW - 5 * u
+      local label = string.format("%d / %d", found, total)
+      shadowPrint(label, right - F.body:getWidth(label), py, F.body, DIM)
+      -- Completion bar
+      local by = py + F.body:getHeight() + 1.5 * u
+      local bw = cardW - 10 * u
+      love.graphics.setColor(0.14, 0.12, 0.18)
+      love.graphics.rectangle("fill", px, by, bw, math.max(2, u * 1.2))
+      love.graphics.setColor(WARM)
+      love.graphics.rectangle("fill", px, by, bw * pct, math.max(2, u * 1.2))
+      local s = p.stats
+      local l1 = string.format("Playtime %s    Runs %d    Deaths %d", save.formatTime(p.playtime), s.runs, s.deaths)
+      local l2 = string.format("Monsters slain %d    Bosses %d    Gold earned %d", s.kills, s.bosses, s.gold)
+      local l3 = "Deepest: " .. deepestName(p) .. "    Last played " .. os.date("%Y-%m-%d", p.lastPlayed)
+      shadowPrint(l1, px, by + 3.5 * u, F.small, DIM)
+      shadowPrint(l2, px, by + 3.5 * u + F.small:getHeight() * 1.3, F.small, DIM)
+      shadowPrint(l3, px, by + 3.5 * u + F.small:getHeight() * 2.6, F.small, FAINT)
+    else
+      shadowPrint("Empty", px, py + F.body:getHeight() + 3 * u, F.body, FAINT)
+      shadowPrint("Start a new hunter here", px, py + F.body:getHeight() * 2 + 4 * u, F.small, focused and WARM or FAINT)
+    end
+    -- Delete
+    local dx = x + cardW + 3 * u
+    if p then
+      button("slots:delete" .. i, "Delete", dx, y, math.floor(33 * u), h, function()
+        confirm({
+          text = "Delete Slot " .. i .. "?",
+          detail = "Its compendium and records will be lost for good.",
+          yesLabel = "Delete",
+          danger = true,
+          yes = function()
+            save.erase(i)
+            if settings.get("lastSlot") == i then
+              settings.set("lastSlot", false)
+            end
+            pop()
+            focusId = "slots:" .. i
+          end,
+        })
+      end, { danger = true, font = F.small })
+    end
+    y = y + h + math.floor(5 * u)
+  end
+end
+
+-- Confirmation box -------------------------------------------------------------------
+
+PAGES.confirm = function()
+  local ww, wh = love.graphics.getDimensions()
+  love.graphics.setColor(0, 0, 0, 0.55)
+  love.graphics.rectangle("fill", 0, 0, ww, wh)
+  local b = confirmBox
+  local w, h = math.floor(180 * u), math.floor(46 * u)
+  local x, y = math.floor((ww - w) / 2), math.floor((wh - h) / 2)
+  panel(x, y, w, h, 0.97, b.danger and DANGER or BORDER)
+  printCentered(b.text, x + w / 2, y + 7 * u, F.body, TEXT)
+  if b.detail then
+    printCentered(b.detail, x + w / 2, y + 7 * u + F.body:getHeight() * 1.4, F.small, DIM)
+  end
+  local bw, bh = math.floor(60 * u), math.floor(12 * u)
+  local by = y + h - bh - 7 * u
+  button("confirm:yes", b.yesLabel or "Yes", math.floor(x + w / 2 - bw - 3 * u), by, bw, bh, function()
+    b.yes()
+  end, { danger = b.danger })
+  button("confirm:no", b.noLabel or "Cancel", math.floor(x + w / 2 + 3 * u), by, bw, bh, function()
+    pop()
+  end)
+end
+
+-- Compendium -------------------------------------------------------------------------
+
+local function compProfile()
+  if root == "pause" then
+    return save.profile()
+  end
+  return comp.slot and save.peek(comp.slot) or nil
+end
+
+local function profileSlots()
+  local out = {}
+  for i = 1, save.SLOTS do
+    if save.peek(i) then
+      out[#out + 1] = i
+    end
+  end
+  return out
+end
+
+local function cycleSlot(dir)
+  local list = profileSlots()
+  if #list < 2 then
     return
   end
-  local layout = LAYOUTS[state]
-  local ww, wh = love.graphics.getDimensions()
-  love.graphics.setColor(0.03, 0.02, 0.05, state == "title" and 0.78 or 0.6)
-  love.graphics.rectangle("fill", 0, 0, ww, wh)
-
-  local big = hud.font(scale * 3.2)
-  local mid = hud.font(scale * 1.2)
-  local small = hud.font(scale)
-  local y = math.floor(wh * 0.2)
-  shadowText(layout.title, (ww - big:getWidth(layout.title)) / 2, y, big, { 0.98, 0.99, 1 })
-  y = y + big:getHeight()
-  local ruleColor = { 0.46, 0.62, 0.9 }
-  require("src.fonts").rule(ww / 2, y + 2 * scale, math.max(big:getWidth(layout.title) * 1.2, 90 * scale), math.max(1, math.floor(scale * 0.5)), ruleColor[1], ruleColor[2], ruleColor[3])
-  if layout.subtitle then
-    shadowText(layout.subtitle, (ww - small:getWidth(layout.subtitle)) / 2, y + 6 * scale, small, { 0.72, 0.8, 0.92 })
-  end
-
-  hitboxes = {}
-  local bw, bh, gap = 70 * scale, 11 * scale, 4 * scale
-  local by = math.floor(wh * 0.46)
-  for i, item in ipairs(layout.items) do
-    local bx = math.floor((ww - bw) / 2)
-    local isSel = i == selected
-    love.graphics.setColor(0.08, 0.06, 0.10, isSel and 0.95 or 0.75)
-    love.graphics.rectangle("fill", bx, by, bw, bh, scale, scale)
-    love.graphics.setLineWidth(math.max(1, scale * 0.5))
-    if isSel then
-      love.graphics.setColor(0.55, 0.75, 1)
-    else
-      love.graphics.setColor(0.55, 0.48, 0.42, 0.9)
+  local idx = 1
+  for i, s in ipairs(list) do
+    if s == comp.slot then
+      idx = i
     end
-    love.graphics.rectangle("line", bx, by, bw, bh, scale, scale)
-    local label = item[1]
-    shadowText(label, bx + (bw - mid:getWidth(label)) / 2, by + (bh - mid:getHeight()) / 2, mid, isSel and { 0.98, 0.99, 1 } or { 0.72, 0.78, 0.88 })
-    hitboxes[i] = { x = bx, y = by, w = bw, h = bh }
-    by = by + bh + gap
+  end
+  comp.slot = list[(idx - 1 + dir) % #list + 1]
+  audio.play("page")
+end
+
+local function setCompTab(i)
+  local n = #compendium.CATEGORIES
+  i = (i - 1) % n + 1
+  if i ~= comp.tab then
+    comp.tab = i
+    comp.scroll, comp.target = 0, 0
+    comp.entry = nil
+    audio.play("page")
+  end
+end
+
+local function drawDetail(entry, profile, cat, x, y, w, h)
+  panel(x, y, w, h, 0.92)
+  if not entry then
+    printCentered("Select an entry", x + w / 2, y + h / 2 - F.body:getHeight() / 2, F.body, FAINT)
+    return
+  end
+  local count = profile and (profile.found[cat.id] or {})[entry.id] or 0
+  local known = count > 0
+  -- The picture: on a dark plate, with a soft glow behind it when known
+  local ix, iy, iw, ih = x + 4 * u, y + 4 * u, w - 8 * u, math.floor(52 * u)
+  love.graphics.setColor(0.02, 0.015, 0.03, 0.9)
+  love.graphics.rectangle("fill", ix, iy, iw, ih, u, u)
+  if known then
+    local c = entry.color or WARM
+    for k = 4, 1, -1 do
+      love.graphics.setColor(c[1], c[2], c[3], 0.035 * (5 - k))
+      love.graphics.circle("fill", ix + iw / 2, iy + ih / 2, ih * 0.14 * k)
+    end
+    if cat.id == "enemy" then
+      compendium.drawLive(entry, ix + 4 * u, iy + 4 * u, iw - 8 * u, ih - 8 * u)
+    else
+      compendium.drawIcon(entry, ix + 4 * u, iy + 4 * u, iw - 8 * u, ih - 8 * u)
+    end
+  else
+    compendium.drawIcon(entry, ix + 4 * u, iy + 4 * u, iw - 8 * u, ih - 8 * u, true)
+  end
+  local ty = iy + ih + 4 * u
+  local tx = x + 5 * u
+  local tw = w - 10 * u
+  shadowPrint(known and entry.name or "???", tx, ty, F.body, known and TEXT or FAINT)
+  ty = ty + F.body:getHeight() + u
+  -- Rarity / kind line
+  local tag
+  if entry.boss then
+    tag = "Boss"
+  elseif entry.rarity then
+    tag = (entry.rarity:sub(1, 1):upper() .. entry.rarity:sub(2))
+  end
+  if tag then
+    shadowPrint(tag, tx, ty, F.small, entry.boss and DANGER or RARITY[entry.rarity] or DIM)
+  end
+  local countText = known and (cat.verb .. " x" .. count) or "Not yet discovered"
+  shadowPrint(countText, x + w - 5 * u - F.small:getWidth(countText), ty, F.small, known and WARM or FAINT)
+  ty = ty + F.small:getHeight() * 1.6
+  if entry.base then
+    -- A levelled common item: how it is made
+    local text = "Fuse " .. entry.base[3] .. " with itself: +" .. entry.level .. " is as strong as " .. (entry.level + 1) .. " fitted together"
+    ty = ty + wrapped(text, tx, ty, tw, F.small, RARITY.fused) + 2 * u
+  end
+  if entry.recipe then
+    -- Fused items: what goes into the fuser (named once both are found)
+    local r = entry.recipe
+    local haveA = profile and (profile.found[r[1][1]] or {})[r[1][2]] or 0
+    local haveB = profile and (profile.found[r[2][1]] or {})[r[2][2]] or 0
+    local text
+    if known or (haveA > 0 and haveB > 0) then
+      text = (known and "Fused from " or "Try fusing ") .. r[1][3] .. " + " .. r[2][3]
+    else
+      text = "Made in the fuser from two common items"
+    end
+    ty = ty + wrapped(text, tx, ty, tw, F.small, RARITY.fused) + 2 * u
+  end
+  if known then
+    ty = ty + wrapped(entry.desc, tx, ty, tw, F.small, DIM) + 2 * u
+    if entry.stats then
+      local colW = tw / 2
+      for i, st in ipairs(entry.stats) do
+        local cx = tx + ((i - 1) % 2) * colW
+        local cy = ty + math.floor((i - 1) / 2) * F.small:getHeight() * 1.35
+        shadowPrint(st[1], cx, cy, F.small, FAINT)
+        shadowPrint(st[2], cx + colW - 3 * u - F.small:getWidth(st[2]), cy, F.small, TEXT)
+      end
+    end
+  else
+    local hintText = cat.id == "enemy" and "Slay one to learn more." or "Find one to learn more."
+    wrapped(hintText, tx, ty, tw, F.small, FAINT)
+  end
+end
+
+PAGES.compendium = function()
+  local ww, wh = love.graphics.getDimensions()
+  love.graphics.setColor(0.015, 0.01, 0.025, root == "pause" and 0.93 or 0.6)
+  love.graphics.rectangle("fill", 0, 0, ww, wh)
+  local profile = compProfile()
+
+  -- Header: title, the slot shown, and the overall count
+  pageTitle("Compendium", X(14), Y(9))
+  local found, total = compendium.progress(profile)
+  local overall = string.format("%d / %d discovered (%d%%)", found, total, total > 0 and math.floor(found / total * 100) or 0)
+  shadowPrint(overall, X(386) - F.body:getWidth(overall), Y(11), F.body, WARM)
+  if root == "title" then
+    local slots = profileSlots()
+    local label = profile and ("Slot " .. comp.slot) or "No save files yet"
+    local lx = X(14) + F.head:getWidth("Compendium") + 10 * u
+    local ly = Y(11)
+    if #slots > 1 then
+      button("comp:slotPrev", "<", lx, ly - u, math.floor(9 * u), math.floor(10 * u), function()
+        cycleSlot(-1)
+      end)
+      shadowPrint(label, lx + 12 * u, ly, F.body, TEXT)
+      button("comp:slotNext", ">", lx + 15 * u + F.body:getWidth(label), ly - u, math.floor(9 * u), math.floor(10 * u), function()
+        cycleSlot(1)
+      end)
+    else
+      shadowPrint(label, lx, ly, F.body, DIM)
+    end
+  else
+    shadowPrint("Slot " .. tostring(save.activeSlot()), X(14) + F.head:getWidth("Compendium") + 10 * u, Y(11), F.body, DIM)
   end
 
-  local hint = state == "title" and "W/S or arrows and Enter, or click" or "Esc: resume"
-  shadowText(hint, (ww - small:getWidth(hint)) / 2, wh - 24 * scale, small, { 0.55, 0.62, 0.74 })
+  -- Tabs, with each category's count
+  local names = {}
+  for i, c in ipairs(compendium.CATEGORIES) do
+    local f, t = compendium.progress(profile, c.id)
+    names[i] = c.name .. " " .. f .. "/" .. t
+  end
+  tabs("comp:tab", names, comp.tab, X(14), Y(27), math.floor(372 * u), math.floor(12 * u), setCompTab)
+
+  -- The grid
+  local cat = compendium.CATEGORIES[comp.tab]
+  local entries = compendium.entries(cat.id)
+  local got = profile and profile.found[cat.id] or {}
+  local gx, gy, gw, gh = X(14), Y(44), math.floor(234 * u), math.floor(166 * u)
+  panel(gx, gy, gw, gh, 0.85)
+  local wide = cat.id == "weapon" or cat.id == "enemy"
+  -- (item tabs are 10 wide, so a common item and its +1 to +4 fill half a row)
+  local cellW = math.floor((wide and 36 or 19) * u)
+  local cellH = math.floor((wide and 26 or 19) * u)
+  local gap = math.floor(3 * u)
+  local pad = math.floor(4 * u)
+  local cols = math.max(1, math.floor((gw - pad * 2 + gap) / (cellW + gap)))
+  local rows = math.ceil(#entries / cols)
+  local contentH = rows * (cellH + gap) - gap
+  local viewH = gh - pad * 2
+  local maxScroll = math.max(0, contentH - viewH)
+  -- Keep the focused cell in view
+  local focusedIndex
+  for i, e in ipairs(entries) do
+    if focusId == "comp:cell:" .. e.id then
+      focusedIndex = i
+      comp.entry = e
+    end
+  end
+  if reveal and focusedIndex then
+    local rowTop = math.floor((focusedIndex - 1) / cols) * (cellH + gap)
+    if rowTop < comp.target then
+      comp.target = rowTop
+    elseif rowTop + cellH > comp.target + viewH then
+      comp.target = rowTop + cellH - viewH
+    end
+  end
+  comp.target = math.max(0, math.min(maxScroll, comp.target))
+  comp.scroll = comp.scroll + (comp.target - comp.scroll) * math.min(1, love.timer.getDelta() * 14)
+  local clip = { gx + 1, gy + 1, gw - 2, gh - 2 }
+  love.graphics.setScissor(clip[1], clip[2], clip[3], clip[4])
+  -- Centre the grid in its panel
+  local gridW = cols * (cellW + gap) - gap
+  local x0 = gx + math.floor((gw - gridW) / 2)
+  for i, e in ipairs(entries) do
+    local col, row = (i - 1) % cols, math.floor((i - 1) / cols)
+    local cx = x0 + col * (cellW + gap)
+    local cy = math.floor(gy + pad + row * (cellH + gap) - comp.scroll)
+    local known = (got[e.id] or 0) > 0
+    local focused = widget({ id = "comp:cell:" .. e.id, x = cx, y = cy, w = cellW, h = cellH, clip = clip, activate = function() end })
+    love.graphics.setColor(known and { 0.09, 0.07, 0.11, 0.95 } or { 0.035, 0.03, 0.05, 0.95 })
+    love.graphics.rectangle("fill", cx, cy, cellW, cellH, u * 0.6, u * 0.6)
+    local edge = known and (e.boss and DANGER or (e.level and RARITY.fused) or (e.rarity and RARITY[e.rarity]) or BORDER) or { 0.2, 0.18, 0.24 }
+    love.graphics.setLineWidth(math.max(1, u * 0.4))
+    love.graphics.setColor(edge[1], edge[2], edge[3], known and 0.8 or 0.6)
+    love.graphics.rectangle("line", cx, cy, cellW, cellH, u * 0.6, u * 0.6)
+    compendium.drawIcon(e, cx + 2 * u, cy + 2 * u, cellW - 4 * u, cellH - 4 * u, not known)
+    if focused then
+      focusFrame(cx, cy, cellW, cellH)
+    end
+  end
+  love.graphics.setScissor()
+  -- A scroll bar when the grid is taller than its panel
+  if maxScroll > 0 then
+    local bh = viewH * viewH / contentH
+    local by = gy + pad + (viewH - bh) * (comp.scroll / maxScroll)
+    love.graphics.setColor(0.6, 0.55, 0.5, 0.5)
+    love.graphics.rectangle("fill", gx + gw - 2 * u, by, math.max(2, u), bh)
+  end
+  comp.region = { gx, gy, gw, gh, maxScroll }
+
+  if comp.entry and comp.entry.category ~= cat.id then
+    comp.entry = nil
+  end
+  drawDetail(comp.entry or entries[1], profile, cat, X(252), Y(44), math.floor(134 * u), math.floor(166 * u))
+end
+
+-- Settings ---------------------------------------------------------------------------
+
+local SETTINGS_TABS = { "Audio", "Display", "Controls" }
+
+local function row(label, y)
+  shadowPrint(label, X(70), y + (13 * u - F.body:getHeight()) / 2, F.body, DIM)
+end
+
+PAGES.settings = function()
+  local ww, wh = love.graphics.getDimensions()
+  love.graphics.setColor(0.015, 0.01, 0.025, root == "pause" and 0.93 or 0.55)
+  love.graphics.rectangle("fill", 0, 0, ww, wh)
+  panel(X(58), Y(8), math.floor(284 * u), math.floor(206 * u), 0.9)
+  pageTitle("Settings", X(200), Y(12), true)
+  tabs("set:tab", SETTINGS_TABS, settingsTab, X(66), Y(34), math.floor(268 * u), math.floor(12 * u), function(i)
+    if i ~= settingsTab then
+      settingsTab = i
+      audio.play("page")
+    end
+  end)
+  local y = Y(52)
+  local rh = math.floor(15 * u)
+  local cx, cw = X(200), math.floor(130 * u)
+  local ch = math.floor(13 * u)
+  if settingsTab == 1 then
+    for _, s in ipairs({ { "Master volume", "masterVolume" }, { "Music", "musicVolume" }, { "Sound effects", "sfxVolume" } }) do
+      row(s[1], y)
+      slider("set:" .. s[2], cx, y, cw, ch, settings.get(s[2]), function(v)
+        settings.set(s[2], v)
+      end)
+      y = y + rh
+    end
+    shadowPrint("Music covers the area themes and the shop's piano; effects include the wind.", X(70), y + 2 * u, F.small, FAINT)
+  elseif settingsTab == 2 then
+    local opts = {
+      { "Fullscreen (F11)", "fullscreen" },
+      { "Vertical sync", "vsync" },
+      { "Bloom and colour grading", "postfx" },
+      { "Show FPS counter", "showFps" },
+      { "Pause when the window loses focus", "pauseOnFocusLoss" },
+    }
+    for _, s in ipairs(opts) do
+      row(s[1], y)
+      toggle("set:" .. s[2], cx + cw - math.floor(50 * u), y, math.floor(50 * u), ch, settings.get(s[2]), function(v)
+        settings.set(s[2], v)
+      end)
+      y = y + rh
+    end
+  else
+    -- Key bindings: two keys per action
+    local kh = math.floor(9.5 * u)
+    local kw = math.floor(46 * u)
+    for _, a in ipairs(input.ACTIONS) do
+      shadowPrint(a.name, X(70), y + (kh - F.small:getHeight()) / 2, F.small, DIM)
+      local keys = input.keys(a.id)
+      for slot = 1, 2 do
+        local kx = X(178) + (slot - 1) * (kw + 3 * u)
+        local id = "set:key:" .. a.id .. ":" .. slot
+        local isListening = listening and listening.action == a.id and listening.slot == slot
+        local focused = widget({ id = id, x = kx, y = y, w = kw, h = kh - u, activate = function()
+          listening = { action = a.id, slot = slot }
+          audio.play("select")
+        end, clear = function()
+          input.bind(a.id, slot, false)
+          settings.save()
+          audio.play("back")
+        end })
+        love.graphics.setColor(isListening and { 0.2, 0.14, 0.08, 0.95 } or { 0.07, 0.06, 0.09, 0.95 })
+        love.graphics.rectangle("fill", kx, y, kw, kh - u, u * 0.6, u * 0.6)
+        local label = isListening and (math.floor(clock * 3) % 2 == 0 and "Press a key" or "") or input.keyName(keys[slot])
+        printCentered(label, kx + kw / 2, y + (kh - u - F.small:getHeight()) / 2, F.small, isListening and WARM or (keys[slot] and TEXT or FAINT))
+        if focused then
+          focusFrame(kx, y, kw, kh - u)
+        end
+      end
+      y = y + kh
+    end
+    -- The mouse, for reference
+    local fy = Y(52)
+    for _, f in ipairs(input.FIXED) do
+      shadowPrint(f[1], X(282), fy, F.small, FAINT)
+      shadowPrint(f[2], X(282), fy + F.small:getHeight(), F.small, DIM)
+      fy = fy + F.small:getHeight() * 2.6
+    end
+  end
+  local by = Y(196)
+  local bw, bh = math.floor(80 * u), math.floor(12 * u)
+  if settingsTab == 3 then
+    button("set:resetKeys", "Reset controls", X(200) - bw - 2 * u, by, bw, bh, function()
+      settings.resetBindings()
+      audio.play("back")
+    end)
+  else
+    button("set:reset", "Restore defaults", X(200) - bw - 2 * u, by, bw, bh, function()
+      settings.resetDefaults()
+      audio.play("back")
+    end)
+  end
+  button("set:back", "Back", X(200) + 2 * u, by, bw, bh, function()
+    pop()
+  end)
+end
+
+-- Naming a save file ---------------------------------------------------------------------
+
+local function nameTrimmed()
+  return (nameState.text:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function confirmName()
+  local name = nameTrimmed()
+  if #name == 0 then
+    audio.play("deny")
+    return
+  end
+  save.setName(nameState.slot, name)
+  audio.play("select")
+  act("play", nameState.slot)
+end
+
+PAGES.name = function()
+  local ww, wh = love.graphics.getDimensions()
+  love.graphics.setColor(0.015, 0.01, 0.025, 0.7)
+  love.graphics.rectangle("fill", 0, 0, ww, wh)
+  pageTitle("Name Your Hunter", ww / 2, Y(46), true)
+  printCentered("Save file " .. tostring(nameState.slot) .. ". The name goes on the file, and is called back when death comes.", ww / 2, Y(46) + F.head:getHeight() + 6 * u, F.small, FAINT)
+  -- The text box
+  local bw, bh = math.floor(150 * u), math.floor(15 * u)
+  local bx, by = math.floor((ww - bw) / 2), Y(94)
+  panel(bx, by, bw, bh, 0.95, ACCENT)
+  local text = nameState.text
+  local ty = by + (bh - F.body:getHeight()) / 2
+  if text == "" then
+    shadowPrint("Type a name", bx + 5 * u, ty, F.body, FAINT)
+  else
+    shadowPrint(text, bx + 5 * u, ty, F.body, TEXT)
+  end
+  if math.floor(clock * 2) % 2 == 0 then
+    love.graphics.setColor(WARM)
+    love.graphics.rectangle("fill", math.floor(bx + 5 * u + F.body:getWidth(text) + u), math.floor(by + 3 * u), math.max(2, math.floor(u * 1.2)), math.floor(bh - 6 * u))
+  end
+  local count = #text .. " / " .. NAME_MAX
+  shadowPrint(count, bx + bw - F.small:getWidth(count), by + bh + 2 * u, F.small, FAINT)
+  local w, h = math.floor(70 * u), math.floor(12 * u)
+  local y = Y(124)
+  button("name:confirm", "Confirm", math.floor(ww / 2 - w - 2 * u), y, w, h, confirmName, { disabled = nameTrimmed() == "" })
+  button("name:back", "Back", math.floor(ww / 2 + 2 * u), y, w, h, function()
+    pop()
+  end)
+end
+
+-- Typed text (love.textinput): letters, digits, spaces, hyphens and apostrophes
+function menu.textinput(text)
+  if top() ~= "name" then
+    return
+  end
+  for ch in text:gmatch("[%w '%-]") do
+    local t = nameState.text
+    if #t < NAME_MAX and not (ch == " " and (t == "" or t:sub(-1) == " ")) then
+      nameState.text = t .. ch
+    end
+  end
+end
+
+-- The death recap -----------------------------------------------------------------------------
+
+local RED = { 0.86, 0.16, 0.2 }
+
+local function drawSegments(segs, cx, y, f)
+  local w = 0
+  for _, seg in ipairs(segs) do
+    w = w + f:getWidth(seg[1])
+  end
+  local x = cx - w / 2
+  for _, seg in ipairs(segs) do
+    shadowPrint(seg[1], x, y, f, seg[2])
+    x = x + f:getWidth(seg[1])
+  end
+  return w
+end
+
+-- The killer's picture is printed on the poster in ink, like a woodcut: its
+-- light and dark become two tones of brown, with nothing of the sprite's own
+-- background, so it reads as part of the paper
+local inkShader
+local function getInk()
+  if inkShader == nil then
+    local ok, shader = pcall(love.graphics.newShader, [[
+      vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
+        vec4 t = Texel(tex, uv);
+        float l = clamp(dot(t.rgb, vec3(0.3, 0.59, 0.11)) * 1.3, 0.0, 1.0) * 0.7;
+        vec3 inkDark = vec3(0.17, 0.09, 0.04);
+        vec3 inkLight = vec3(0.56, 0.40, 0.20);
+        return vec4(mix(inkDark, inkLight, l), t.a) * color;
+      }
+    ]])
+    inkShader = ok and shader or false
+  end
+  return inkShader or nil
+end
+
+local INK = { 0.24, 0.13, 0.06 }
+
+-- The poster's timing on the recap page (seconds since it opened): it flies in
+-- from close to the screen and hits at IMPACT; the rest of the page fades in after
+local SLAM_START, IMPACT = 0.3, 0.5
+local slammed = false -- the thud has played
+local recapLayer -- the page's content (text, compendium, buttons), drawn on its own so it can fade
+
+-- The wanted poster: parchment, WANTED, the killer printed in ink, its name.
+-- Centred on (cx, cy), w x h in window pixels; `scale`, `spin` and `alpha`
+-- are the slam's.
+local function drawPoster(cx, cy, w, h, noun, photo, scale, spin, alpha)
+  local x, y = math.floor(cx - w / 2), math.floor(cy - h / 2)
+  local function color(r, g, b, a)
+    love.graphics.setColor(r, g, b, (a or 1) * alpha)
+  end
+  local function ink(text, tx, ty, f, c)
+    love.graphics.setFont(f)
+    c = c or INK
+    color(c[1], c[2], c[3])
+    love.graphics.print(text, math.floor(tx - f:getWidth(text) / 2), math.floor(ty))
+  end
+  love.graphics.push()
+  love.graphics.translate(cx, cy)
+  love.graphics.rotate(0.025 + spin) -- (nailed up a little crooked)
+  love.graphics.scale(scale, scale)
+  love.graphics.translate(-cx, -cy)
+  -- A soft shadow, the paper, a darker rim and a faint inner border
+  color(0, 0, 0, 0.45)
+  love.graphics.rectangle("fill", x + 2 * u, y + 2 * u, w, h)
+  color(0.78, 0.65, 0.42)
+  love.graphics.rectangle("fill", x, y, w, h)
+  color(0.86, 0.74, 0.50)
+  love.graphics.rectangle("fill", x + u, y + u, w - 2 * u, h - 2 * u)
+  love.graphics.setLineWidth(math.max(1, u * 0.5))
+  color(0.45, 0.30, 0.16, 0.9)
+  love.graphics.rectangle("line", x + 2.5 * u, y + 2.5 * u, w - 5 * u, h - 5 * u)
+  -- Stains and a torn corner
+  color(0.62, 0.48, 0.28, 0.35)
+  love.graphics.rectangle("fill", x + w - 9 * u, y + h - 8 * u, 6 * u, 4 * u)
+  love.graphics.rectangle("fill", x + 4 * u, y + 30 * u, 3 * u, 5 * u)
+  -- Nails
+  for _, nx in ipairs({ x + 3.8 * u, x + w - 3.8 * u }) do
+    color(0.14, 0.12, 0.12)
+    love.graphics.circle("fill", nx, y + 3.8 * u, 1.1 * u)
+    color(0.55, 0.55, 0.58)
+    love.graphics.circle("fill", nx - 0.3 * u, y + 3.5 * u, 0.4 * u)
+  end
+  ink("WANTED", cx, y + 5 * u, F.head)
+  color(INK[1], INK[2], INK[3], 0.8)
+  love.graphics.rectangle("fill", x + 8 * u, y + 5 * u + F.head:getHeight() + u, w - 16 * u, math.max(1, math.floor(u * 0.5)))
+  -- The picture, printed straight onto the paper: a ruled box, and the
+  -- monster in ink inside it
+  local px, py, pw, ph = x + 8 * u, y + 5 * u + F.head:getHeight() + 4 * u, w - 16 * u, 32 * u
+  color(0.70, 0.56, 0.34, 0.35)
+  love.graphics.rectangle("fill", px, py, pw, ph)
+  color(INK[1], INK[2], INK[3], 0.85)
+  love.graphics.rectangle("line", px, py, pw, ph)
+  if photo then
+    local sc = math.min((pw - 5 * u) / photo.w, (ph - 5 * u) / photo.h)
+    if sc >= 1 then
+      sc = math.floor(sc)
+    end
+    local dx = math.floor(px + (pw - photo.w * sc) / 2)
+    local dy = math.floor(py + (ph - photo.h * sc) / 2)
+    love.graphics.setShader(getInk())
+    color(1, 1, 1, 0.95)
+    love.graphics.draw(photo.image, dx, dy, 0, sc, sc)
+    love.graphics.setShader()
+  else
+    -- Nothing to photograph (gas, flames, water...): a question mark
+    ink("?", px + pw / 2, py + ph / 2 - F.head:getHeight() / 2, F.head, { 0.45, 0.32, 0.16 })
+  end
+  ink((noun or "Unknown"):upper(), cx, py + ph + 3 * u, F.body)
+  love.graphics.pop()
+end
+
+PAGES.recap = function()
+  local d = recapData or {}
+  local ww, wh = love.graphics.getDimensions()
+  local t = enterT
+  local ti = t - IMPACT -- seconds since the poster hit (negative before)
+  if t < 0.05 then
+    slammed = false
+  end
+  if ti >= 0 and not slammed then
+    slammed = true
+    audio.play("poster_slam")
+  end
+
+  -- The page shakes when the poster hits
+  local shake = ti >= 0 and ti < 0.45 and 4 * u * math.exp(-ti * 12) or 0
+  love.graphics.push()
+  love.graphics.translate(math.floor(math.sin(ti * 95) * shake), math.floor(math.cos(ti * 83) * shake))
+
+  -- The world stays visible behind, just darker (the same darkness the death fade reached)
+  love.graphics.setColor(0.05, 0.01, 0.02, 0.8)
+  love.graphics.rectangle("fill", -20 * u, -20 * u, ww + 40 * u, wh + 40 * u)
+
+  -- Everything but the poster is drawn onto a layer, so it can fade in as a whole
+  if not recapLayer or recapLayer:getWidth() ~= ww or recapLayer:getHeight() ~= wh then
+    recapLayer = love.graphics.newCanvas(ww, wh)
+  end
+  love.graphics.push("all")
+  love.graphics.setCanvas(recapLayer)
+  love.graphics.clear(0, 0, 0, 0)
+  love.graphics.origin()
+
+  local name, killer = d.name or "The hunter", d.killer or "Unforgiving Dark"
+  -- Everything in the middle is one group, centred on the screen: the poster
+  -- on the left, the death text beside it
+  local posterW, posterH = math.floor(56 * u), math.floor(66 * u)
+  local gap = math.floor(14 * u)
+  -- (what the text column says, and how tall it comes to; the column is only
+  -- as wide as its text, so the group sits centred)
+  local full = { { name, WARM }, { " met his end by the ", TEXT }, { killer, RED }, { ".", TEXT } }
+  local width = 0
+  for _, seg in ipairs(full) do
+    width = width + F.body:getWidth(seg[1])
+  end
+  local oneLine = width < 170 * u
+  local quip = '"' .. (d.quip or "") .. '"'
+  local quipW, quipLines = F.body:getWrap(quip, math.floor(150 * u))
+  local sentenceW = oneLine and width or math.max(F.body:getWidth(name .. " met his end"), F.body:getWidth("by the " .. killer .. "."))
+  local colW = math.ceil(math.max(sentenceW, quipW, F.head:getWidth("You Died") * 1.4)) + math.floor(4 * u)
+  local lineH = F.body:getHeight()
+  local titleH = F.head:getHeight()
+  local textH = titleH + 7 * u + lineH * (oneLine and 1.8 or 3.2) + #quipLines * lineH * 1.25
+
+  -- The compendium block's top (so the group never runs into it)
+  local list = d.discoveries or {}
+  local groups = {}
+  for _, c in ipairs(compendium.CATEGORIES) do
+    local ids = {}
+    for _, found in ipairs(list) do
+      if found[1] == c.id then
+        ids[#ids + 1] = found[2]
+      end
+    end
+    if #ids > 0 then
+      groups[#groups + 1] = { c.name, c.id, ids }
+    end
+  end
+  local rowH = math.floor(10.5 * u)
+  local bottom = Y(190)
+  local blockTop = bottom - #groups * rowH - math.floor(11 * u)
+
+  local groupH = math.max(posterH, textH)
+  local groupTop = math.floor(math.min(wh / 2 - groupH / 2, blockTop - 6 * u - groupH))
+  groupTop = math.max(groupTop, math.floor(6 * u))
+  local gx = math.floor(ww / 2 - (posterW + gap + colW) / 2)
+  local posterCx, posterCy = gx + posterW / 2, groupTop + groupH / 2
+  local colCx = gx + posterW + gap + colW / 2
+
+  -- Text column: You Died, the line, the quip
+  local ty = math.floor(groupTop + (groupH - textH) / 2)
+  printCentered("You Died", colCx, ty, F.head, RED)
+  fonts.rule(colCx, ty + titleH + u, math.max(F.head:getWidth("You Died") * 1.4, 90 * u), math.max(1, math.floor(u * 0.5)), 0.7, 0.14, 0.18)
+  local y = ty + titleH + 7 * u
+  if oneLine then
+    drawSegments(full, colCx, y, F.body)
+    y = y + lineH * 1.8
+  else
+    drawSegments({ { name, WARM }, { " met his end", TEXT } }, colCx, y, F.body)
+    y = y + lineH * 1.4
+    drawSegments({ { "by the ", TEXT }, { killer, RED }, { ".", TEXT } }, colCx, y, F.body)
+    y = y + lineH * 1.8
+  end
+  love.graphics.setFont(F.body)
+  love.graphics.setColor(0, 0, 0, 0.6)
+  love.graphics.printf(quip, math.floor(colCx - colW / 2) + 2, math.floor(y) + 2, colW, "center")
+  love.graphics.setColor(DIM)
+  love.graphics.printf(quip, math.floor(colCx - colW / 2), math.floor(y), colW, "center")
+
+  -- What the run added to the compendium, just above the buttons: one row per
+  -- group (its title, then the sprites; no names)
+  love.graphics.setColor(BORDER[1], BORDER[2], BORDER[3], 0.5)
+  love.graphics.rectangle("fill", math.floor(ww / 2 - 170 * u), blockTop - math.floor(2 * u), math.floor(340 * u), math.max(1, math.floor(u * 0.4)))
+  if #groups == 0 then
+    printCentered("Nothing new in the compendium this run.", ww / 2, bottom - 8 * u, F.body, FAINT)
+  else
+    printCentered("New in the compendium", ww / 2, blockTop + u, F.body, WARM)
+    local iconW, step = math.floor(8.5 * u), math.floor(10 * u)
+    local labelW = math.floor(38 * u)
+    local perRow = math.floor((340 * u - labelW) / step)
+    -- (the block is centred as a whole, by its widest row)
+    local widest = 0
+    for _, g in ipairs(groups) do
+      widest = math.max(widest, math.min(#g[3], perRow))
+    end
+    local x0 = math.floor(ww / 2 - (labelW + widest * step) / 2)
+    for gi, g in ipairs(groups) do
+      local yy = blockTop + math.floor(11 * u) + (gi - 1) * rowH
+      shadowPrint(g[1], x0, yy + (iconW - F.small:getHeight()) / 2, F.small, DIM)
+      local ids = g[3]
+      local shown = #ids > perRow and perRow - 1 or #ids
+      for i = 1, shown do
+        local entry = compendium.entry(g[2], ids[i])
+        local ix = x0 + labelW + (i - 1) * step
+        love.graphics.setColor(0.07, 0.05, 0.09, 0.9)
+        love.graphics.rectangle("fill", ix, yy, iconW, iconW, u * 0.5, u * 0.5)
+        if entry then
+          compendium.drawIcon(entry, ix + u * 0.5, yy + u * 0.5, iconW - u, iconW - u)
+        end
+      end
+      if #ids > shown then
+        shadowPrint("+" .. (#ids - shown), x0 + labelW + shown * step, yy + (iconW - F.small:getHeight()) / 2, F.small, DIM)
+      end
+    end
+  end
+
+  local w, h = math.floor(84 * u), math.floor(13 * u)
+  local by = Y(196)
+  -- (a button press in the first moments is ignored: it is probably the
+  -- hunter's trigger finger, not a choice)
+  button("recap:new", "New run", math.floor(ww / 2 - w - 3 * u), by, w, h, function()
+    if enterT > 0.9 then
+      act("restart")
+    end
+  end)
+  button("recap:menu", "Quit to Menu", math.floor(ww / 2 + 3 * u), by, w, h, function()
+    if enterT > 0.9 then
+      act("title")
+    end
+  end)
+
+  love.graphics.pop() -- (back from the layer)
+  -- Nothing but the poster until it lands; then the rest fades in
+  local fade = math.max(0, math.min(1, (t - IMPACT + 0.1) / 0.45))
+  if fade > 0 then
+    love.graphics.setColor(fade, fade, fade, fade) -- (premultiplied)
+    love.graphics.setBlendMode("alpha", "premultiplied")
+    love.graphics.draw(recapLayer, 0, 0)
+    love.graphics.setBlendMode("alpha")
+  end
+
+  -- The poster, flying in from close to the screen and slamming down
+  if t >= SLAM_START then
+    local scale, spin, alpha = 1, 0, 1
+    if ti < 0 then
+      local k = (t - SLAM_START) / (IMPACT - SLAM_START)
+      local ease = k * k * k
+      scale = 3.2 - 2.2 * ease
+      spin = 0.35 * (1 - ease)
+      alpha = math.min(1, k * 3)
+    else
+      scale = 1 - 0.05 * math.exp(-ti * 12) * math.cos(ti * 28) -- (a little rebound)
+    end
+    drawPoster(posterCx, posterCy, posterW, posterH, d.noun, d.photo, scale, spin, alpha)
+    -- Dust thrown out from its edges as it hits
+    if ti >= 0 and ti < 0.45 then
+      for i = 1, 18 do
+        local a = i * 2.399
+        local speed = (45 + (i * 37) % 70) * u
+        local dx, dy = math.cos(a) * speed * ti, math.sin(a) * speed * ti * 0.8
+        local ex = posterCx + math.cos(a) * posterW * 0.5 + dx
+        local ey = posterCy + math.sin(a) * posterH * 0.5 + dy
+        local size = math.max(1, math.floor((1 + i % 3) * u * 0.6))
+        love.graphics.setColor(0.75, 0.66, 0.5, 0.7 * (1 - ti / 0.45))
+        love.graphics.rectangle("fill", math.floor(ex), math.floor(ey), size, size)
+      end
+    end
+  end
+  love.graphics.pop()
+end
+
+-- Pause ------------------------------------------------------------------------------
+
+PAGES.pause = function()
+  local ww, wh = love.graphics.getDimensions()
+  love.graphics.setColor(0.03, 0.02, 0.05, 0.62)
+  love.graphics.rectangle("fill", 0, 0, ww, wh)
+  pageTitle("Paused", ww / 2, Y(34), true)
+  local slot = save.activeSlot()
+  if slot then
+    local who = save.profile() and save.profile().name
+    printCentered((who and (who .. " - ") or "") .. "Slot " .. slot .. " - progress is saved as you play", ww / 2, Y(34) + F.head:getHeight() + 5 * u, F.small, FAINT)
+  end
+  local w, h, gap = math.floor(96 * u), math.floor(12 * u), math.floor(3.5 * u)
+  local x, y = math.floor((ww - w) / 2), Y(70)
+  local function abandon(text, action)
+    return function()
+      confirm({ text = text, detail = "This run will be lost; the compendium keeps what you found.", yesLabel = "Yes", danger = true, yes = function()
+        act(action)
+      end })
+    end
+  end
+  local list = {
+    { "pause:resume", "Resume", function()
+      act("resume")
+    end },
+    { "pause:compendium", "Compendium", function()
+      push("compendium")
+    end },
+    { "pause:settings", "Settings", function()
+      push("settings")
+    end },
+    { "pause:restart", "Restart run", abandon("Restart the run?", "restart") },
+    { "pause:title", "Quit to title", abandon("Quit to the title screen?", "title") },
+    { "pause:quit", "Quit to desktop", abandon("Quit the game?", "quit") },
+  }
+  for _, b in ipairs(list) do
+    button(b[1], b[2], x, y, w, h, b[3])
+    y = y + h + gap
+  end
+end
+
+-- Input --------------------------------------------------------------------------------
+
+local function moveFocus(dx, dy)
+  local cur = find(focusId)
+  if not cur then
+    if widgets[1] then
+      focusId = widgets[1].id
+    end
+    return
+  end
+  local cx, cy = cur.x + cur.w / 2, cur.y + cur.h / 2
+  local best, bestScore
+  for _, w in ipairs(widgets) do
+    if w ~= cur then
+      local wx, wy = w.x + w.w / 2, w.y + w.h / 2
+      local ddx, ddy = wx - cx, wy - cy
+      local along = ddx * dx + ddy * dy
+      if along > 1 then
+        local across = math.abs(ddx * dy) + math.abs(ddy * dx)
+        local score = along + across * 2.5
+        if not bestScore or score < bestScore then
+          best, bestScore = w, score
+        end
+      end
+    end
+  end
+  if not best and dy ~= 0 then
+    -- Wrap round a vertical list to the far end
+    for _, w in ipairs(widgets) do
+      if w ~= cur and math.abs((w.x + w.w / 2) - cx) < cur.w then
+        local along = ((w.y + w.h / 2) - cy) * dy
+        if along < -1 and (not bestScore or along < bestScore) then
+          best, bestScore = w, along
+        end
+      end
+    end
+  end
+  if best then
+    focusId = best.id
+    reveal = true
+    audio.play("tick")
+  end
+end
+
+local function back()
+  if listening then
+    listening = nil
+    audio.play("back")
+    return
+  end
+  if not pop() and root == "pause" then
+    act("resume")
+  end
+end
+
+function menu.keypressed(key)
+  if not root then
+    return
+  end
+  if top() == "name" then
+    -- (letters arrive through love.textinput, so no key here moves the focus)
+    if key == "backspace" then
+      local t = nameState.text
+      nameState.text = t:sub(1, math.max(0, #t - 1))
+    elseif key == "return" or key == "kpenter" then
+      confirmName()
+    elseif key == "escape" then
+      pop()
+    end
+    return
+  end
+  if listening then
+    if key == "escape" then
+      listening = nil
+      audio.play("back")
+    elseif key == "delete" or key == "backspace" then
+      input.bind(listening.action, listening.slot, false)
+      settings.save()
+      listening = nil
+      audio.play("back")
+    elseif input.isReserved(key) then
+      audio.play("deny")
+    else
+      input.bind(listening.action, listening.slot, key)
+      settings.save()
+      listening = nil
+      audio.play("select")
+    end
+    return
+  end
+  local cur = find(focusId)
+  if key == "up" or key == "w" then
+    moveFocus(0, -1)
+  elseif key == "down" or key == "s" then
+    moveFocus(0, 1)
+  elseif key == "left" or key == "a" then
+    if cur and cur.left then
+      cur.left()
+    else
+      moveFocus(-1, 0)
+    end
+  elseif key == "right" or key == "d" then
+    if cur and cur.right then
+      cur.right()
+    else
+      moveFocus(1, 0)
+    end
+  elseif key == "return" or key == "kpenter" or key == "space" then
+    if cur and cur.activate then
+      audio.play("select")
+      cur.activate()
+    end
+  elseif key == "escape" or key == "backspace" then
+    back()
+  elseif key == "delete" and cur and cur.clear then
+    cur.clear()
+  elseif (key == "q" or key == "[" or key == "pageup") then
+    if top() == "compendium" then
+      setCompTab(comp.tab - 1)
+    elseif top() == "settings" then
+      settingsTab = (settingsTab - 2) % #SETTINGS_TABS + 1
+      audio.play("page")
+    end
+  elseif (key == "e" or key == "]" or key == "pagedown") then
+    if top() == "compendium" then
+      setCompTab(comp.tab + 1)
+    elseif top() == "settings" then
+      settingsTab = settingsTab % #SETTINGS_TABS + 1
+      audio.play("page")
+    end
+  elseif (key == "z" or key == "c") and top() == "compendium" and root == "title" then
+    cycleSlot(key == "z" and -1 or 1)
+  end
+end
+
+function menu.mousepressed(x, y, button)
+  if not root then
+    return
+  end
+  mouseX, mouseY = x, y
+  if button == 2 then
+    back()
+    return
+  end
+  if button ~= 1 then
+    return
+  end
+  if listening then
+    listening = nil
+    audio.play("back")
+    return
+  end
+  local w = hovered()
+  pressedId = w and w.id or nil
+  if w then
+    focusId = w.id
+    if w.drag then
+      dragging = w
+      w.drag(x)
+    end
+  end
+end
+
+function menu.mousereleased(x, y, button)
+  if not root or button ~= 1 then
+    return
+  end
+  mouseX, mouseY = x, y
+  local w = hovered()
+  local down = pressedId
+  pressedId = nil
+  if dragging then
+    dragging = nil
+    return
+  end
+  if w and w.id == down and w.activate then
+    audio.play("select")
+    w.activate()
+  end
+end
+
+function menu.wheelmoved(_, dy)
+  if top() == "compendium" and comp.region then
+    comp.target = comp.target - dy * 24 * u
+  end
+end
+
+-- Hovering selects (only when the mouse actually moves, so it doesn't fight the keys)
+function menu.update(dt)
+  clock = clock + (dt or 0)
+  enterT = enterT + (dt or 0)
+  if not root then
+    return
+  end
+  local mx, my = love.mouse.getPosition()
+  if mx ~= mouseX or my ~= mouseY then
+    mouseX, mouseY = mx, my
+    if dragging then
+      dragging.drag(mx)
+    else
+      local w = hovered()
+      if w and w.id ~= focusId then
+        focusId = w.id
+        reveal = false
+        audio.play("tick", 0.5)
+      end
+    end
+  end
+end
+
+function menu.draw(scale)
+  if not root then
+    return
+  end
+  layout(scale)
+  widgets = {}
+  local page = top()
+  -- Pages over the pause menu or the title replace it; the confirm box sits over the page below it
+  if page == "confirm" and #stack >= 2 then
+    PAGES[stack[#stack - 1]]()
+    widgets = {}
+  elseif page == "confirm" then
+    PAGES[root]()
+    widgets = {}
+  end
+  PAGES[page]()
+  reveal = false
+  -- Nothing focused (a new page): focus its main control, else the first
+  if not find(focusId) and widgets[1] then
+    focusId = widgets[1].id
+    local prefix = DEFAULT_FOCUS[page]
+    for _, w in ipairs(widgets) do
+      if prefix and w.id:sub(1, #prefix) == prefix then
+        focusId = w.id
+        break
+      end
+    end
+  end
+  -- A short fade as a page comes in
+  if enterT < 0.15 then
+    local ww, wh = love.graphics.getDimensions()
+    love.graphics.setColor(0.02, 0.015, 0.035, 0.6 * (1 - enterT / 0.15))
+    love.graphics.rectangle("fill", 0, 0, ww, wh)
+  end
+  love.graphics.setColor(1, 1, 1)
 end
 
 return menu

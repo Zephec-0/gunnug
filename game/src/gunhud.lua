@@ -8,6 +8,9 @@
 --   automatic  an AK: the magazine drops away and a fresh one is slapped in
 --   pistol     the Broomhandle: the bolt slides back, a stripper clip is set on
 --              top and thumbed down into the box magazine, the empty clip flies off
+--   gatling    six barrels in brass rings that turn as it spins up (the crank
+--              turns with them); the hopper on top lifts away and a full one
+--              drops in
 local gunhud = {}
 
 local STEEL, STEEL_L, STEEL_D = { 0.66, 0.68, 0.76 }, { 0.88, 0.90, 0.96 }, { 0.36, 0.37, 0.46 }
@@ -345,6 +348,76 @@ local function drawPistol(R0, rp)
   end
 end
 
+-- Gatling -------------------------------------------------------------------
+
+local function drawHopper(R, dy, alpha)
+  R(23, 0 + dy, 6, 1, STEEL_L, alpha)
+  R(23, 1 + dy, 6, 4, STEEL, alpha)
+  R(23, 1 + dy, 1, 4, STEEL_L, alpha)
+  R(28, 1 + dy, 1, 4, STEEL_D, alpha)
+  -- Rounds peeking out of the top
+  for i = 0, 3 do
+    R(24 + i, 0 + dy, 1, 1, i % 2 == 0 and BRASS_L or BRASS, alpha)
+  end
+end
+
+local function drawGatling(R, rp, gun)
+  local spin = gun.spin or 0
+  -- Barrels: three of the six in view, their shading rolling round as they turn
+  local shades = { STEEL_L, STEEL, STEEL_D }
+  R(2, 6, 18, 1, STEEL_D)
+  for k = 0, 2 do
+    R(2, 7 + k * 2, 18, 1, shades[(k + math.floor(spin)) % 3 + 1])
+  end
+  R(2, 8, 18, 1, INK)
+  R(2, 10, 18, 1, INK)
+  R(2, 12, 18, 1, STEEL_D)
+  -- Brass rings: the muzzle plate, a middle band and the rear plate
+  R(0, 6, 2, 7, BASE_D)
+  R(0, 6, 1, 7, BRASS)
+  R(9, 5, 2, 9, BRASS)
+  R(9, 5, 1, 9, BRASS_L)
+  R(19, 5, 2, 9, BRASS)
+  R(19, 5, 1, 9, BRASS_L)
+  -- The breech casing, with rivets
+  R(21, 5, 12, 1, BRASS_L)
+  R(21, 6, 12, 6, BRASS)
+  R(21, 12, 12, 1, BASE_D)
+  R(23, 7, 1, 1, BASE_D)
+  R(30, 7, 1, 1, BASE_D)
+  R(23, 10, 1, 1, BASE_D)
+  R(30, 10, 1, 1, BASE_D)
+  -- The crank on the back, turning with the barrels
+  R(33, 8, 2, 2, STEEL_D)
+  local a = spin / 6 * math.pi * 2
+  local hx, hy = 33.5 + math.cos(a) * 2.5, 8.5 + math.sin(a) * 2.5
+  R(hx, hy, 1, 1, STEEL)
+  R(33.5 + math.cos(a) * 1.3, 8.5 + math.sin(a) * 1.3, 1, 1, STEEL)
+  R(hx, hy + 1, 1, 1, WOOD_L)
+  -- Stock, pistol grip and trigger guard
+  R(35, 10, 6, 1, WOOD_L)
+  R(33, 11, 9, 1, WOOD)
+  R(35, 12, 7, 1, WOOD_D)
+  R(41, 9, 1, 4, INK)
+  R(29, 13, 3, 3, WOOD)
+  R(29, 13, 1, 3, WOOD_L)
+  R(25, 13, 1, 2, STEEL_D)
+  R(25, 15, 4, 1, STEEL_D)
+  R(27, 13, 1, 1, INK)
+  -- The hopper: lifted off and away, then a full one dropped in
+  if rp then
+    local off = ease(rp / 0.25)
+    local on = ease((rp - 0.5) / 0.3)
+    if rp < 0.4 then
+      drawHopper(R, -floor(off * 6), 1 - off)
+    else
+      drawHopper(R, -floor((1 - on) * 6), on)
+    end
+  else
+    drawHopper(R, 0, 1)
+  end
+end
+
 -- Entry points ----------------------------------------------------------------
 
 local MODELS = {
@@ -352,7 +425,57 @@ local MODELS = {
   shotgun = { w = 36, h = 15, shiftX = 0, shiftY = -2 },
   automatic = { w = 39, h = 15, shiftX = 0, shiftY = 0 },
   pistol = { w = 34, h = 18, shiftX = 0, shiftY = 0 },
+  gatling = { w = 42, h = 17, shiftX = 0, shiftY = 0 },
 }
+
+-- The gun's model at half size, for guns lying on the ground or on a shop
+-- pedestal (game pixels): drawn once, then each 2x2 block averaged (a pixel
+-- is kept where at least two of its four are), so it matches the item bar's
+-- picture. Cached per model; nil for guns without one.
+local groundCache = {}
+function gunhud.groundImage(gun)
+  local model = gun.def.model
+  if not MODELS[model] then
+    return nil
+  end
+  if groundCache[model] then
+    return groundCache[model]
+  end
+  local m = MODELS[model]
+  local canvas = love.graphics.newCanvas(m.w + 2, m.h + 2)
+  love.graphics.push("all")
+  love.graphics.setCanvas(canvas)
+  love.graphics.clear(0, 0, 0, 0)
+  love.graphics.origin()
+  gunhud.drawModel({ def = gun.def, spin = 0 }, 0, 0, 1, 1)
+  love.graphics.pop()
+  local src = canvas:newImageData()
+  local w, h = math.ceil(src:getWidth() / 2), math.ceil(src:getHeight() / 2)
+  local out = love.image.newImageData(w, h)
+  for y = 0, h - 1 do
+    for x = 0, w - 1 do
+      local r, g, b, n = 0, 0, 0, 0
+      for dy = 0, 1 do
+        for dx = 0, 1 do
+          local sx, sy = x * 2 + dx, y * 2 + dy
+          if sx < src:getWidth() and sy < src:getHeight() then
+            local pr, pg, pb, pa = src:getPixel(sx, sy)
+            if pa > 0.5 then
+              r, g, b, n = r + pr, g + pg, b + pb, n + 1
+            end
+          end
+        end
+      end
+      if n >= 2 then
+        out:setPixel(x, y, r / n, g / n, b / n, 1)
+      end
+    end
+  end
+  local img = love.graphics.newImage(out)
+  img:setFilter("nearest", "nearest")
+  groundCache[model] = img
+  return img
+end
 
 -- Whether this gun has a drawn model
 function gunhud.supports(gun)
@@ -379,6 +502,8 @@ function gunhud.drawModel(gun, ox, oy, q, alpha)
     drawShotgun(R, rp, ox, oy, q)
   elseif model == "automatic" then
     drawAutomatic(R, rp)
+  elseif model == "gatling" then
+    drawGatling(R, rp, gun)
   else
     drawPistol(R, rp)
   end

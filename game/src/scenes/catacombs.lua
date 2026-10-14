@@ -77,6 +77,7 @@ local THEMES = {
     ambient = { 0.40, 0.40, 0.24 }, -- a murky yellow-green
     palette = { rock = materials.SULFUR, dirt = materials.BILECLAY },
     glow = { 1.0, 0.92, 0.35 }, -- sulfur crystals
+    glowLight = 0.4, -- (yellow reads far brighter than the other areas' tints, so they give less light)
     glowCount = 220,
     glowRadius = 36,
     crystals = true,
@@ -386,6 +387,29 @@ function catacombs.spawnProps()
         enemies.spawn("dummy", shop.dummySpot(room))
       end
       fluids.add(world, info)
+      -- Piranhas: a small school in every pool big enough (one per ~80 cells
+      -- of 4 px, up to six), placed in cells with water above them too
+      for _, pool in ipairs(info.water or {}) do
+        local n = #pool.cells / 2
+        local count = math.min(6, math.floor(n / 80))
+        if count > 0 then
+          local deep = {}
+          local inPool = {}
+          for c = 1, #pool.cells, 2 do
+            inPool[pool.cells[c] .. "," .. pool.cells[c + 1]] = true
+          end
+          for c = 1, #pool.cells, 2 do
+            local x, y = pool.cells[c], pool.cells[c + 1]
+            if inPool[x .. "," .. (y - 4)] and inPool[(x - 4) .. "," .. y] and inPool[(x + 4) .. "," .. y] then
+              deep[#deep + 1] = { x, y }
+            end
+          end
+          for _ = 1, math.min(count, #deep) do
+            local spot = table.remove(deep, love.math.random(#deep))
+            enemies.spawn("piranha", spot[1] + 2, spot[2], 1 + (lv.row - 1) * 0.6, lv.row)
+          end
+        end
+      end
       if info.arena then
         for _, br in ipairs(info.arena.braziers) do
           fluids.addBrazier(br.x, br.y)
@@ -557,7 +581,7 @@ function catacombs.addLights(lighting, view)
         minedecor.addLights(lighting, info.mine, view)
       end
       local g, r = lv.theme.glow, lv.theme.glowRadius
-      local strong = lv.index > 1 and 0.75 or 0.6
+      local strong = (lv.index > 1 and 0.75 or 0.6) * (lv.theme.glowLight or 1)
       for i, spot in ipairs(info.glows) do
         if visible(view, spot[1], spot[2], r) then
           lighting.add(spot[1], spot[2] - 3, r, g[1], g[2], g[3], strong + math.sin(t * 1.5 + i) * 0.08)
@@ -721,6 +745,11 @@ function catacombs.drawScreen(toScreen, font)
       end
     end
   end
+end
+
+-- An area's name (for the save files' "deepest reached")
+function catacombs.areaName(i)
+  return THEMES[i] and THEMES[i].name or nil
 end
 
 return catacombs

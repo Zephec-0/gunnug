@@ -3,6 +3,7 @@ local Body = require("src.body")
 local audio = require("src.audio")
 local bullets = require("src.bullets")
 local config = require("src.config")
+local controls = require("src.input")
 local effects = require("src.effects")
 local enemies = require("src.enemies")
 local perks = require("src.perks")
@@ -47,7 +48,7 @@ function Player.new(x, y, world, inv)
     end
     -- One-way platforms: only landed on, falling or standing, and S drops through
     local plats = self.world.platforms
-    if plats and self.body.vy >= 0 and not love.keyboard.isDown("s") then
+    if plats and self.body.vy >= 0 and not controls.down("down") then
       local feet = cy + ch
       for _, p in ipairs(plats) do
         if feet == p.y + 1 and cx + cw > p.x0 and cx <= p.x1 then
@@ -293,10 +294,12 @@ end
 
 -- Damage that wears the hunter down rather than striking him (poison gas):
 -- no knockback or invulnerability, and the blink after a hit doesn't stop it
-function Player:hurtOverTime(amount, color)
+-- source: what is doing it (an id for src.deaths: an enemy kind, "gas", "fire"...)
+function Player:hurtOverTime(amount, color, source)
   if self.dead then
     return
   end
+  self.lastSource, self.lastEnemy = source, nil
   amount = self:loseHealth(amount)
   self.hurtFlash = math.max(self.hurtFlash, 0.35)
   local cx = self:center()
@@ -308,7 +311,7 @@ function Player:hurtOverTime(amount, color)
   end
 end
 
-function Player:hurt(amount, fromX, fromY)
+function Player:hurt(amount, fromX, fromY, source)
   if self.dead or self.invuln > 0 then
     return false
   end
@@ -316,6 +319,7 @@ function Player:hurt(amount, fromX, fromY)
     self:dodged()
     return false
   end
+  self.lastSource, self.lastEnemy = source, nil -- (the last thing to hurt him is what killed him; an enemy sets lastEnemy to itself)
   local b = self.body
   local cx, cy = self:center()
   amount = self:loseHealth(amount)
@@ -523,10 +527,10 @@ function Player:update(dt, aimX, aimY)
   -- Horizontal movement. Momentum above walk speed (from recoil) is kept and
   -- only bled off by friction, so walking never cancels a recoil jump.
   local input = 0
-  if love.keyboard.isDown("a") then
+  if controls.down("left") then
     input = input - 1
   end
-  if love.keyboard.isDown("d") then
+  if controls.down("right") then
     input = input + 1
   end
 
@@ -542,7 +546,7 @@ function Player:update(dt, aimX, aimY)
     end
   end
   if not self.rollT then
-    self:updateCrouch(dt, love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl"))
+    self:updateCrouch(dt, controls.down("crouch"))
   end
 
   local walk = cfg.walkSpeed * perks.prod("speed") * (self.haste > 0 and 1.35 or 1) * (self.inWater and 0.6 or 1)
@@ -624,7 +628,7 @@ function Player:update(dt, aimX, aimY)
       effects.particle(b.x + b.w / 2 + (love.math.random() - 0.5) * 6, b.y + b.h, (love.math.random() - 0.5) * 60, 20 + love.math.random() * 30, 0.35, { 0.8, 0.92, 1 }, 60, true)
     end
   end
-  local jumpHeld = love.keyboard.isDown("w") or love.keyboard.isDown("space")
+  local jumpHeld = controls.down("jump")
   if self.jumping and not jumpHeld and b.vy < 0 then
     b.vy = b.vy * cfg.jumpCutMultiplier
     self.jumping = false
@@ -660,7 +664,19 @@ function Player:update(dt, aimX, aimY)
     end
   end
   pickups.extraMagnet = self.gun and self.gun:stats().magnet or 0
-  if love.mouse.isDown(1) and not self.rollT then
+  local trigger = love.mouse.isDown(1) and not self.rollT
+  if self.gun and self.gun.def.spoolTime then
+    -- Gatling: the barrels wind up while the trigger is held, ratcheting
+    -- faster and higher as they go
+    self.gun:spinUp(dt, trigger)
+    local spool = self.gun.spool
+    self.spinClick = (self.spinClick or 0) - dt
+    if spool > 0.02 and self.spinClick <= 0 then
+      self.spinClick = 0.16 - 0.12 * spool
+      audio.play("gatling_spin", 0.4 + 0.6 * spool, 0.7 + 0.9 * spool)
+    end
+  end
+  if trigger then
     self:shoot()
   end
 

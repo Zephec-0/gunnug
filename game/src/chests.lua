@@ -3,6 +3,7 @@
 -- (80%) or a generated weapon (20%), never both, so the real prize is saved
 -- for playing well down to the shop. Deeper chests hold more gold and
 -- better-equipped weapons (more pre-fitted slots).
+local input = require("src.input")
 local audio = require("src.audio")
 local effects = require("src.effects")
 local guns = require("src.guns")
@@ -140,7 +141,7 @@ function chests.drawScreen(toScreen, font, player)
     return
   end
   local sx, sy = toScreen(c.x, c.y - H - 8)
-  local text = "[E] Open chest"
+  local text = "[" .. input.label("interact") .. "] Open chest"
   love.graphics.setFont(font)
   local x, y = math.floor(sx - font:getWidth(text) / 2), math.floor(sy - font:getHeight())
   love.graphics.setColor(0, 0, 0, 0.85)

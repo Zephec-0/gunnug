@@ -176,8 +176,8 @@ enemies.defs.worm = {
   w = 4,
   h = 4,
   hp = 28,
-  speed = 135, -- it swims through the rock: fast, and never slowed by it
-  lungeSpeed = 215,
+  speed = 108, -- it swims through the rock, never slowed by it
+  lungeSpeed = 172,
   turn = 5.5, -- radians per second it can swing its head
   segments = 17,
   segGap = 2.8,
@@ -187,7 +187,7 @@ enemies.defs.worm = {
   lungeCooldown = 1.6,
   sight = 300,
   forget = 600,
-  damage = 10,
+  damage = 5, -- (halved on 2026-10-14)
   bodyDamage = 0.6, -- the body's touch hurts this fraction as much as the head's
   gold = { 5, 9 },
   knockback = 0.25,
@@ -240,6 +240,32 @@ enemies.defs.roller = {
   rollCooldown = 1.0,
   rollRange = 190,
   dizzyTime = 1.5,
+}
+
+-- Piranha: a small, toothy fish of the cave pools. In the water it swims
+-- freely, and once the hunter is in the water with it, closes in and darts
+-- at him in quick dashes. A small bite, but they come in schools. Out of the
+-- water (a dash can fling it out at the surface) it can only flop about in
+-- short hops, toward the hunter if he is near; it bites just the same.
+enemies.defs.piranha = {
+  w = 8,
+  h = 5,
+  hp = 8,
+  speed = 62, -- swimming
+  sight = 190,
+  forget = 320,
+  damage = 4,
+  chase = 480, -- once it has bitten, it follows the hunter this far, even out of the water
+  dashRange = 64, -- darts at the hunter from this close...
+  dashSpeed = 240,
+  dashTime = 0.22,
+  dashCooldown = 0.9, -- ...this often
+  flopTime = 0.55, -- out of the water: a hop about this often
+  flopSpeed = 45,
+  flopLift = 120,
+  gold = { 1, 3 },
+  knockback = 0.6,
+  weight = 0.4,
 }
 
 -- Bosses: one per area, drawn as bigger versions of the monsters they grew
@@ -312,6 +338,41 @@ enemies.defs.queen = giant("bloater", {
   splitDamage = 0.75, -- each split deals this much of the damage of the one before
 })
 
+-- Names and field notes for the compendium's bestiary (src.compendium).
+-- Bosses carry their own name; `compendium = false` keeps a kind out of it.
+-- A new monster only needs an entry here (and in enemies.order, for where it
+-- is listed) to show up.
+local LORE = {
+  ghoul = { "Ghoul", "A hunched, ash-pale scavenger of the catacombs. Slow on its feet, but it rears back and lunges when it gets close." },
+  bat = { "Cave Bat", "Hangs asleep from the ceiling. Once it spots you it locks on, screeches, and dives in a straight line." },
+  spitter = { "Spitter", "A fleshy sac clinging to the rock overhead. It swells up, then lobs a glob of acid in an arc. Shoot the glob down, or the rock it hangs from." },
+  hopper = { "Mire Hopper", "A squat marsh toad. Crouches for a moment, then leaps at you in a long arc." },
+  bloater = { "Bloater", "A veined bag of gas with a glowing core. Drifts after you leaking poison, and bursts into a cloud of it. Kill one near fire and the cloud goes up." },
+  swarmbat = { "Swarm Bat", "One of a colony that hangs together. When one wakes they all wake, and the swarm flocks at you as a fluttering cloud." },
+  wisp = { "Cinder Wisp", "A flitting spark that leaves a trail of fire and lights any gas it meets. Fire can't hurt it." },
+  worm = { "Tunnel Worm", "Swims through solid rock after you, then bursts out of the ground in a leap. In the open air it has no control at all." },
+  miner = { "Skeleton Miner", "Keeps its distance and lobs lit dynamite. Shoot the stick out of the air to set it off early." },
+  roller = { "Cave Roller", "An armoured pillbug. Curls up and rolls at you, shrugging off most damage. Spent, it uncurls dizzy and soft." },
+  piranha = { "Piranha", "A small, toothy fish of the cave pools. In the water it darts at you in quick bites; flung out of it, it flops after you all the same." },
+  warden = { nil, "A ghoul grown huge in the dark of the catacombs. Rears back, then lunges from far away." },
+  matron = { nil, "A giant hopper that bounds in great leaps, and calls her brood to her side." },
+  behemoth = { nil, "A giant bloater, pouring out gas. Burst in fire, it goes up in a huge blast." },
+  dreadbat = { nil, "A bat three times the size. It needs no line of sight: it screeches, then dives at you through the rock itself." },
+  queen = { nil, "A crowned bloater the size of a house, queen of the Sulfur Vents. Immune to fire, she flies through the walls of her arena, and splits in two when badly hurt." },
+}
+for kind, l in pairs(LORE) do
+  local def = enemies.defs[kind]
+  def.name = def.name or l[1]
+  def.desc = l[2]
+end
+enemies.defs.dummy.compendium = false
+
+-- The order monsters are listed in the bestiary (anything missing is listed after)
+enemies.order = {
+  "ghoul", "bat", "swarmbat", "spitter", "hopper", "bloater", "wisp", "worm", "miner", "roller", "piranha",
+  "warden", "dreadbat", "matron", "behemoth", "queen",
+}
+
 -- Queen remnant sizes by generation: whole-number sprite scales (the sac is 14 px)
 local QUEEN_SCALES = { 6, 5, 4, 3, 2 }
 
@@ -326,6 +387,8 @@ local DPS_IDLE = 2
 local ITEM_DROP_CHANCE = 0.1 -- chance a dying monster drops an ammo type or attachment
 local ACTIVE_RANGE = 520 -- enemies further than this from the hunter are frozen
 local GLOB_LIFE = 4
+
+local DRAW_REF, GLOW_REF = {}, {} -- filled in once the drawing functions exist (below)
 
 local list = {}
 local globs = {}
@@ -351,7 +414,7 @@ end
 
 -- Spawns an enemy. Ghouls stand on the ground at (x, groundY); bats and
 -- spitters hang from the ceiling at (x, ceilingY). toughness >= 1 scales HP.
-function enemies.spawn(kind, x, y, toughness, level, swarm)
+local function newEnemy(kind, x, y, toughness, level, swarm)
   local def = assert(enemies.defs[kind], "unknown enemy: " .. tostring(kind))
   local top = def.ground and y - def.h or y
   local e = {
@@ -375,7 +438,6 @@ function enemies.spawn(kind, x, y, toughness, level, swarm)
     phase = love.math.random() * 10, -- animation clock
     grounded = false,
   }
-  list[#list + 1] = e
   if kind == "worm" then
     e.wx, e.wy = e.body.x + e.body.w / 2, e.body.y + e.body.h / 2
     e.ang = love.math.random() * math.pi * 2
@@ -385,11 +447,98 @@ function enemies.spawn(kind, x, y, toughness, level, swarm)
     end
     e.air, e.lungeT, e.lungeCd, e.digged = false, 0, 0, 0
   end
+  return e
+end
+
+function enemies.spawn(kind, x, y, toughness, level, swarm)
+  local e = newEnemy(kind, x, y, toughness, level, swarm)
+  list[#list + 1] = e
   if swarm then
     swarm.members = swarm.members or {}
     swarm.members[#swarm.members + 1] = e
   end
   return e
+end
+
+-- A monster that isn't in the world, posed awake for a portrait (the
+-- compendium and the title screen draw these with enemies.drawSpecimen).
+-- Its body's top-left is at (0, 0).
+function enemies.specimen(kind)
+  local def = enemies.defs[kind]
+  local e = newEnemy(kind, def.w / 2, def.ground and def.h or 0)
+  e.state = (kind == "spitter" or kind == "worm") and "watch" or "chase"
+  e.facing = 1
+  e.grounded = true
+  if e.segs then
+    -- A worm, curled in an S
+    e.state = "chase"
+    e.air = true
+    e.ang = -0.5
+    e.wx, e.wy = 16, 2
+    for i, seg in ipairs(e.segs) do
+      local t = (i - 1) / #e.segs
+      seg[1] = 16 - t * 30
+      seg[2] = 2 + math.sin(t * math.pi * 2) * 5 + t * 6
+    end
+  end
+  return e
+end
+
+-- The bounding box a specimen's drawing roughly fills: x, y, w, h
+function enemies.specimenBounds(e)
+  if e.segs then
+    return -16, -6, 36, 18
+  end
+  local b = e.body
+  local d = e.def
+  local w = (d.spriteW or b.w) * (d.scale or 1)
+  local h = (d.spriteH or b.h) * (d.scale or 1)
+  return b.x + b.w / 2 - w / 2 - 2, b.y + b.h - h - 2, w + 4, h + 4
+end
+
+-- A photograph of a monster as it looks in the game right now (the death
+-- recap's wanted poster): drawn into an image of its own size. `e` is the
+-- monster that did it; if it isn't known (a glob's shooter) or is a worm
+-- (drawn along the world), a posed specimen of its `kind` is photographed.
+-- Returns { image, w, h } or nil.
+function enemies.photo(e, kind)
+  kind = kind or (e and e.kind)
+  if not kind or not enemies.defs[kind] then
+    return nil
+  end
+  local subject = e
+  if not subject or subject.segs then
+    subject = enemies.specimen(kind)
+  end
+  local flash = subject.flash
+  subject.flash = 0 -- (not caught mid white-flash)
+  local x, y, w, h = enemies.specimenBounds(subject)
+  w, h = math.ceil(w), math.ceil(h)
+  local canvas = love.graphics.newCanvas(w, h)
+  canvas:setFilter("nearest", "nearest")
+  love.graphics.push("all")
+  love.graphics.setCanvas(canvas)
+  love.graphics.clear(0, 0, 0, 0)
+  love.graphics.origin()
+  love.graphics.translate(-math.floor(x), -math.floor(y))
+  local ok = enemies.drawSpecimen(subject)
+  love.graphics.pop()
+  subject.flash = flash
+  if not ok then
+    return nil
+  end
+  return { image = canvas, w = w, h = h }
+end
+
+-- Draws a specimen (body, then its glowing parts). Returns false if this
+-- kind's drawing failed outside the world.
+function enemies.drawSpecimen(e)
+  local ok = pcall(DRAW_REF[e.kind] or function() end, e)
+  if ok then
+    ok = pcall(GLOW_REF[e.kind] or function() end, e)
+  end
+  love.graphics.setColor(1, 1, 1)
+  return ok
 end
 
 local function center(e)
@@ -456,6 +605,11 @@ local function die(e)
       pickups.maybeDropItem(cx + (r() - 0.5) * 10, cy, 1)
     end
     pickups.maybeDropWeapon(cx, cy, 1, 0.5)
+    -- ...and a perk, one the hunter doesn't have yet, left where it fell
+    local perk = perks.roll(1)[1]
+    if perk then
+      pickups.dropPerk(cx, cy - 6, perk, 0, -70)
+    end
     effects.popup(cx, e.body.y - 10, "SLAIN", { 0.95, 0.97, 1 })
     if enemies.onBossKilled then
       enemies.onBossKilled(e)
@@ -514,6 +668,16 @@ local function die(e)
     effects.chunk(cx, cy - 8, (r() - 0.5) * 50, -70, 5, 2, { 0.66, 0.50, 0.16 }, 3)
     effects.chunk(cx + 3, cy, 30, -40, 4, 1, { 0.46, 0.48, 0.54 }, 3)
     effects.particle(cx, cy - 7, 0, -20, 0.8, { 1, 0.86, 0.42 }, 80, true)
+  elseif kind == "piranha" then
+    -- A flick of scales and a red puff; bubbles rise if it died under water
+    for _ = 1, 6 do
+      effects.chunk(cx + (r() - 0.5) * 4, cy, (r() - 0.5) * 60, -20 - r() * 40, 1, 1, r() < 0.5 and { 0.62, 0.66, 0.66 } or { 0.80, 0.24, 0.18 }, 2)
+    end
+    if e.inWater then
+      for _ = 1, 6 do
+        effects.particle(cx + (r() - 0.5) * 6, cy, (r() - 0.5) * 10, -20 - r() * 20, 0.7, { 0.75, 0.9, 1 }, -40, true)
+      end
+    end
   elseif kind == "roller" then
     -- The shell cracks into plates
     for _ = 1, 8 do
@@ -1651,6 +1815,7 @@ local function spit(e, tx, ty)
     gravity = def.globGravity,
     damage = math.floor(def.globDamage * e.dmgMul + 0.5),
     life = GLOB_LIFE,
+    source = e.kind,
   }
   for _ = 1, 5 do
     effects.particle(cx, cy, (love.math.random() - 0.5) * 50, love.math.random() * 40, 0.3, { 0.55, 0.95, 0.35 }, 200, true)
@@ -1673,6 +1838,7 @@ local function fireGlob(e, ang, speed)
     gravity = def.globGravity,
     damage = math.max(1, math.floor(def.globDamage * e.dmgMul + 0.5)),
     life = GLOB_LIFE,
+    source = e.kind,
   }
   effects.particle(cx, cy, math.cos(ang) * 30, math.sin(ang) * 30, 0.25, { 0.55, 0.95, 0.35 }, 0, true)
 end
@@ -2496,7 +2662,135 @@ local function updateRoller(e, dt, world, player, px, py)
   e.phase = e.phase + dt * (math.abs(b.vx) / 5 + 0.8)
 end
 
+-- Piranha: swims in water (no gravity, steering toward a target), and
+-- flops about out of it (gravity, short hops)
+local function updatePiranha(e, dt, world, player, px, py)
+  local def, b = e.def, e.body
+  local collide = collider(e, world)
+  local cx, cy = center(e)
+  if e.state == "sleep" then
+    e.state = "idle"
+  end
+  local wet = fluids.waterAt(cx, cy)
+  e.inWater = wet
+  -- The hunter counts as in the water if any of him is: head, middle or feet.
+  -- It aims at his feet when those are the wet part
+  local pb = player.body
+  local feetWet = fluids.waterAt(px, pb.y + pb.h - 1)
+  local preyWet = fluids.waterTouching(pb.x, pb.y, pb.w, pb.h)
+  local ty0 = feetWet and (pb.y + pb.h - 2) or py
+  local dx, dy = px - cx, ty0 - cy
+  local dist = math.max(1, math.sqrt(dx * dx + dy * dy))
+  local r = love.math.random
+  local dashing = e.dashT and e.dashT > 0
+  if dashing then
+    e.dashT = e.dashT - dt
+  end
+  if wet then
+    e.flopT = nil
+    if e.stun > 0 then
+      b.vx, b.vy = b.vx * (1 - math.min(1, 3 * dt)), b.vy * (1 - math.min(1, 3 * dt))
+    elseif not dashing then
+      -- Before its first bite it only goes after a hunter in the water;
+      -- once it has bitten (e.aggro) it follows him anywhere
+      local reach = e.aggro and def.chase or (e.state == "chase" and def.forget or def.sight)
+      local hunting = not player.dead and (preyWet or e.aggro) and dist < reach and (e.seesPlayer or e.state == "chase" or e.aggro)
+      e.state = hunting and "chase" or "idle"
+      if not hunting then
+        e.aggro = nil
+      end
+      local tx, ty
+      if hunting and dist < def.dashRange and e.cooldown <= 0 then
+        -- A dart at the hunter
+        e.dashT = def.dashTime
+        e.aggro = true
+        b.vx, b.vy = dx / dist * def.dashSpeed, dy / dist * def.dashSpeed
+        e.cooldown = def.dashCooldown * (0.8 + r() * 0.4)
+        audio.play("hit", 0.25, 1.7)
+      elseif hunting then
+        tx, ty = dx / dist * def.speed, dy / dist * def.speed
+      else
+        -- Idle: drift about, turning now and then
+        e.timer = e.timer - dt
+        if e.timer <= 0 or not e.heading then
+          e.timer = 1 + r() * 2
+          e.heading = r() * math.pi * 2
+        end
+        tx, ty = math.cos(e.heading) * def.speed * 0.35, math.sin(e.heading) * def.speed * 0.2
+      end
+      if tx then
+        local k = math.min(1, dt * 4)
+        b.vx = b.vx + (tx - b.vx) * k
+        b.vy = b.vy + (ty - b.vy) * k
+      end
+      if e.aggro and not preyWet and hunting then
+        -- The hunter is out of the water: leap out of the surface after him
+        local above = fluids.waterAt(cx, cy - b.h - 2)
+        if not above and e.cooldown <= 0 then
+          e.cooldown = 0.5
+          local dir = dx < 0 and -1 or 1
+          b.vx = dir * math.min(def.dashSpeed * 0.6, math.abs(dx) * 3 + 40)
+          b.vy = -def.flopLift * 1.7
+          audio.play("hit", 0.25, 1.4)
+        end
+      end
+      -- Otherwise it never swims out of the water on its own: turn back at the edge
+      if not (e.aggro and not preyWet) then
+        local sx = b.vx > 0 and 1 or -1
+        if not fluids.waterAt(cx + sx * (b.w / 2 + 2), cy) then
+          b.vx = -sx * math.abs(b.vx) * 0.5
+          e.heading = e.heading and (math.pi - e.heading)
+        end
+        local sy = b.vy > 0 and 1 or -1
+        if not fluids.waterAt(cx, cy + sy * (b.h / 2 + 2)) then
+          b.vy = -sy * math.abs(b.vy) * 0.5
+          e.heading = e.heading and -e.heading
+        end
+      end
+    else
+      local drag = math.exp(-dt * 2)
+      b.vx, b.vy = b.vx * drag, b.vy * drag
+    end
+  else
+    -- Out of the water: it falls, and flops along in short hops
+    b.vy = math.min(b.vy + config.gravity * dt, 450)
+    e.grounded = Body.isGrounded(b, collide) and b.vy >= 0
+    if e.grounded then
+      b.vx = b.vx * math.max(0, 1 - 12 * dt)
+      e.flopT = (e.flopT or r() * 0.3) - dt
+      if e.flopT <= 0 and e.stun <= 0 then
+        e.flopT = def.flopTime * (0.7 + r() * 0.6)
+        local dir
+        if not player.dead and dist < (e.aggro and def.chase or def.sight) then
+          dir = dx < 0 and -1 or 1
+          e.state = "chase"
+        else
+          dir = r() < 0.5 and -1 or 1
+        end
+        b.vx = dir * def.flopSpeed * (0.7 + r() * 0.6)
+        b.vy = -def.flopLift * (0.7 + r() * 0.5)
+        e.grounded = false
+        e.facing = dir
+      end
+    end
+  end
+  if math.abs(b.vx) > 3 then
+    e.facing = b.vx < 0 and -1 or 1
+  end
+  if Body.moveX(b, collide, b.vx * dt, wet and 0 or 1) then
+    b.vx = -b.vx * 0.3
+  end
+  if Body.moveY(b, collide, b.vy * dt) then
+    if wet then
+      b.vy = -b.vy * 0.3
+    else
+      b.vy = 0
+    end
+  end
+end
+
 local UPDATE = {
+  piranha = updatePiranha,
   worm = updateWorm,
   miner = updateMiner,
   roller = updateRoller,
@@ -2578,7 +2872,15 @@ function enemies.update(dt, world, player)
         -- Touching the hunter hurts him
         local b = e.body
         if not player.dead and e.state ~= "sleep" and overlaps(b.x, b.y, b.w, b.h, pb.x, pb.y, pb.w, pb.h) then
-          if e.def.damage and player:hurt(math.floor(e.def.damage * e.dmgMul * (e.contactMul or 1) + 0.5), center(e)) and e.def.retreat then
+          if e.kind == "piranha" then
+            e.aggro = true
+          end
+          local hx, hy = center(e)
+          local hurt = e.def.damage and player:hurt(math.floor(e.def.damage * e.dmgMul * (e.contactMul or 1) + 0.5), hx, hy, e.kind)
+          if hurt then
+            player.lastEnemy = e
+          end
+          if hurt and e.def.retreat then
             e.state = "retreat"
             e.timer = e.def.retreat
             e.attackCd = e.def.chargeCooldown
@@ -2588,7 +2890,7 @@ function enemies.update(dt, world, player)
         if e.segs and e.state ~= "sleep" and not player.dead then
           for _, sg in ipairs(e.segs) do
             if overlaps(sg[1] - 1, sg[2] - 1, 2, 2, pb.x, pb.y, pb.w, pb.h) then
-              player:hurt(math.floor(e.def.damage * e.def.bodyDamage * e.dmgMul + 0.5), sg[1], sg[2])
+              player:hurt(math.floor(e.def.damage * e.def.bodyDamage * e.dmgMul + 0.5), sg[1], sg[2], e.kind)
               break
             end
           end
@@ -2624,7 +2926,7 @@ function enemies.update(dt, world, player)
     end
     if s.fuse <= 0 or s.dead then
       table.remove(sticks, i)
-      require("src.bullets").blast(s.x, s.y, 1, s.mul)
+      require("src.bullets").blast(s.x, s.y, 1, s.mul, nil, nil, "dynamite")
     end
   end
 
@@ -2643,7 +2945,7 @@ function enemies.update(dt, world, player)
       if overlaps(g.x - 1, g.y - 1, 3, 3, pb.x, pb.y, pb.w, pb.h) and not player.dead and player:isDodging() then
         player:dodged() -- (rolled under it: it flies on)
       elseif overlaps(g.x - 1, g.y - 1, 3, 3, pb.x, pb.y, pb.w, pb.h) and not player.dead then
-        player:hurt(g.damage, g.x - g.vx * 0.01, g.y)
+        player:hurt(g.damage, g.x - g.vx * 0.01, g.y, g.source)
         g.dead = true
       elseif world:isSolid(math.floor(g.x), math.floor(g.y)) then
         g.dead = true
@@ -4214,7 +4516,55 @@ local function drawQueenCrown(e)
   end
 end
 
+-- Piranha: a stubby silver fish, dark back, a red belly and an underbite of
+-- white teeth; its tail beats while it swims, and it thrashes out of water
+local PIRANHA = {
+  back = { 0.24, 0.30, 0.30 },
+  body = { 0.56, 0.62, 0.62 },
+  light = { 0.76, 0.80, 0.78 },
+  belly = { 0.80, 0.24, 0.18 },
+  fin = { 0.36, 0.20, 0.18 },
+  tooth = { 0.96, 0.94, 0.86 },
+}
+local function drawPiranha(e)
+  local r = mirror(e, 8)
+  local function col(c)
+    love.graphics.setColor(e.flash > 0 and { 1, 1, 1 } or c)
+  end
+  local t = love.timer.getTime() + e.phase
+  local beat = e.inWater and (math.sin(t * (e.dashT and e.dashT > 0 and 40 or 14)) > 0 and 1 or 0) or (math.sin(t * 30) > 0 and 1 or 0)
+  -- Tail
+  col(PIRANHA.fin)
+  r(0, beat, 1, 3)
+  r(1, 1, 1, 1 + beat)
+  -- Body: dark back, silver flank, red belly
+  col(PIRANHA.back)
+  r(2, 0, 4, 1)
+  r(4, -1, 1, 1) -- dorsal fin
+  col(PIRANHA.body)
+  r(2, 1, 5, 2)
+  col(PIRANHA.light)
+  r(3, 1, 2, 1)
+  col(PIRANHA.belly)
+  r(2, 3, 4, 1)
+  r(3, 4, 3, 1)
+  -- Head and the jutting jaw, teeth showing
+  col(PIRANHA.body)
+  r(7, 1, 1, 1)
+  col(PIRANHA.belly)
+  r(6, 3, 2, 1)
+  col(PIRANHA.tooth)
+  r(7, 2, 1, 1)
+  r(6, 4, 1, 1)
+end
+local function drawPiranhaEye(e)
+  local r = mirror(e, 8)
+  love.graphics.setColor(1, 0.3, 0.2, 0.9)
+  r(6, 1, 1, 1)
+end
+
 local DRAW = {
+  piranha = drawPiranha,
   worm = drawWorm,
   miner = drawMiner,
   roller = drawRoller,
@@ -4236,6 +4586,7 @@ local DRAW = {
   wisp = function() end,
 }
 local GLOW = {
+  piranha = drawPiranhaEye,
   worm = function() end,
   miner = drawMinerGlow,
   roller = function() end,
@@ -4307,6 +4658,12 @@ end
 
 -- (for the art tests: the drawing functions by kind)
 enemies.DRAW, enemies.GLOW = DRAW, GLOW
+for k, f in pairs(DRAW) do
+  DRAW_REF[k] = f
+end
+for k, f in pairs(GLOW) do
+  GLOW_REF[k] = f
+end
 
 -- After the lighting: eyes, glowing mouths and acid globs
 function enemies.drawEmissive(view)

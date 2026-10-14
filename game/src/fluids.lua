@@ -1,6 +1,7 @@
 -- Volumetric gas, water, fire and smoke (design doc §6c). A sparse grid of
--- 4-px cells per substance, simulated only around the hunter (everything
--- else is frozen as it was) and drawn from the same grid:
+-- 2-px cells per substance (nearly pixel-fine: the baseline for every liquid
+-- and gas added later), simulated only around the hunter (everything else is
+-- frozen as it was) and drawn from the same grid:
 --   gas    concentration 0..1 that diffuses slowly through open space, a little
 --          faster downward (it is heavy), thinning as it spreads; vents on the
 --          floors of the Sulfur Vents keep feeding it. Poisons the hunter.
@@ -18,7 +19,12 @@ local effects = require("src.effects")
 
 local fluids = {}
 
-local C = 4 -- cell size in pixels (cavegen's pools use the same grid)
+local C = 2 -- cell size in pixels
+local HALF = C / 2
+local POOL_CELL = 4 -- cavegen's pools come on a coarser grid: each of its cells fills several of ours
+local WATER_STEP = 0.025 -- water moves a cell per step: 80 px/s falling
+local SPREAD = 12 -- water slides sideways toward a drop up to this many cells away
+local SWEEP = 1.5 -- every so often all water near the hunter is woken (terrain may have changed)
 local K = 2048 -- key stride: key = gy * K + gx
 local RANGE_X, RANGE_Y = 400, 270 -- the simulated region around the hunter
 
@@ -35,7 +41,11 @@ local vents = {} -- { k, x, y }
 local braziers = {} -- { k, x, y }: bowls of fire that never go out
 local columns = {} -- vertical columns of dense gas: { x0, x1, top, bottom, age, warn, life }
 local COLUMN_DAMAGE = 9 -- per tick inside a column (a thin cloud of gas does about 3-5)
-local accWater, accSlow, accPurge = 0, 0, 0
+local accWater, accSlow, accPurge, accSmoke, accSweep = 0, 0, 0, 0, 0
+local active = {} -- water cells that may move this step; resting water sleeps
+-- How many cells of water and of gas each grid row holds, so drawing and the
+-- gas step skip empty rows
+local waterRows, gasRows = {}, {}
 local gasTimer, fireTimer = TICK, TICK
 local drownTimer = TICK
 local breathPlayer -- the hunter, for drawing his bubbles
@@ -46,6 +56,7 @@ fluids.exposure = 0
 
 function fluids.clear()
   gas, water, fire, smoke, vents, braziers, columns = {}, {}, {}, {}, {}, {}, {}
+  active, waterRows, gasRows = {}, {}, {}
   gasTimer, fireTimer, drownTimer = TICK, TICK, TICK
   breathPlayer = nil
   fluids.exposure = 0
@@ -69,7 +80,36 @@ end
 
 local function solidAt(k)
   local gx, gy = coords(k)
-  return world:isSolid(gx * C + 2, gy * C + 2)
+  return world:isSolid(gx * C + HALF, gy * C + HALF)
+end
+
+local function rowOf(k)
+  return (k - k % K) / K
+end
+
+-- Every change to water or gas goes through these, to keep the row counts
+local function setWater(k, v)
+  local had = water[k] ~= nil
+  if v and not had then
+    local r = rowOf(k)
+    waterRows[r] = (waterRows[r] or 0) + 1
+  elseif not v and had then
+    local r = rowOf(k)
+    waterRows[r] = waterRows[r] - 1
+  end
+  water[k] = v or nil
+end
+
+local function setGas(k, v)
+  local had = gas[k] ~= nil
+  if v and not had then
+    local r = rowOf(k)
+    gasRows[r] = (gasRows[r] or 0) + 1
+  elseif not v and had then
+    local r = rowOf(k)
+    gasRows[r] = gasRows[r] - 1
+  end
+  gas[k] = v
 end
 
 -- Free of terrain and water
@@ -83,16 +123,33 @@ end
 -- each { cells = { x, y, ... } top-left pixel corners of C-px cells, vent })
 function fluids.add(w, info)
   world = w
+  local sub = POOL_CELL / C
   for _, p in ipairs(info.gas or {}) do
     for i = 1, #p.cells, 2 do
-      gas[key(p.cells[i] / C, p.cells[i + 1] / C)] = 0.85
+      local gx, gy = p.cells[i] / C, p.cells[i + 1] / C
+      for oy = 0, sub - 1 do
+        for ox = 0, sub - 1 do
+          if not solidAt(key(gx + ox, gy + oy)) then
+            setGas(key(gx + ox, gy + oy), 0.85)
+          end
+        end
+      end
     end
     local vx, vy = p.vent[1], p.vent[2]
     vents[#vents + 1] = { k = cellOf(vx, vy - 2), x = vx, y = vy }
   end
   for _, p in ipairs(info.water or {}) do
     for i = 1, #p.cells, 2 do
-      water[key(p.cells[i] / C, p.cells[i + 1] / C)] = true
+      local gx, gy = p.cells[i] / C, p.cells[i + 1] / C
+      for oy = 0, sub - 1 do
+        for ox = 0, sub - 1 do
+          local k = key(gx + ox, gy + oy)
+          if not solidAt(k) then
+            setWater(k, true)
+            active[k] = true
+          end
+        end
+      end
     end
   end
 end
@@ -103,8 +160,9 @@ function fluids.fillWater(w, x0, x1, level)
   world = world or w
   for gx = floor(x0 / C), floor(x1 / C) do
     local gy = floor(level / C)
-    while gy < floor(level / C) + 60 and not w:isSolid(gx * C + 2, gy * C + 2) do
-      water[key(gx, gy)] = true
+    while gy < floor(level / C) + 60 * 4 / C and not w:isSolid(gx * C + HALF, gy * C + HALF) do
+      setWater(key(gx, gy), true)
+      active[key(gx, gy)] = true
       gy = gy + 1
     end
   end
@@ -141,9 +199,12 @@ end
 
 -- Adding things ---------------------------------------------------------------
 
+-- (a puff covers a 4-px patch, so it reads the same at any cell size)
 function fluids.addSmoke(x, y, amount)
   local k = cellOf(x, y)
-  smoke[k] = math.min(1, (smoke[k] or 0) + amount)
+  for _, d in ipairs({ 0, 1, K, K + 1 }) do
+    smoke[k + d] = math.min(1, (smoke[k + d] or 0) + amount)
+  end
 end
 
 -- A cloud of gas around (x, y): concentration `amount` fading toward `radius`
@@ -159,7 +220,7 @@ function fluids.addGas(x, y, amount, radius)
       if d <= r then
         local k = key(cx + dx, cy + dy)
         if open(k) then
-          gas[k] = math.min(1, (gas[k] or 0) + amount * (1 - 0.5 * d / math.max(1, r)))
+          setGas(k, math.min(1, (gas[k] or 0) + amount * (1 - 0.5 * d / math.max(1, r))))
         end
       end
     end
@@ -167,7 +228,7 @@ function fluids.addGas(x, y, amount, radius)
 end
 
 local function igniteCell(k, c)
-  gas[k] = nil
+  setGas(k, nil)
   fire[k] = 0.25 + c * 0.9
   smoke[k - K] = math.min(1, (smoke[k - K] or 0) + c * 0.35)
 end
@@ -191,9 +252,12 @@ function fluids.ignite(x, y, power, onlyGas)
     end
   end
   if not caught and not onlyGas then
-    local k = key(gx, gy)
-    if open(k) then
-      fire[k] = math.max(fire[k] or 0, 0.2 + 0.2 * (power or 1))
+    -- A small flame, a 4-px patch
+    for _, d in ipairs({ 0, 1, -K, -K + 1 }) do
+      local k = key(gx, gy) + d
+      if open(k) then
+        fire[k] = math.max(fire[k] or 0, 0.2 + 0.2 * (power or 1))
+      end
     end
   end
   return caught
@@ -213,7 +277,7 @@ function fluids.explosion(x, y, radius)
         local c = gas[k]
         if c then
           igniteCell(k, c)
-        elseif love.math.random() < 0.18 and open(k) then
+        elseif love.math.random() < 0.18 * C / 4 and open(k) then
           fire[k] = 0.2 + love.math.random() * 0.25
         end
       end
@@ -232,6 +296,27 @@ end
 
 function fluids.waterAt(x, y)
   return water[cellOf(x, y)] == true
+end
+
+-- Is any part of the box (head, middle or feet) in water?
+function fluids.waterTouching(x, y, w, h)
+  return water[cellOf(x + w / 2, y + 1)] ~= nil or water[cellOf(x + w / 2, y + h / 2)] ~= nil or water[cellOf(x + w / 2, y + h - 1)] ~= nil
+end
+
+-- Wakes the water around a region (src.destruction calls this when terrain
+-- is removed), so it starts to flow at once instead of at the next sweep
+function fluids.wake(x0, y0, x1, y1)
+  local gx0, gy0, gx1, gy1 = floor(x0 / C) - 2, floor(y0 / C) - 2, floor(x1 / C) + 2, floor(y1 / C) + 2
+  for gy = gy0, gy1 do
+    if (waterRows[gy] or 0) > 0 then
+      for gx = gx0, gx1 do
+        local k = gy * K + gx
+        if water[k] then
+          active[k] = true
+        end
+      end
+    end
+  end
 end
 
 function fluids.fireAt(x, y)
@@ -257,59 +342,60 @@ local function region(px, py)
 end
 
 -- Gas diffuses toward emptier neighbours: slowly sideways, faster down, a
--- little up. Thin traces vanish.
+-- little up. Thin traces vanish. (The weights are for 2-px cells.)
+local GAS_OFFSETS = { K, -1, 1, -K }
+local GAS_WEIGHTS = { 0.24, 0.14, 0.14, 0.08 }
 local function stepGas(gx0, gy0, gx1, gy1)
   for _, v in ipairs(vents) do
     local gx, gy = coords(v.k)
-    if gx >= gx0 and gx <= gx1 and gy >= gy0 and gy <= gy1 and (gas[v.k] or 0) < 0.9 and not water[v.k] then
-      gas[v.k] = math.min(0.95, (gas[v.k] or 0) + 0.08)
-    end
-  end
-  local cells = {}
-  for gy = gy0, gy1 do
-    for gx = gx0, gx1 do
-      local k = key(gx, gy)
-      if gas[k] then
-        cells[#cells + 1] = k
+    if gx >= gx0 and gx <= gx1 and gy >= gy0 and gy <= gy1 and not water[v.k] then
+      for _, d in ipairs({ 0, -1, 1, -K }) do
+        if (gas[v.k + d] or 0) < 0.9 and open(v.k + d) then
+          setGas(v.k + d, math.min(0.95, (gas[v.k + d] or 0) + 0.08))
+        end
       end
     end
   end
   local delta, openCache = {}, {}
-  local function isOpen(k)
-    local o = openCache[k]
-    if o == nil then
-      o = open(k)
-      openCache[k] = o
-    end
-    return o
-  end
-  for _, k in ipairs(cells) do
-    local c = gas[k]
-    if water[k] then
-      gas[k] = nil
-    else
-      local function flow(nk, w)
-        local diff = c - (gas[nk] or 0)
-        if diff > 0.012 and isOpen(nk) then
-          local f = diff * w
-          delta[k] = (delta[k] or 0) - f
-          delta[nk] = (delta[nk] or 0) + f
+  for gy = gy0, gy1 do
+    if (gasRows[gy] or 0) > 0 then
+      for gx = gx0, gx1 do
+        local k = gy * K + gx
+        local c = gas[k]
+        if c then
+          if water[k] then
+            setGas(k, nil)
+          else
+            for i = 1, 4 do
+              local nk = k + GAS_OFFSETS[i]
+              local diff = c - (gas[nk] or 0)
+              if diff > 0.012 then
+                local o = openCache[nk]
+                if o == nil then
+                  o = open(nk)
+                  openCache[nk] = o
+                end
+                if o then
+                  local f = diff * GAS_WEIGHTS[i]
+                  delta[k] = (delta[k] or 0) - f
+                  delta[nk] = (delta[nk] or 0) + f
+                end
+              end
+            end
+          end
         end
       end
-      flow(k + K, 0.12)
-      flow(k - 1, 0.07)
-      flow(k + 1, 0.07)
-      flow(k - K, 0.04)
     end
   end
   for k, d in pairs(delta) do
     local v = (gas[k] or 0) + d
-    gas[k] = v < 0.012 and nil or math.min(1, v)
+    setGas(k, (v >= 0.012) and math.min(1, v) or nil)
   end
 end
 
 -- Flames: ignite neighbouring gas (reaching two cells, so a burning cloud
 -- flares across quickly), die down, leave smoke, and are put out by water
+local FIRE_REACH = { -1, 1, -K, K, -2, 2, -2 * K, 2 * K, -3, 3, -4, 4, -3 * K, -4 * K }
 local function stepFire(dt, near)
   local keys = {}
   for k in pairs(fire) do
@@ -323,7 +409,8 @@ local function stepFire(dt, near)
         fire[k] = nil
         smoke[k] = math.min(1, (smoke[k] or 0) + 0.3) -- steam
       else
-        for _, n in ipairs({ k - 1, k + 1, k - K, k + K, k - 2, k + 2, k - 2 * K }) do
+        for _, d in ipairs(FIRE_REACH) do
+          local n = k + d
           local c = gas[n]
           if c and c > 0.1 and r() < 0.75 then
             igniteCell(n, c)
@@ -342,7 +429,7 @@ local function stepFire(dt, near)
           fire[k] = life
           if near and r() < 0.06 then
             local gx, gy = coords(k)
-            effects.particle(gx * C + 2, gy * C, (r() - 0.5) * 14, -20 - r() * 20, 0.5, { 1, 0.55 + r() * 0.3, 0.15 }, -30, true)
+            effects.particle(gx * C + HALF, gy * C, (r() - 0.5) * 14, -20 - r() * 20, 0.5, { 1, 0.55 + r() * 0.3, 0.15 }, -30, true)
           end
         end
       end
@@ -350,22 +437,22 @@ local function stepFire(dt, near)
   end
 end
 
--- Smoke rises, wanders and thins
+-- Smoke rises, wanders and thins (stepped twice as often as before, on
+-- cells half the size, so it drifts as fast as ever)
 local function stepSmoke(gx0, gy0, gx1, gy1)
   local cells = {}
-  for gy = gy0, gy1 do
-    for gx = gx0, gx1 do
-      local k = key(gx, gy)
-      if smoke[k] then
-        cells[#cells + 1] = k
-      end
+  for k in pairs(smoke) do
+    local gx = k % K
+    local gy = (k - gx) / K
+    if gx >= gx0 and gx <= gx1 and gy >= gy0 and gy <= gy1 then
+      cells[#cells + 1] = k
     end
   end
   local r = love.math.random
   for _, k in ipairs(cells) do
     local v = smoke[k]
     if v then
-      v = v * 0.975 - 0.004
+      v = v * 0.9875 - 0.002
       if v < 0.05 then
         smoke[k] = nil
       else
@@ -393,59 +480,96 @@ local function stepSmoke(gx0, gy0, gx1, gy1)
 end
 
 -- Water: falls, then slides down-slope, then flows sideways toward a drop
--- within a few cells; otherwise rests (so a flat surface is still)
+-- within a few cells; otherwise rests. Only cells in `active` are looked at:
+-- one that can't move goes to sleep until a neighbour moves (or the periodic
+-- sweep wakes it), so still pools cost nothing.
+local NEIGHBOURS = { -K - 1, -K, -K + 1, -1, 1, K - 1, K, K + 1 }
+local function free(k)
+  return not water[k] and not solidAt(k)
+end
+
 local function stepWater(gx0, gy0, gx1, gy1)
   local r = love.math.random
+  local list = {}
+  for k in pairs(active) do
+    local gx = k % K
+    local gy = (k - gx) / K
+    if gx >= gx0 and gx <= gx1 and gy >= gy0 and gy <= gy1 then
+      list[#list + 1] = k
+    end
+  end
+  if #list == 0 then
+    return
+  end
+  -- Bottom rows first; each row swept left or right at random
+  if r() < 0.5 then
+    table.sort(list, function(a, b)
+      return a > b
+    end)
+  else
+    table.sort(list, function(a, b)
+      local ra, rb = a - a % K, b - b % K
+      if ra ~= rb then
+        return ra > rb
+      end
+      return a < b
+    end)
+  end
   local moved = {}
-  local function free(k)
-    return not water[k] and not solidAt(k)
-  end
   local function move(k, n)
-    water[k] = nil
-    water[n] = true
+    setWater(k, nil)
+    setWater(n, true)
     moved[n] = true
-    gas[n] = nil
+    setGas(n, nil)
     fire[n] = nil
+    active[k] = nil
+    active[n] = true
+    for _, d in ipairs(NEIGHBOURS) do
+      if water[k + d] then
+        active[k + d] = true
+      end
+    end
   end
-  for gy = gy1, gy0, -1 do
-    local flip = r() < 0.5
-    for i = gx0, gx1 do
-      local gx = flip and (gx1 - (i - gx0)) or i
-      local k = key(gx, gy)
-      if water[k] and not moved[k] then
-        local below = k + K
-        if free(below) then
-          move(k, below)
-        else
-          local side = r() < 0.5 and -1 or 1
-          local done = false
-          for _, d in ipairs({ side, -side }) do
-            if free(below + d) and free(k + d) then
-              move(k, below + d)
-              done = true
-              break
-            end
+  for _, k in ipairs(list) do
+    if water[k] and not moved[k] then
+      local below = k + K
+      local done = false
+      if free(below) then
+        move(k, below)
+        done = true
+      else
+        local side = r() < 0.5 and -1 or 1
+        for _, d in ipairs({ side, -side }) do
+          if free(below + d) and free(k + d) then
+            move(k, below + d)
+            done = true
+            break
           end
-          if not done then
-            for _, d in ipairs({ side, -side }) do
-              for i2 = 1, 6 do
-                local c = k + d * i2
-                if not free(c) then
-                  break
-                end
-                if free(c + K) then
-                  move(k, k + d)
-                  done = true
-                  break
-                end
-              end
-              if done then
+        end
+        if not done then
+          for _, d in ipairs({ side, -side }) do
+            for i2 = 1, SPREAD do
+              local c = k + d * i2
+              if not free(c) then
                 break
               end
+              if free(c + K) then
+                move(k, k + d)
+                done = true
+                break
+              end
+            end
+            if done then
+              break
             end
           end
         end
       end
+      if not done then
+        active[k] = nil
+      end
+    elseif not water[k] then
+      active[k] = nil
     end
   end
 end
@@ -462,10 +586,33 @@ function fluids.update(dt, player, enemies)
   local px, py = b.x + b.w / 2, b.y + b.h / 2
   local gx0, gy0, gx1, gy1 = region(px, py)
 
+  accSweep = accSweep + dt
+  if accSweep >= SWEEP then
+    -- Wake the water near the hunter, in case the rock under it was dug away
+    accSweep = 0
+    for gy = gy0, gy1 do
+      if (waterRows[gy] or 0) > 0 then
+        for gx = gx0, gx1 do
+          local k = gy * K + gx
+          if water[k] then
+            active[k] = true
+          end
+        end
+      end
+    end
+  end
   accWater = accWater + dt
-  if accWater >= 0.05 then
-    accWater = accWater % 0.05
+  local steps = 0
+  while accWater >= WATER_STEP and steps < 2 do
+    accWater = accWater - WATER_STEP
+    steps = steps + 1
     stepWater(gx0, gy0, gx1, gy1)
+  end
+  accWater = math.min(accWater, WATER_STEP)
+  accSmoke = accSmoke + dt
+  if accSmoke >= 0.05 then
+    accSmoke = 0
+    stepSmoke(gx0, gy0, gx1, gy1)
   end
   accSlow = accSlow + dt
   if accSlow >= 0.1 then
@@ -474,7 +621,7 @@ function fluids.update(dt, player, enemies)
     for _, br in ipairs(braziers) do
       local bx, by = coords(br.k)
       if bx >= gx0 and bx <= gx1 and by >= gy0 and by <= gy1 then
-        for dk = -1, 1 do
+        for dk = -2, 3 do
           fire[br.k + dk] = math.max(fire[br.k + dk] or 0, 0.6)
         end
       end
@@ -487,7 +634,7 @@ function fluids.update(dt, player, enemies)
           for gx = floor(c.x0 / C), floor(c.x1 / C) do
             local k = key(gx, gy)
             if open(k) then
-              gas[k] = 1
+              setGas(k, 1)
             end
           end
         end
@@ -500,7 +647,6 @@ function fluids.update(dt, player, enemies)
     end
     stepGas(gx0, gy0, gx1, gy1)
     stepFire(step, true)
-    stepSmoke(gx0, gy0, gx1, gy1)
     -- Wisps of gas in view drift up as little puffs
     if love.math.random() < 0.3 then
       local x = px + (love.math.random() - 0.5) * 500
@@ -531,7 +677,7 @@ function fluids.update(dt, player, enemies)
     if gasTimer <= 0 then
       gasTimer = TICK
       local c = math.max(gas[headK] or 0, gas[midK] or 0)
-      player:hurtOverTime(inCol and COLUMN_DAMAGE or math.floor(GAS_DAMAGE * (0.6 + c) + 0.5), GAS_COLOR)
+      player:hurtOverTime(inCol and COLUMN_DAMAGE or math.floor(GAS_DAMAGE * (0.6 + c) + 0.5), GAS_COLOR, "gas")
       audio.play("hurt", 0.35)
     end
     if love.math.random() < dt * 6 then
@@ -552,7 +698,7 @@ function fluids.update(dt, player, enemies)
     fireTimer = fireTimer - dt
     if fireTimer <= 0 then
       fireTimer = TICK
-      player:hurtOverTime(FIRE_DAMAGE, { 1, 0.6, 0.2 })
+      player:hurtOverTime(FIRE_DAMAGE, { 1, 0.6, 0.2 }, "fire")
     end
   else
     fireTimer = math.min(TICK, fireTimer + dt)
@@ -575,7 +721,7 @@ function fluids.update(dt, player, enemies)
         drownTimer = drownTimer - dt
         if drownTimer <= 0 then
           drownTimer = TICK
-          player:hurtOverTime(DROWN_DAMAGE, { 0.5, 0.8, 1 })
+          player:hurtOverTime(DROWN_DAMAGE, { 0.5, 0.8, 1 }, "water")
           audio.play("hurt", 0.35)
         end
       else
@@ -598,6 +744,7 @@ function fluids.update(dt, player, enemies)
     player.breath = breath
   end
   if player.inWater ~= (wasIn or false) then
+    audio.play(player.inWater and "splash_in" or "splash_out")
     for _ = 1, 10 do
       effects.particle(px + (love.math.random() - 0.5) * 8, py - 4, (love.math.random() - 0.5) * 70, -40 - love.math.random() * 50, 0.5, { 0.55, 0.8, 0.95 }, 400, true)
     end
@@ -652,21 +799,23 @@ function fluids.drawDecor(view)
   end
 end
 
--- Cells are simulated at 4 px but drawn at 2 px, and only where the terrain
--- is not: so the edges follow the rock instead of the grid. A 2-px piece also
--- counts as filled when it lies in a cell the simulation had to treat as rock
--- (its centre is solid) but a neighbouring cell is filled, so there are no
--- gaps hugging slopes.
+-- Pieces of a cell are drawn only where the terrain is not, so edges follow
+-- the rock rather than the grid. A piece also counts as filled when it lies
+-- in a cell the simulation had to treat as rock (its centre is solid) but a
+-- neighbouring cell is filled, so there are no gaps hugging slopes.
 local function pieceFilled(tbl, gx, gy, px, py, world)
-  if world:isSolid(px, py) or world:isSolid(px + 1, py + 1) then
-    return nil
-  end
-  local v = tbl[key(gx, gy)]
+  -- (cheap table lookups first: most pixels have nothing in or next to them)
+  local k = gy * K + gx
+  local v = tbl[k]
   if v then
+    if world:isSolid(px, py) then
+      return nil
+    end
     return v
   end
-  if solidAt(key(gx, gy)) then
-    return tbl[key(gx - 1, gy)] or tbl[key(gx + 1, gy)] or tbl[key(gx, gy - 1)] or tbl[key(gx, gy + 1)]
+  local n = tbl[k - 1] or tbl[k + 1] or tbl[k - K] or tbl[k + K]
+  if n and solidAt(k) and not world:isSolid(px, py) then
+    return n
   end
   return nil
 end
@@ -713,29 +862,57 @@ local function drawBreath(t)
   end
 end
 
+local GAS_LEVELS = 8
+local GAS_MAX = 0.58 -- the strongest a gas cell is drawn
+local gasPoints = {}
+for i = 1, GAS_LEVELS do
+  gasPoints[i] = {}
+end
+
 function fluids.drawEmissive(view)
   local gx0, gy0, gx1, gy1 = visibleRange(view)
   local t = love.timer.getTime()
   drawBreath(t)
-  local noise = love.math.noise
+  -- Gas: each cell a 2-px square whose strength shimmers slowly, sorted into
+  -- a few brightness levels so the whole cloud is a handful of draw calls
+  local counts = {}
+  for i = 1, GAS_LEVELS do
+    counts[i] = 0
+  end
+  local sin = math.sin
   for gy = gy0, gy1 do
-    for gx = gx0, gx1 do
-      local k = key(gx, gy)
-      if gas[k] or (not water[k] and (gas[k - 1] or gas[k + 1] or gas[k - K] or gas[k + K])) then
-        for sy = 0, 2, 2 do
-          for sx = 0, 2, 2 do
-            local px, py = gx * C + sx, gy * C + sy
-            local c = pieceFilled(gas, gx, gy, px, py, world)
-            if c and c > 0.03 then
-              local n = noise(px * 0.06 + t * 0.12, py * 0.06 - t * 0.07)
-              love.graphics.setColor(GAS_COLOR[1] + 0.15 * n, GAS_COLOR[2], GAS_COLOR[3], math.min(0.4, c * 0.3) * (0.55 + n * 0.9))
-              love.graphics.rectangle("fill", px, py, 2, 2)
-            end
-          end
+    if (gasRows[gy] or 0) > 0 then
+      local row = gy * K
+      local py = gy * C
+      local wob = sin(py * 0.05 - t * 0.3) * 1.7
+      for gx = gx0, gx1 do
+        local c = gas[row + gx]
+        if c and c > 0.03 then
+          local px = gx * C
+          local n = 0.5 + 0.5 * sin(px * 0.07 + t * 0.5 + wob)
+          local a = math.min(0.4, c * 0.3) * (0.55 + n * 0.9)
+          local level = math.min(GAS_LEVELS, floor(a / GAS_MAX * GAS_LEVELS) + 1)
+          local list = gasPoints[level]
+          local nn = counts[level]
+          list[nn + 1] = px + HALF
+          list[nn + 2] = py + HALF
+          counts[level] = nn + 2
         end
       end
     end
   end
+  love.graphics.setPointSize(C)
+  for i = 1, GAS_LEVELS do
+    local list, nn = gasPoints[i], counts[i]
+    for j = #list, nn + 1, -1 do
+      list[j] = nil
+    end
+    if nn > 0 then
+      love.graphics.setColor(GAS_COLOR[1], GAS_COLOR[2], GAS_COLOR[3], (i - 0.5) / GAS_LEVELS * GAS_MAX)
+      love.graphics.points(list)
+    end
+  end
+  love.graphics.setPointSize(1)
   -- Columns still warming up: a flickering pale beam where gas is about to pour
   for _, c in ipairs(columns) do
     if c.age < c.warn and c.x1 > view.x and c.x0 < view.x + view.w then
@@ -752,12 +929,15 @@ function fluids.drawEmissive(view)
   for k, life in pairs(fire) do
     local gx, gy = coords(k)
     if gx >= gx0 and gx <= gx1 and gy >= gy0 and gy <= gy1 then
-      local h = 2 + (k * 7 + frame) % 3
+      -- Tongues that flicker up past the cell top
+      local h = 1 + (k * 7 + frame) % 3
       local hot = math.min(1, life * 2)
       love.graphics.setColor(1, 0.35 + 0.35 * hot, 0.1 + 0.15 * hot)
       love.graphics.rectangle("fill", gx * C, gy * C + C - h, C, h)
-      love.graphics.setColor(1, 0.85, 0.45, 0.8)
-      love.graphics.rectangle("fill", gx * C + 1, gy * C + C - h + 1, 2, math.max(1, h - 1))
+      if h > 1 then
+        love.graphics.setColor(1, 0.85, 0.45, 0.8)
+        love.graphics.rectangle("fill", gx * C + (k % 2), gy * C + C - h + 1, 1, h - 1)
+      end
     end
   end
   -- Breathing it in tints the whole view a sickly green
@@ -766,6 +946,8 @@ function fluids.drawEmissive(view)
     love.graphics.rectangle("fill", view.x, view.y, view.w, view.h)
   end
 end
+
+local buildWaterEdge, drawWaterRun -- (defined below)
 
 -- The water's colours: deep in the middle, lighter toward the edges, in fine
 -- steps so it reads as a smooth gradient
@@ -784,68 +966,169 @@ for k, width in ipairs({ 16, 13, 10, 8, 6, 5, 4, 3, 2, 1 }) do
   }
 end
 
+-- The water's sides: a gradient strip (deep to light, toward the edge) drawn
+-- at each end of a run, as one image instead of stacked rectangles
+local WATER_ALPHA = 0.74
+local edgeImage
+local edgeQuads = {}
+local EDGE_W = 16
+buildWaterEdge = function()
+  if edgeImage then
+    return
+  end
+  local data = love.image.newImageData(EDGE_W, 1)
+  for x = 0, EDGE_W - 1 do
+    -- x px from the edge: the bands' colour at that depth
+    local col = WATER_DEEP
+    for i = #WATER_BANDS, 1, -1 do
+      if x < WATER_BANDS[i][1] then
+        col = WATER_BANDS[i][2]
+        break
+      end
+    end
+    data:setPixel(x, 0, col[1], col[2], col[3], 1)
+  end
+  edgeImage = love.graphics.newImage(data)
+  edgeImage:setFilter("nearest", "nearest")
+  for w = 1, EDGE_W do
+    edgeQuads[w] = love.graphics.newQuad(0, 0, w, 1, EDGE_W, 1)
+  end
+end
+
+-- One pixel row's segment of water, from x0 to x1 (inclusive)
+local function drawWaterSegment(x0, x1, py, surfaceRow, t)
+  local w = x1 - x0 + 1
+  -- (see-through enough that the hunter and fish in it can be made out)
+  love.graphics.setColor(WATER_DEEP[1], WATER_DEEP[2], WATER_DEEP[3], WATER_ALPHA)
+  love.graphics.rectangle("fill", x0, py, w, 1)
+  local bw = math.min(EDGE_W, floor(w / 2))
+  if bw > 0 then
+    love.graphics.setColor(1, 1, 1, WATER_ALPHA)
+    love.graphics.draw(edgeImage, edgeQuads[bw], x0, py)
+    love.graphics.draw(edgeImage, edgeQuads[bw], x1 + 1, py, 0, -1, 1)
+  end
+  if not surfaceRow then
+    return
+  end
+  -- The top row of a cell: a pale rippling line where there is open air above,
+  -- a faint grain and now and then a glint in the body
+  local aboveRow = floor((py - 1) / C) * K
+  local x = x0
+  while x <= x1 do
+    local cx = floor(x / C)
+    local cellEnd = math.min(x1, cx * C + C - 1)
+    if water[aboveRow + cx] then
+      -- Water above: the body. A faint grain, now and then a glint (per cell)
+      local h = (cx * 73856093 + py * 19349663) % 1000
+      if h < 70 then
+        love.graphics.setColor(0.32, 0.56, 0.58, 0.22)
+        love.graphics.rectangle("fill", x, py, cellEnd - x + 1, C)
+      elseif h > 985 then
+        love.graphics.setColor(0.05, 0.14, 0.2, 0.2)
+        love.graphics.rectangle("fill", x, py, cellEnd - x + 1, C)
+      end
+      if (cx * 73856093 + py * 19349663 + floor(t * 2) * 83492791) % 1000 < 4 then
+        love.graphics.setColor(0.80, 0.92, 0.95, 0.8)
+        love.graphics.rectangle("fill", x, py, 1, 1)
+      end
+    else
+      -- Open air (or rock) above: the surface, a pale rippling line
+      for sx = x, cellEnd do
+        if not world:isSolid(sx, py - 1) then
+          local off = math.sin(sx * 0.35 + t * 2.2) > 0.5 and 1 or 0
+          love.graphics.setColor(0.74, 0.84, 0.76, 0.95)
+          love.graphics.rectangle("fill", sx, py + off, 1, 1)
+        end
+      end
+    end
+    x = cellEnd + 1
+  end
+end
+
+local runEdges = {}
+
+-- A run of water cells a..b in grid row gy, drawn a pixel row at a time
+drawWaterRun = function(gy, a, b, t)
+  local row = gy * K
+  -- Which cells of the run touch something other than water (once per run)
+  local edges = runEdges
+  for gx = a, b do
+    local k = row + gx
+    edges[gx - a + 1] = not (water[k - K] and water[k + K] and water[k - 1] and water[k + 1])
+  end
+  for sy = 0, C - 1 do
+    local py = gy * C + sy
+    local segStart
+    -- A rock-centred cell just left of the run lends its open pixels
+    local lx = a * C
+    if not water[row + a - 1] and solidAt(row + a - 1) then
+      while lx > (a - 1) * C and not world:isSolid(lx - 1, py) do
+        lx = lx - 1
+      end
+    end
+    local rx = b * C + C - 1
+    if not water[row + b + 1] and solidAt(row + b + 1) then
+      while rx < (b + 1) * C + C - 1 and not world:isSolid(rx + 1, py) do
+        rx = rx + 1
+      end
+    end
+    if lx < a * C then
+      segStart = lx
+    end
+    for gx = a, b do
+      local k = row + gx
+      if edges[gx - a + 1] then
+        for ox = 0, C - 1 do
+          local x = gx * C + ox
+          local on = not world:isSolid(x, py)
+          if on and not segStart then
+            segStart = x
+          elseif not on and segStart then
+            drawWaterSegment(segStart, x - 1, py, sy == 0, t)
+            segStart = nil
+          end
+        end
+      elseif not segStart then
+        segStart = gx * C -- inside the water: open, no need to look
+      end
+    end
+    if segStart then
+      drawWaterSegment(segStart, rx, py, sy == 0, t)
+    elseif rx > b * C + C - 1 then
+      drawWaterSegment(b * C + C, rx, py, sy == 0, t)
+    end
+  end
+end
+
 -- Water and smoke are drawn in front of the hunter, but lit
 function fluids.drawFront(view)
   local gx0, gy0, gx1, gy1 = visibleRange(view)
   local t = love.timer.getTime()
-  -- Water in 2-px rows, merged into runs. Rows of cells with no water in or
-  -- next to them are skipped outright (most of the screen, most of the time).
-  local wet = {}
-  for gy = gy0 - 1, gy1 + 1 do
-    for gx = gx0 - 1, gx1 + 1 do
-      if water[key(gx, gy)] then
-        wet[gy] = true
-        break
-      end
-    end
-  end
+  -- Water, one pixel row at a time: rows of cells are split into runs of
+  -- water cells; only cells on the edge of the water (a neighbour without
+  -- water) look at the terrain pixel by pixel, so the edges follow the rock
+  -- while the body costs next to nothing. Cells the simulation treats as rock
+  -- (a solid centre) at the end of a run lend their open pixels to it.
+  buildWaterEdge()
   for gy = gy0, gy1 do
-    for sy = 0, (wet[gy] or wet[gy - 1] or wet[gy + 1]) and 2 or -1, 2 do
-      local py = gy * C + sy
-      local runStart
-      for sx2 = gx0 * 2, gx1 * 2 + 2 do
-        local px = sx2 * 2
-        local on = sx2 <= gx1 * 2 + 1 and pieceFilled(water, floor(sx2 / 2), gy, px, py, world)
-        if on and not runStart then
-          runStart = px
-        elseif not on and runStart then
-          local w = px - runStart
-          -- A teal body, nearly opaque: deep blue-green in the middle, lighter
-          -- toward the edges (stacked bands from each side)
-          love.graphics.setColor(WATER_DEEP[1], WATER_DEEP[2], WATER_DEEP[3], 0.92)
-          love.graphics.rectangle("fill", runStart, py, w, 2)
-          for _, band in ipairs(WATER_BANDS) do
-            local bw = math.min(band[1], floor(w / 2))
-            if bw > 0 then
-              love.graphics.setColor(band[2][1], band[2][2], band[2][3], 0.92)
-              love.graphics.rectangle("fill", runStart, py, bw, 2)
-              love.graphics.rectangle("fill", px - bw, py, bw, 2)
-            end
+    if (waterRows[gy] or 0) > 0 then
+      local row = gy * K
+      local gx = gx0
+      -- (a single-cell dip in the surface, water either side and below,
+      -- is drawn filled, so the surface reads as a line rather than notches)
+      local function wetCell(c)
+        local k = row + c
+        return water[k] or (water[k - 1] and water[k + 1] and water[k + K] and not solidAt(k))
+      end
+      while gx <= gx1 do
+        if water[row + gx] then
+          local a = gx
+          while gx <= gx1 and wetCell(gx) do
+            gx = gx + 1
           end
-          -- The surface: pieces with open air above get a pale, rippling line;
-          -- and now and then a glint catches the eye
-          for x = runStart, px - 1, 2 do
-            local above = world:isSolid(x, py - 1) or pieceFilled(water, floor(x / C), floor((py - 2) / C), x, py - 2, world)
-            if not above then
-              local off = math.sin(x * 0.35 + t * 2.2) > 0.5 and 1 or 0
-              love.graphics.setColor(0.74, 0.84, 0.76, 0.95)
-              love.graphics.rectangle("fill", x, py + off, 2, 1)
-            else
-              local h = (x * 73856093 + py * 19349663) % 1000
-              if h < 70 then
-                love.graphics.setColor(0.32, 0.56, 0.58, 0.22) -- a faint grain in the body
-                love.graphics.rectangle("fill", x, py, 2, 2)
-              elseif h > 985 then
-                love.graphics.setColor(0.05, 0.14, 0.2, 0.2)
-                love.graphics.rectangle("fill", x, py, 2, 2)
-              end
-              if (x * 73856093 + py * 19349663 + floor(t * 2) * 83492791) % 1000 < 3 then
-                love.graphics.setColor(0.80, 0.92, 0.95, 0.8) -- a glint
-                love.graphics.rectangle("fill", x, py, 1, 1)
-              end
-            end
-          end
-          runStart = nil
+          drawWaterRun(gy, a, gx - 1, t)
+        else
+          gx = gx + 1
         end
       end
     end
@@ -854,10 +1137,11 @@ function fluids.drawFront(view)
   -- second, so it reads as fine drifting grit instead of blocks
   local points = {}
   local frame = floor(t * 6)
-  for gy = gy0, gy1 do
-    for gx = gx0, gx1 do
-      local sm = smoke[key(gx, gy)]
-      if sm then
+  for k, sm in pairs(smoke) do
+    local gx = k % K
+    local gy = (k - gx) / K
+    if gx >= gx0 and gx <= gx1 and gy >= gy0 and gy <= gy1 then
+      do
         local density = math.min(0.9, sm)
         for oy = 0, C - 1 do
           for ox = 0, C - 1 do
@@ -881,8 +1165,8 @@ end
 function fluids.addLights(lighting, view)
   local gx0, gy0, gx1, gy1 = visibleRange(view)
   local lights = 0
-  for gy = gy0 - 6, gy1 + 6, 6 do
-    for gx = gx0 - 6, gx1 + 6, 6 do
+  for gy = gy0 - 12, gy1 + 12, 12 do
+    for gx = gx0 - 12, gx1 + 12, 12 do
       local c = gas[key(gx, gy)]
       if c and c > 0.3 and lights < 16 then
         lights = lights + 1
@@ -898,9 +1182,9 @@ function fluids.addLights(lighting, view)
   local n = 0
   for k, life in pairs(fire) do
     local gx, gy = coords(k)
-    if gx >= gx0 and gx <= gx1 and gy >= gy0 and gy <= gy1 and (k % 3 == 0 or life > 0.6) and n < 30 then
+    if gx >= gx0 and gx <= gx1 and gy >= gy0 and gy <= gy1 and (k % 7 == 0 or life > 0.6) and n < 30 then
       n = n + 1
-      lighting.add(gx * C + 2, gy * C, 30, 1, 0.6, 0.25, 0.55)
+      lighting.add(gx * C + HALF, gy * C, 30, 1, 0.6, 0.25, 0.55)
     end
   end
 end

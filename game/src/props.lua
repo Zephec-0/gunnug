@@ -717,7 +717,7 @@ local function detonate(p)
     local s = 40 + love.math.random() * 120
     effects.particle(x, y, math.cos(a) * s, math.sin(a) * s - 50, 0.7, { 0.50, 0.31, 0.17 }, 520)
   end
-  require("src.bullets").blast(x, y, ex.count, ex.scale, ex.dig, ex.digPower)
+  require("src.bullets").blast(x, y, ex.count, ex.scale, ex.dig, ex.digPower, "keg")
 end
 
 function props.update(dt)

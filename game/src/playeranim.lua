@@ -32,6 +32,7 @@ local HOLDS = {
   pistol = { reach = 5.8, pull = 2.0, tip = 0.35 },
   shotgun = { reach = 3.4, support = 4.2, pull = 1.6, tip = 0.3 },
   automatic = { reach = 3.4, support = 4.0, pull = 1.4, tip = 0.22 },
+  gatling = { reach = 3.0, support = 5.5, pull = 1.0, tip = 0.1 }, -- heavy: hugged in close, barely kicks
 }
 local TAIL_LINKS, TAIL_LINK = 4, 2.2
 
@@ -117,6 +118,9 @@ local RELOAD = {
   },
 }
 
+-- The Gatling's hopper comes off and goes on like the machine gun's drum
+RELOAD.gatling = RELOAD.automatic
+
 local function smooth(t)
   return t * t * (3 - 2 * t)
 end
@@ -138,7 +142,7 @@ local COLORS = {
   coat = { 0.15, 0.13, 0.17 },
   coatLight = { 0.27, 0.23, 0.30 },
   coatDark = { 0.09, 0.08, 0.11 },
-  lining = { 0.46, 0.07, 0.11 },
+  lining = { 0.20, 0.80, 0.66 }, -- the ether's teal (the fuser's colour)
   mantle = { 0.64, 0.63, 0.62 },
   mantleLight = { 0.78, 0.77, 0.75 },
   mantleDark = { 0.44, 0.43, 0.45 },
@@ -333,7 +337,7 @@ function anim.updateDeath(player, dt)
     for _ = 1, 34 do
       local ang = love.math.random() * math.pi * 2
       local s = 40 + love.math.random() * 130
-      local col = love.math.random() < 0.55 and { 0.55, 0.06, 0.09 } or (love.math.random() < 0.5 and COLORS.coat or COLORS.mantle)
+      local col = love.math.random() < 0.55 and COLORS.lining or (love.math.random() < 0.5 and COLORS.coat or COLORS.mantle)
       effects.particle(cx, fy - 6, math.cos(ang) * s, math.sin(ang) * s - 60, 0.8 + love.math.random() * 0.6, col, 480)
     end
   end
@@ -587,7 +591,7 @@ local function drawCoat(player, fy, hipX, hipY, neckX, neckY)
     outline = reversed
   end
   fillPolygon(outline, COLORS.coat)
-  -- Crimson lining glimpsed at the open front, and a lit leading edge
+  -- Teal lining (the ether's colour) glimpsed at the open front, and a lit leading edge
   segment(hipX + f * 1.6, hipY, hipX + f * 2.0 + a.coatX * 0.35, hemY - 1, COLORS.lining)
   segment(neckX + f * 1.2, neckY + 1, hipX + f * 1.4, hipY - 1, COLORS.coatLight)
   segment(hipX - f * 2.4, hipY, tailX, tailY, COLORS.coatDark)
@@ -630,19 +634,22 @@ end
 
 -- Mostly hat, riding low: a tall crown and a wide drooping brim pulled down
 -- to the eyes, the face lost in shadow except for the two glowing eyes
+-- The brim sits two pixels over the neck, so the hat comes right down to the
+-- shoulders with just the eyes showing between (a future hat swaps the crown
+-- and brim drawn below; the face column and collar stay)
 local function headOrigin(neckX, neckY, f)
-  return math.floor(neckX + f * 0.6), math.floor(neckY - 4)
+  return math.floor(neckX + f * 0.6), math.floor(neckY - 2)
 end
 
 local function drawHead(neckX, neckY, f, nohat)
   local hx, hy = headOrigin(neckX, neckY, f)
   local left = f > 0 and hx - 2 or hx -- 3-wide face column
   love.graphics.setColor(COLORS.shadow)
-  love.graphics.rectangle("fill", left, hy, 3, 3)
+  love.graphics.rectangle("fill", left, hy, 3, 2)
   -- High coat collar around the jaw
   love.graphics.setColor(COLORS.coat)
-  love.graphics.rectangle("fill", left - f, hy + 1, 1, 3)
-  love.graphics.rectangle("fill", f > 0 and left or left + 2, hy + 2, 1, 2)
+  love.graphics.rectangle("fill", left - f, hy + 1, 1, 2)
+  love.graphics.rectangle("fill", f > 0 and left or left + 2, hy + 1, 1, 2)
   -- Eyes just under the brim
   pixel(hx, hy + 1, COLORS.eye)
   pixel(hx - f * 2, hy + 1, COLORS.eye)
@@ -728,12 +735,32 @@ function GUN_DRAW.automatic(x, y, dx, dy, px, py, len)
   pixel(x + dx * len, y + dy * len, COLORS.silver)
 end
 
+local BRASS = { 0.86, 0.64, 0.24 }
+
+function GUN_DRAW.gatling(x, y, dx, dy, px, py, len, gun)
+  -- Stock back into the shoulder, a brass breech casing, the hopper on top
+  segment(x, y, x - dx * 3 + px * 1.4, y + py * 1.4 - dy * 3, COLORS.grip)
+  segment(x - dx, y - dy, x + dx * 4, y + dy * 4, BRASS)
+  segment(x - dx - px, y - dy - py, x + dx * 4 - px, y + dy * 4 - py, BRASS)
+  pixel(x + dx * 1.5 - px * 2, y + dy * 1.5 - py * 2, COLORS.gunMid)
+  pixel(x + dx * 2.5 - px * 2, y + dy * 2.5 - py * 2, COLORS.gunMid)
+  -- The barrel cluster: two rows whose shading swaps as the barrels turn
+  local turn = gun and math.floor(gun.spin or 0) % 2 == 1
+  segment(x + dx * 4, y + dy * 4, x + dx * len, y + dy * len, turn and COLORS.gunMid or COLORS.gun)
+  segment(x + dx * 4 - px, y + dy * 4 - py, x + dx * len - px, y + dy * len - py, turn and COLORS.gun or COLORS.gunMid)
+  -- Brass bands round the barrels and a bright muzzle
+  pixel(x + dx * 8, y + dy * 8, BRASS)
+  pixel(x + dx * 8 - px, y + dy * 8 - py, BRASS)
+  pixel(x + dx * len, y + dy * len, COLORS.silver)
+  pixel(x + dx * len - px, y + dy * len - py, COLORS.silver)
+end
+
 local function drawGun(gun, gripX, gripY, angle, f)
   local dx, dy = math.cos(angle), math.sin(angle)
   local px, py = -dy * f, dx * f
   local def = gun and gun.def
   local draw = GUN_DRAW[def and def.model or "revolver"] or GUN_DRAW.revolver
-  draw(gripX, gripY, dx, dy, px, py, def and def.length or 8.8)
+  draw(gripX, gripY, dx, dy, px, py, def and def.length or 8.8, gun)
 end
 
 -- Eye position under the brim (the lighting adds a faint glow there)

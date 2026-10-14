@@ -9,6 +9,7 @@
 -- A pickup is { kind, value, x, y, vx, vy, ... }. Coins are simulated per
 -- pixel like particles (cheap, so hundreds can lie around) rather than as
 -- Box2D bodies.
+local input = require("src.input")
 local audio = require("src.audio")
 local config = require("src.config")
 local effects = require("src.effects")
@@ -107,7 +108,7 @@ end
 function pickups.weaponAt(wx, wy)
   for _, p in ipairs(list) do
     if p.kind == "weapon" then
-      local icon = itembar.weaponIcon(p.gun.def)
+      local icon = itembar.groundIcon(p.gun)
       local w, h = icon:getWidth(), icon:getHeight()
       if math.abs(wx - p.x) <= w / 2 + 4 and wy >= p.y - h - 5 and wy <= p.y + 5 then
         return p.gun, p.x, p.y - h - 4
@@ -122,6 +123,24 @@ function pickups.maybeDropItem(x, y, chance)
   if love.math.random() < chance then
     pickups.dropItem(x, y, items.random())
   end
+end
+
+-- Drops a perk (an id from src.perks) at (x, y). Like an item it never
+-- despawns; the hunter takes it by pressing E next to it, and it is his for
+-- the rest of the run (no slot, no room needed).
+function pickups.dropPerk(x, y, id, vx, vy)
+  list[#list + 1] = {
+    kind = "perk",
+    perkId = id,
+    perk = perks.new(id),
+    value = 0,
+    x = x,
+    y = y,
+    vx = vx or (love.math.random() - 0.5) * 40,
+    vy = vy or -90,
+    age = 0,
+    sparkle = love.math.random() * 6,
+  }
 end
 
 -- Spills `amount` gold at (x, y) as a handful of coins, flung outward
@@ -174,6 +193,14 @@ local function collect(p, player)
     effects.popup(p.x, p.y - 6, p.item.name, p.item.color)
     for _ = 1, 4 do
       effects.particle(p.x, p.y, (love.math.random() - 0.5) * 70, -love.math.random() * 60, 0.35, p.item.color, 200, true)
+    end
+  elseif p.kind == "perk" then
+    perks.add(p.perkId)
+    player:refreshMaxHp()
+    audio.play("buy")
+    effects.popup(p.x, p.y - 8, p.perk.name, p.perk.color)
+    for _ = 1, 12 do
+      effects.particle(p.x, p.y - 4, (love.math.random() - 0.5) * 80, -love.math.random() * 70, 0.5, p.perk.color, 200, true)
     end
   elseif p.kind == "gold" then
     local value = math.max(1, math.floor(p.value * perks.prod("gold") + 0.5))
@@ -251,7 +278,7 @@ function pickups.nearestItem(player)
   local px, py = player:center()
   local best, bestDist = nil, ITEM_REACH
   for _, p in ipairs(list) do
-    if p.kind == "item" or p.kind == "weapon" then
+    if p.kind == "item" or p.kind == "weapon" or p.kind == "perk" then
       local d = math.sqrt((p.x - px) ^ 2 + (p.y - py) ^ 2)
       if d < bestDist then
         best, bestDist = p, d
@@ -287,12 +314,12 @@ function pickups.drawScreen(toScreen, font, player)
     return
   end
   local sx, sy = toScreen(p.x, p.y - 12)
-  local text = "[E] " .. (p.item and p.item.name or p.gun.name)
+  local text = "[" .. input.label("interact") .. "] " .. (p.item and p.item.name or (p.perk and ("Take " .. p.perk.name) or p.gun.name))
   love.graphics.setFont(font)
   local x, y = math.floor(sx - font:getWidth(text) / 2), math.floor(sy - font:getHeight())
   love.graphics.setColor(0, 0, 0, 0.85)
   love.graphics.print(text, x + 2, y + 2)
-  local c = p.item and p.item.color or { 1, 0.85, 0.5 }
+  local c = p.item and p.item.color or (p.perk and p.perk.color) or { 1, 0.85, 0.5 }
   love.graphics.setColor(math.min(1, c[1] + 0.3), math.min(1, c[2] + 0.3), math.min(1, c[3] + 0.3))
   love.graphics.print(text, x, y)
 end
@@ -309,10 +336,30 @@ function pickups.drawEmissive(view)
     local blinkOff = left < FADE_TIME and math.floor(left * 10) % 2 == 0
     if p.kind == "weapon" and onScreen(p, view) then
       -- The gun's own icon, with a faint pulse so it stands out
-      local icon = itembar.weaponIcon(p.gun.def)
+      local icon = itembar.groundIcon(p.gun)
       local pulse = 0.85 + 0.15 * math.sin(t * 4 + p.sparkle)
       love.graphics.setColor(pulse, pulse, pulse)
       love.graphics.draw(icon, math.floor(p.x - icon:getWidth() / 2), math.floor(p.y - icon:getHeight()))
+    elseif p.kind == "perk" and onScreen(p, view) then
+      -- A perk: its icon hovering over the ground in a pulsing halo of its colour
+      local c = p.perk.color
+      local img = icons.get(p.perk)
+      local pulse = 0.5 + 0.5 * math.sin(t * 3 + p.sparkle)
+      local bob = math.floor(math.sin(t * 2.5 + p.sparkle) * 1.5)
+      local x, y = math.floor(p.x) - 4, math.floor(p.y) - 13 + bob
+      love.graphics.setColor(c[1], c[2], c[3], 0.12 + 0.1 * pulse)
+      love.graphics.rectangle("fill", x - 3, y - 3, 14, 14)
+      love.graphics.setColor(c[1], c[2], c[3], 0.25 + 0.15 * pulse)
+      love.graphics.rectangle("fill", x - 1, y - 1, 10, 10)
+      if img then
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.draw(img, x, y)
+      end
+      local rarity = items.rarities[p.perk.rarity]
+      if rarity then
+        love.graphics.setColor(rarity.border[1], rarity.border[2], rarity.border[3], 0.9)
+        love.graphics.rectangle("line", x - 0.5, y - 0.5, 9, 9)
+      end
     elseif p.kind == "item" and onScreen(p, view) then
       -- A little glowing crate in the item's colour
       local c = p.item.color
@@ -358,6 +405,9 @@ function pickups.addLights(lighting, view)
     if onScreen(p, view) then
       if p.kind == "weapon" then
         lighting.add(p.x, p.y - 4, 30, 1, 0.85, 0.5, 0.6)
+      elseif p.kind == "perk" then
+        local c = p.perk.color
+        lighting.add(p.x, p.y - 6, 34, c[1], c[2], c[3], 0.7)
       elseif p.kind == "item" then
         local c = p.item.color
         lighting.add(p.x, p.y - 2, 22, c[1], c[2], c[3], 0.6)

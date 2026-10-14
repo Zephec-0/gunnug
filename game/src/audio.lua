@@ -16,6 +16,12 @@ local RATE = 22050
 local TAU = 6.2832
 local sources = {} -- name -> { source, volume, cooldown, last }
 local MASTER = 0.45
+-- Player volume settings (src.settings), each 0..1
+local volMaster, volMusic, volSfx = 1, 1, 1
+local menuMode = false -- the title screens: the void's drone and the menu theme
+local recapMode = false -- the death recap: its own sad little theme
+local muffled = false -- the weapon panel is open: everything sounds as if through a wall
+local MUFFLE = { type = "lowpass", volume = 0.85, highgain = 0.07 }
 local enabled = false
 local ambient = {} -- looping beds: surface wind and one per area
 local music -- the shop's piano
@@ -162,6 +168,17 @@ local DEFS = {
   shot_pistol = { gen = shotPistol, volume = 0.45 },
   shot_shotgun = { gen = shotShotgun, volume = 0.75 },
   shot_automatic = { gen = shotAutomatic, volume = 0.32, cooldown = 0.03 },
+  shot_gatling = { gen = shotAutomatic, volume = 0.26, cooldown = 0.02 },
+  -- The Gatling's barrels turning: a dry ratchet click, played faster and
+  -- higher as they spin up
+  gatling_spin = {
+    gen = function()
+      return synth(0.05, function(t, p)
+        return (noise() * 0.5 + math.sin(t * 1400 * TAU) * 0.3) * math.exp(-p * 7)
+      end)
+    end,
+    volume = 0.22,
+  },
   explosion = {
     gen = function()
       local tail = lp(0.12)
@@ -570,10 +587,165 @@ local DEFS = {
   },
 }
 
+-- Menu sounds ------------------------------------------------------------------------
+-- A softer step back, a page turn, a chime for a new compendium entry, and the
+-- sigh of something falling into the void on the title screen.
+
+DEFS.back = {
+  gen = function()
+    return synth(0.1, function(t, p)
+      return math.sin(t * (p < 0.5 and 700 or 470) * TAU) * math.exp(-p * 5) * 0.45
+    end)
+  end,
+  volume = 0.35,
+}
+DEFS.page = {
+  gen = function()
+    local band = hp(0.3)
+    return synth(0.09, function(t, p)
+      return (band(noise()) * 0.6 + math.sin(t * 1300 * TAU) * 0.2) * math.exp(-p * 7)
+    end)
+  end,
+  volume = 0.3,
+}
+DEFS.discover = {
+  gen = function()
+    return timeline(1.4, {
+      { t = 0, kind = "ting", f = 1047, d = 3.2 },
+      { t = 0.11, kind = "ting", f = 1568, d = 2.6 },
+      { t = 0.22, kind = "ting", f = 2093, d = 2.2 },
+    })
+  end,
+  volume = 0.35,
+}
+-- The fuser: a clamp and a rising hum as it locks, a falling breath when it
+-- lets go, a tiny glassy blip for each spark of ether, and a bright swell when
+-- two items become one
+DEFS.fuse_lock = {
+  gen = function()
+    return synth(0.7, function(t, p)
+      local clank = (noise() * 0.5 + math.sin(t * 180 * TAU) * 0.6) * math.exp(-t * 30)
+      local hum = math.sin(t * (220 + 220 * p) * TAU) * 0.3 * math.sin(p * math.pi) + math.sin(t * (330 + 330 * p) * TAU) * 0.12 * math.sin(p * math.pi)
+      return clank + hum
+    end)
+  end,
+  volume = 0.5,
+}
+DEFS.fuse_release = {
+  gen = function()
+    local air = lp(0.15)
+    return synth(0.8, function(t, p)
+      local f = 500 * (1 - p) + 90
+      return (math.sin(t * f * TAU) * 0.3 + air(noise()) * 0.6) * (1 - p) ^ 1.4 * math.min(1, p * 20)
+    end)
+  end,
+  volume = 0.45,
+}
+DEFS.ether = {
+  gen = function()
+    return synth(0.12, function(t, p)
+      return (math.sin(t * 1760 * TAU) * 0.5 + math.sin(t * 2640 * TAU) * 0.2) * math.exp(-p * 6)
+    end)
+  end,
+  volume = 0.16,
+  cooldown = 0.035,
+}
+DEFS.fuse_done = {
+  gen = function()
+    return synth(1.6, function(t, p)
+      local swell = math.min(1, p * 6) * math.exp(-math.max(0, p - 0.15) * 3)
+      local chord = math.sin(t * 523 * TAU) + math.sin(t * 659 * TAU) * 0.8 + math.sin(t * 784 * TAU) * 0.7 + math.sin(t * 1046 * TAU) * 0.5
+      local shimmer = math.sin(t * 2093 * TAU) * 0.25 * (0.5 + 0.5 * math.sin(t * 9 * TAU))
+      return (chord * 0.22 + shimmer) * swell
+    end)
+  end,
+  volume = 0.5,
+}
+-- Water: a splash going in (a slap, a burst of spray and a few bubbly
+-- blips), and the same sound played backwards coming out, so it sucks
+-- up into a pop as the hunter leaves the water
+local splashData
+local function splash()
+  if not splashData then
+    local spray = hp(0.35)
+    local body = lp(0.25)
+    local blips = {}
+    for i = 1, 2 do
+      blips[i] = { t = 0.03 + love.math.random() * 0.1, f = 500 + love.math.random() * 700 }
+    end
+    -- (only the opening of it: the slap and a quick burst of spray)
+    splashData = synth(0.2, function(t, p)
+      local slap = (body(noise()) * 1.6 + math.sin(t * 90 * TAU) * 0.5) * math.exp(-t * 28)
+      local hiss = spray(noise()) * 0.55 * math.exp(-t * 16) * math.min(1, t * 80) * (1 - p) ^ 2
+      local bub = 0
+      for _, b in ipairs(blips) do
+        local d = t - b.t
+        if d > 0 and d < 0.06 then
+          bub = bub + math.sin(d * b.f * (1 + d * 12) * TAU) * math.exp(-d * 60) * 0.35
+        end
+      end
+      return slap + hiss + bub
+    end)
+  end
+  return splashData
+end
+DEFS.splash_in = {
+  gen = splash,
+  volume = 0.45,
+  cooldown = 0.15,
+}
+DEFS.splash_out = {
+  gen = splash, -- (the same short splash coming out)
+  volume = 0.4,
+  cooldown = 0.15,
+}
+-- The wanted poster slammed up on the death recap: a heavy thud, a crack of
+-- wood and paper, and dust settling
+DEFS.poster_slam = {
+  gen = function()
+    local low = lp(0.12)
+    local crack = hp(0.4)
+    return synth(0.6, function(t, p)
+      local thud = math.sin(t * (95 - 50 * math.min(1, t * 6)) * TAU) * math.exp(-t * 12) * 1.2
+      local body = low(noise()) * 1.4 * math.exp(-t * 14)
+      local snap = crack(noise()) * 0.7 * math.exp(-t * 45)
+      return thud + body + snap
+    end)
+  end,
+  volume = 0.7,
+}
+DEFS.swallow = {
+  gen = function()
+    local phase = 0
+    local air = lp(0.25)
+    return synth(1.1, function(t, p)
+      -- A breath of air drawn down into a low sigh
+      local f = 320 * (1 - p) ^ 2 + 38
+      phase = phase + f / RATE
+      return (math.sin(phase * TAU) * 0.55 + air(noise()) * 0.8 * (1 - p)) * math.sin(math.min(1, p * 3) * math.pi * 0.5) * (1 - p) ^ 1.5
+    end)
+  end,
+  volume = 0.22,
+  cooldown = 0.6,
+}
+
 -- Beds ------------------------------------------------------------------------------
 -- The desert wind over the surface (the areas have music instead, see below)
 
 local BEDS = {
+  -- The menu's void: a deep, slowly beating hum under a low roar of falling
+  -- air, with a thin glassy whistle drifting in and out
+  void = function()
+    local low = lp(0.015)
+    local mid = lp(0.08)
+    return synthLoop(8, function(t, p)
+      local swell = 0.65 + 0.35 * math.sin(p * 2 * math.pi)
+      local hum = math.sin(t * 36 * TAU) * 0.45 + math.sin(t * 36.5 * TAU) * 0.35 + math.sin(t * 54 * TAU) * 0.12
+      local roar = low(noise()) * 2.6 * swell + mid(noise()) * 0.25
+      local whistle = math.sin(t * 1244 * TAU + math.sin(t * 0.75 * TAU) * 3) * 0.035 * (0.5 + 0.5 * math.sin(p * 4 * math.pi))
+      return (hum * (0.8 + 0.2 * math.sin(p * 6 * math.pi)) + roar + whistle) * 0.55
+    end)
+  end,
   wind = function()
     local low = lp(0.04)
     return synthLoop(4, function(t, p)
@@ -1069,6 +1241,63 @@ local TRACKS = {
   },
 }
 
+-- The title screen's theme: a slow, cold drift in D minor with a glassy bell
+-- line, falling away into a long echo
+local MENU_TRACK = {
+  bpm = 50,
+  bars = 8,
+  echo = { delay = 0.72, fb = 0.55 },
+  prog = { "Dm", "Dm", "Bb", "Bb", "Gm", "Gm", "A", "A" },
+  chords = {
+    Dm = { root = "D2", fifth = "A2", pad = { "D3", "A3", "D4", "F4" }, notes = { "D4", "F4", "A4", "D5", "E5" } },
+    Bb = { root = "Bb1", fifth = "F2", pad = { "Bb2", "F3", "Bb3", "D4" }, notes = { "Bb3", "D4", "F4", "A4", "D5" } },
+    Gm = { root = "G1", fifth = "D2", pad = { "G2", "D3", "G3", "Bb3" }, notes = { "G3", "Bb3", "D4", "G4", "A4" } },
+    A = { root = "A1", fifth = "E2", pad = { "A2", "E3", "A3", "C#4" }, notes = { "A3", "C#4", "E4", "A4", "C#5" } },
+  },
+  channels = {
+    { wave = "tri", gain = 0.13, steps = 1, a = 1.6, r = 1.4, legato = 1.0, tokens = padPattern() },
+    { wave = "saw", gain = 0.025, steps = 1, a = 2.0, r = 1.4, legato = 1.0, tokens = padPattern() },
+    { wave = "sine", gain = 0.32, steps = 1, a = 0.8, r = 1.0, legato = 1.0, tokens = bassPattern("R") },
+    { wave = "sine", gain = 0.09, steps = 8, pluck = 2.2, tokens = arpPattern({ 1, 0, 0, 3, 0, 0, 5, 0 }) },
+    {
+      wave = "p125", gain = 0.035, steps = 8, pluck = 3.5,
+      tokens = explicit({
+        "A5 . . . - - - -", "- - - - D6 . . .", "F5 . . . - - - -", "- - E5 . . . D5 .",
+        "D5 . . . - - - -", "- - - - Bb5 . . .", "A5 . . . - - - -", "- - - - C#6 . . .",
+      }),
+    },
+  },
+}
+
+-- The death recap's theme: very slow and sad, E minor (Em, C, G, D), a lonely
+-- sine lead with a slow vibrato over soft pads and a deep sub, a few distant
+-- bells, and a long echo
+local RECAP_TRACK = {
+  bpm = 42,
+  bars = 8,
+  echo = { delay = 0.8, fb = 0.6 },
+  prog = { "Em", "Em", "C", "C", "G", "G", "D", "D" },
+  chords = {
+    Em = { root = "E2", fifth = "B2", pad = { "E3", "B3", "E4", "G4" }, notes = { "E4", "G4", "B4", "D5", "E5" } },
+    C = { root = "C2", fifth = "G2", pad = { "C3", "G3", "C4", "E4" }, notes = { "C4", "E4", "G4", "B4", "C5" } },
+    G = { root = "G1", fifth = "D2", pad = { "G2", "D3", "G3", "B3" }, notes = { "G3", "B3", "D4", "G4", "A4" } },
+    D = { root = "D2", fifth = "A2", pad = { "D3", "A3", "D4", "F#4" }, notes = { "D4", "F#4", "A4", "C5", "D5" } },
+  },
+  channels = {
+    { wave = "tri", gain = 0.12, steps = 1, a = 2.0, r = 1.8, legato = 1.0, tokens = padPattern() },
+    { wave = "saw", gain = 0.02, steps = 1, a = 2.4, r = 1.8, legato = 1.0, tokens = padPattern() },
+    { wave = "sine", gain = 0.30, steps = 1, a = 1.0, r = 1.2, legato = 1.0, tokens = bassPattern("R") },
+    {
+      wave = "sine", gain = 0.11, steps = 4, a = 0.12, r = 1.0, legato = 1.0, vib = { 4.6, 0.009 },
+      tokens = explicit({
+        "B4 . . .", "G4 . E4 .", "G4 . . .", "E4 . C4 .",
+        "D5 . . .", "B4 . G4 .", "A4 . . F#4", "A4 . . .",
+      }),
+    },
+    { wave = "tri", gain = 0.05, steps = 8, pluck = 2.6, tokens = arpPattern({ 0, 0, 0, 0, 5, 0, 0, 0 }) },
+  },
+}
+
 local function renderTrack(def)
   local barLen = 4 * 60 / def.bpm
   local reps = def.repeats or 1 -- (a short track plays its bars through more than once)
@@ -1131,6 +1360,15 @@ end
 -- Setup and playback ---------------------------------------------------------------------
 
 local areaMusic = {} -- the area themes, one looping source each
+-- Areas whose theme is a recorded file (looped) rather than synthesised.
+-- To change one: replace the file (or point this at a different one). Its
+-- volume is set automatically from how loud the recording is (AREA_GAIN is
+-- filled in at load), so a new file needs no tuning.
+local AREA_FILES = { [1] = "audio/caves.wav" }
+local AREA_GAIN = {}
+local TARGET_RMS = 0.126 -- the loudness (RMS, 0..1) a recorded theme is brought to
+local menuMusic -- the title screen's theme
+local recapMusic -- the death recap's theme
 
 function audio.load()
   local ok = pcall(function()
@@ -1147,11 +1385,35 @@ function audio.load()
     music:setLooping(true)
     music:setVolume(0)
     for i, def in ipairs(TRACKS) do
-      local src = love.audio.newSource(renderTrack(def), "static")
-      src:setLooping(true)
+      -- A recorded track takes the place of an area's synthesised theme
+      local file = AREA_FILES[i]
+      local src
+      if file and love.filesystem.getInfo(file) then
+        local ok, loaded = pcall(function()
+          local data = love.sound.newSoundData(file)
+          -- Its loudness: the RMS of every 40th sample
+          local sum, n = 0, 0
+          for k = 0, data:getSampleCount() * data:getChannelCount() - 1, 40 do
+            local v = data:getSample(k)
+            sum, n = sum + v * v, n + 1
+          end
+          local rms = math.sqrt(sum / math.max(1, n))
+          AREA_GAIN[i] = rms > 0.001 and math.max(0.3, math.min(1.5, TARGET_RMS / rms)) or 1
+          return love.audio.newSource(data, "static")
+        end)
+        src = ok and loaded or nil
+      end
+      src = src or love.audio.newSource(renderTrack(def), "static")
+      src:setLooping(true) -- (it starts over as soon as it finishes)
       src:setVolume(0)
       areaMusic[i] = src
     end
+    menuMusic = love.audio.newSource(renderTrack(MENU_TRACK), "static")
+    menuMusic:setLooping(true)
+    menuMusic:setVolume(0)
+    recapMusic = love.audio.newSource(renderTrack(RECAP_TRACK), "static")
+    recapMusic:setLooping(true)
+    recapMusic:setVolume(0)
     enabled = true
   end)
   if not ok then
@@ -1186,8 +1448,11 @@ function audio.play(name, volume, pitch)
   if not ok then
     return
   end
-  src:setVolume(def.volume * (volume or 1) * MASTER * (0.9 + love.math.random() * 0.2))
+  src:setVolume(def.volume * (volume or 1) * MASTER * volMaster * volSfx * (0.9 + love.math.random() * 0.2))
   src:setPitch((pitch or 1) * (0.94 + love.math.random() * 0.12))
+  if muffled then
+    pcall(src.setFilter, src, MUFFLE)
+  end
   src:play()
   playing[#playing + 1] = src
 end
@@ -1199,13 +1464,51 @@ local lastArea
 -- air) to 1; area is the number of the area the hunter is in (nil on the
 -- surface); inShop is true inside a shop room, where the piano plays instead of
 -- the area's theme
-function audio.update(dt, underground, paused, area, inShop)
+function audio.update(dt, underground, paused, area, inShop, muffle)
   if not enabled then
     return
   end
-  if paused then
-    for _, src in pairs(ambient) do
-      src:setVolume(0)
+  -- The weapon panel: the same sounds, but as if through a wall (a low-pass
+  -- filter on everything playing; without effects support, just quieter)
+  if (muffle and true or false) ~= muffled then
+    muffled = muffle and true or false
+    local filter = muffled and MUFFLE or nil
+    local function apply(src)
+      if src then
+        pcall(src.setFilter, src, filter)
+      end
+    end
+    apply(ambient.wind)
+    apply(music)
+    for _, src in ipairs(areaMusic) do
+      apply(src)
+    end
+    for _, src in ipairs(playing) do
+      apply(src)
+    end
+  end
+  -- The title screens play the void and the menu theme over silence
+  local function toward(src, target, k)
+    src:setVolume(src:getVolume() + (target - src:getVolume()) * k)
+  end
+  if not menuMusic:isPlaying() then
+    menuMusic:play()
+  end
+  if not ambient.void:isPlaying() then
+    ambient.void:play()
+  end
+  local k = menuMode and math.min(1, dt * 0.8) or math.min(1, dt * 3)
+  toward(menuMusic, menuMode and 0.16 * MASTER * 2 * volMaster * volMusic or 0, k)
+  toward(recapMusic, recapMode and 0.2 * MASTER * 2 * volMaster * volMusic or 0, recapMode and math.min(1, dt * 0.6) or math.min(1, dt * 3))
+  if recapMode and not recapMusic:isPlaying() then
+    recapMusic:play()
+  end
+  toward(ambient.void, menuMode and 0.16 * MASTER * 2 * volMaster * volSfx or 0, k)
+  if paused or menuMode then
+    for name, src in pairs(ambient) do
+      if name ~= "void" then
+        src:setVolume(0)
+      end
     end
     for _, src in ipairs(areaMusic) do
       src:setVolume(0)
@@ -1213,8 +1516,8 @@ function audio.update(dt, underground, paused, area, inShop)
     music:setVolume(0)
     return
   end
-  for _, src in pairs(ambient) do
-    if not src:isPlaying() then
+  for name, src in pairs(ambient) do
+    if name ~= "void" and not src:isPlaying() then
       src:play()
     end
   end
@@ -1228,12 +1531,12 @@ function audio.update(dt, underground, paused, area, inShop)
   end
   local fade = math.min(1, dt * 1.2)
   local wind = ambient.wind
-  wind:setVolume(wind:getVolume() + (0.10 * (1 - underground) * MASTER * 2 - wind:getVolume()) * math.min(1, dt * 1.5))
+  wind:setVolume(wind:getVolume() + (0.10 * (1 - underground) * MASTER * 2 * volMaster * volSfx - wind:getVolume()) * math.min(1, dt * 1.5))
   for i, src in ipairs(areaMusic) do
-    local target = (i == area and not inShop) and 0.10 * underground or 0
-    src:setVolume(src:getVolume() + (target * MASTER * 2 - src:getVolume()) * fade)
+    local target = ((i == area and not inShop) and 0.10 * underground or 0) * (AREA_GAIN[i] or 1)
+    src:setVolume(src:getVolume() + (target * MASTER * 2 * volMaster * volMusic - src:getVolume()) * fade)
   end
-  music:setVolume(music:getVolume() + ((inShop and 0.13 or 0) * MASTER * 2 - music:getVolume()) * fade)
+  music:setVolume(music:getVolume() + ((inShop and 0.13 or 0) * MASTER * 2 * volMaster * volMusic - music:getVolume()) * fade)
 
   -- Little events over the music
   if area ~= lastArea then
@@ -1249,6 +1552,30 @@ function audio.update(dt, underground, paused, area, inShop)
         audio.play(ev[1], ev[4], 0.9 + love.math.random() * 0.25)
       end
     end
+  end
+end
+
+-- Volume settings (src.settings): master, music and sound effects, each 0..1
+function audio.setVolumes(master, musicVol, sfx)
+  volMaster, volMusic, volSfx = master or 1, musicVol or 1, sfx or 1
+end
+
+-- An area's music source (for tests)
+function audio.areaTrack(i)
+  return areaMusic[i]
+end
+
+-- The title screens: the void's drone and the menu theme instead of the world
+function audio.setMenu(on)
+  menuMode = on and true or false
+end
+
+-- The death recap's theme instead of the world
+function audio.setRecap(on)
+  recapMode = on and true or false
+  if recapMode and recapMusic then
+    recapMusic:stop()
+    recapMusic:setVolume(0)
   end
 end
 

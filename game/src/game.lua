@@ -23,21 +23,29 @@ local chests = require("src.chests")
 local compare = require("src.compare")
 local config = require("src.config")
 local effects = require("src.effects")
+local deaths = require("src.deaths")
 local enemies = require("src.enemies")
+local fuser = require("src.fuser")
 local guns = require("src.guns")
 local hud = require("src.hud")
+local input = require("src.input")
 local inventory = require("src.inventory")
+local items = require("src.items")
 local itembar = require("src.itembar")
 local lighting = require("src.lighting")
 local menu = require("src.menu")
+local menubg = require("src.menubg")
 local perks = require("src.perks")
 local physics = require("src.physics")
 local pickups = require("src.pickups")
 local Player = require("src.player")
 local props = require("src.props")
 local render = require("src.render")
+local save = require("src.save")
+local settings = require("src.settings")
 local shop = require("src.shop")
 local targets = require("src.targets")
+local toasts = require("src.toasts")
 
 -- The overworld scene is the whole world (surface and catacombs); the test
 -- room is a separate tuning ground
@@ -55,6 +63,20 @@ local fade = 0 -- black overlay alpha, fades out after entering a scene
 local mouseVX, mouseVY = 0, 0
 local showPhysics = false
 
+-- Recording into the save slot (src.save): every weapon, ammo type and
+-- attachment that reaches the inventory is counted once (the same object
+-- picked up again isn't counted twice), and so is every perk taken in a run
+local counted = setmetatable({}, { __mode = "k" })
+local runPerks = {}
+local lastGold = 0
+local deathCounted
+local playing = false -- a run is under way (not on the title screen)
+local discoveries = {} -- this run's first-time compendium entries: { category, id }
+local deadTime = 0 -- seconds the hunter has been dead (the recap follows the death animation)
+local deathPhoto -- the killer, photographed the moment he died (false: nothing to photograph)
+local RECAP_DELAY = 1.5
+local DEATH_FADE_START = 0.3 -- the fade to the recap starts this long after the fall
+
 -- Queues a scene change (a new run, or the test room). Loading happens next
 -- update, after one blank frame.
 function game.enter(name, opts)
@@ -66,6 +88,7 @@ local function load(name, opts)
   bullets.clear()
   effects.clear()
   enemies.clear()
+  fuser.clear()
   pickups.clear()
   chests.clear()
   shop.clear()
@@ -84,16 +107,89 @@ end
 -- Starts a fresh run in the overworld
 local function newRun()
   inv = inventory.new()
+  runPerks, lastGold = {}, 0
+  discoveries, deadTime, deathPhoto = {}, 0, nil
+  audio.setRecap(false)
   if itembar.isOpen() then
     itembar.toggle()
   end
   game.enter("overworld")
+  if playing then
+    save.stat("runs")
+  end
+end
+
+local function note(thing, category, id)
+  if thing and not counted[thing] then
+    counted[thing] = true
+    save.record(category, id)
+  end
+end
+
+-- Logs what the run has collected into the profile (cheap: a few slots a frame)
+local function track(area)
+  if not save.profile() or not inv then
+    return
+  end
+  for i = 1, inventory.WEAPON_SLOTS do
+    local gun = inv.weapons[i]
+    if gun then
+      note(gun, "weapon", gun.id)
+      for s = 1, gun.slotCount do
+        local item = gun.slots[s]
+        if item then
+          note(item, item.kind, items.key(item.id, item.level))
+        end
+      end
+    end
+  end
+  for i = 1, inventory.ITEM_SLOTS do
+    local item = inv.items[i]
+    if item then
+      note(item, item.kind, items.key(item.id, item.level))
+    end
+  end
+  for i = 1, 2 do
+    local item = inv.fuse.slots[i]
+    if item then
+      note(item, item.kind, items.key(item.id, item.level))
+    end
+  end
+  for _, id in ipairs(inv.perks) do
+    if not runPerks[id] then
+      runPerks[id] = true
+      save.record("perk", id)
+    end
+  end
+  if inv.gold > lastGold then
+    save.stat("gold", inv.gold - lastGold)
+  end
+  lastGold = inv.gold
+  if area then
+    save.statMax("deepest", area)
+  end
+  if player.dead and deathCounted ~= player then
+    deathCounted = player
+    save.stat("deaths")
+    save.flush()
+  end
 end
 
 function game.load()
   audio.load()
   render.load()
   lighting.load()
+  settings.load()
+  -- A first discovery pops up a note at the side of the screen
+  save.onDiscover = function(category, id)
+    if playing then
+      toasts.discover(category, id)
+      discoveries[#discoveries + 1] = { category, id }
+    end
+  end
+  menu.onAction = function(action, arg)
+    game.menuAction(action, arg)
+  end
   love.mouse.setVisible(false)
   inv = inventory.new()
   -- A replaced weapon drops at the hunter's feet
@@ -108,6 +204,16 @@ function game.load()
     local px, py = player:center()
     pickups.dropWeapon(px + player.facing * 6, py, old, player.facing * 70, -50)
     effects.weaponCard(px, py - 22, newGun)
+  end
+  -- The fuser's tooltip names a result only once the save file has found it
+  itembar.isKnown = function(category, id)
+    return save.count(category, id) > 0
+  end
+  -- The fuser's lock, from its button on the item bar
+  itembar.onFuseToggle = function()
+    if player and not player.dead then
+      fuser.toggle(inv, player)
+    end
   end
   -- With all weapon slots full, picking up a weapon asks which to replace
   pickups.onWeaponFull = function(p)
@@ -128,6 +234,21 @@ function game.load()
     if player then
       player:onKill(e, fx)
     end
+    -- Its ether charges a locked fuser
+    if inv then
+      local b = e.body
+      fuser.onKill(inv, b.x + b.w / 2, b.y + b.h / 2, e.def.boss and not (e.group and e.group.alive > 1))
+    end
+    -- Into the bestiary (a split Queen counts once, when the last of her falls)
+    if not (e.group and e.group.alive > 1) then
+      save.record("enemy", e.kind)
+      save.stat("kills")
+      if e.def.boss then
+        save.stat("bosses")
+      end
+    else
+      save.stat("kills")
+    end
     if perks.has("death_burst") then
       local b = e.body
       local x, y = b.x + b.w / 2, b.y + b.h / 2
@@ -136,17 +257,24 @@ function game.load()
       enemies.damageArea(x, y, 22, 12, 180)
     end
   end
-  load("overworld")
-  menu.open("title") -- the world waits, dimmed, behind the title screen
+  load("overworld") -- the first world is built behind the title screen
+  menu.open("title")
+  audio.setMenu(true)
 end
 
--- Carries out the action a menu button chose
-local function menuAction(action)
-  if action then
-    audio.play("select")
-  end
+-- Carries out what a menu chose (src.menu calls this)
+function game.menuAction(action, arg)
   if action == "play" then
+    -- Into a run with the chosen save slot (the world behind the title is fresh)
+    save.use(arg)
+    settings.set("lastSlot", arg)
+    playing = true
+    save.stat("runs")
+    runPerks, lastGold, deathCounted = {}, inv and inv.gold or 0, nil
+    discoveries, deadTime, deathPhoto = {}, 0, nil
     menu.close()
+    audio.setMenu(false)
+    toasts.clear()
     hud.showBanner(scene.title, scene.subtitle)
   elseif action == "resume" then
     menu.close()
@@ -154,10 +282,31 @@ local function menuAction(action)
     newRun()
     menu.close()
   elseif action == "title" then
+    save.flush()
+    playing = false
     newRun()
     menu.open("title")
+    audio.setMenu(true)
   elseif action == "quit" then
+    save.flush()
     love.event.quit()
+  end
+end
+
+-- Typed text, for the name entry (main.lua passes love.textinput on)
+function game.textinput(text)
+  menu.textinput(text)
+end
+
+-- Saves on the way out (main.lua calls this from love.quit)
+function game.quit()
+  save.flush()
+end
+
+-- The window lost focus: pause, if the setting says so
+function game.focus(focused)
+  if not focused and playing and not menu.isOpen() and settings.get("pauseOnFocusLoss") then
+    menu.open("pause")
   end
 end
 
@@ -175,19 +324,49 @@ function game.update(dt)
 
   render.layout()
   local underground, area, inShop = 0, nil, false
-  if scene.undergroundFactor and not menu.isOpen() and not itembar.isOpen() then
+  if scene.undergroundFactor and not menu.isOpen() then
     underground = scene.undergroundFactor(player:center())
     if scene.audioInfo then
       area, inShop = scene.audioInfo(player:center())
     end
   end
-  audio.update(dt, underground, menu.isOpen(), area, inShop)
+  -- (with the weapon panel open the area's sound plays on, but muffled)
+  audio.update(dt, underground, menu.isOpen(), area, inShop, itembar.isOpen())
   -- The weapon panel and the menus pause the game, like Noita's inventory
   love.mouse.setVisible(itembar.isOpen() or menu.isOpen() or compare.isOpen())
-  menu.update()
+  menu.update(dt)
+  if menu.isFrontEnd() then
+    menubg.update(dt)
+  end
+  save.update(dt, playing and not (itembar.isOpen() or menu.isOpen() or compare.isOpen()))
+  toasts.update(dt)
   compare.update()
   if scene.background then
     scene.background()
+  end
+  if playing then
+    track(area)
+    -- A death: once the hunter has finished falling, the recap
+    if player.dead and not menu.isOpen() then
+      if deathPhoto == nil then
+        -- The picture for the wanted poster, taken as he falls
+        local source = player.lastSource
+        deathPhoto = enemies.defs[source] and enemies.photo(player.lastEnemy, source) or false
+      end
+      deadTime = deadTime + dt
+      if deadTime >= RECAP_DELAY then
+        local profile = save.profile()
+        local recap = deaths.recap(profile and profile.name, player.lastSource)
+        recap.discoveries = discoveries
+        recap.photo = deathPhoto or nil
+        recap.slot = save.activeSlot()
+        toasts.clear()
+        menu.open("recap", recap)
+        audio.setRecap(true)
+      end
+    elseif not player.dead then
+      deadTime, deathPhoto = 0, nil
+    end
   end
   if itembar.isOpen() or menu.isOpen() or compare.isOpen() then
     return
@@ -218,6 +397,7 @@ function game.update(dt)
   bullets.update(dt, world)
   enemies.update(dt, world, player)
   pickups.update(dt, world, player)
+  fuser.update(dt, world, player, inv)
   effects.update(dt, world)
   world:refresh()
   hud.update(dt)
@@ -235,7 +415,26 @@ local function drawLoading()
   pending.drawn = true
 end
 
+-- The title screen: the black hole, with the menu over it
+local function drawFrontEnd()
+  menubg.prepare()
+  render.beginWorld()
+  menubg.draw()
+  menu.drawWorldLayer()
+  render.endWorld()
+  menu.draw(render.uiScale())
+  love.graphics.setColor(1, 1, 1)
+end
+
 function game.draw()
+  if menu.isFrontEnd() then
+    -- (a world being built behind the title doesn't blank the screen)
+    if pending then
+      pending.drawn = true
+    end
+    drawFrontEnd()
+    return
+  end
   if pending then
     drawLoading()
     return
@@ -253,6 +452,7 @@ function game.draw()
   shop.addLights(lighting, view)
   bullets.addLights(lighting)
   effects.addLights(lighting)
+  fuser.addLights(lighting)
   if scene.addLights then
     scene.addLights(lighting, camX, camY)
   end
@@ -299,6 +499,7 @@ function game.draw()
   shop.drawEmissive(view)
   bullets.draw()
   effects.drawEmissive()
+  fuser.drawEmissive()
   if showPhysics then
     physics.drawDebug()
   end
@@ -345,15 +546,21 @@ function game.draw()
   end
   -- The title screen stands alone; a pause menu keeps the HUD but hides the
   -- area banner, which would show through it
-  if menu.state() ~= "title" then
+  if menu.state() ~= "title" and menu.state() ~= "recap" then
     hud.hideBanner = menu.isOpen() or compare.isOpen()
     hud.draw(player, render.uiScale())
-    if player.dead then
-      hud.drawDeath(render.uiScale())
-    end
     itembar.draw(inv, render.uiScale())
   end
+  -- Dying: once he has fallen, the world fades darker toward the recap (which
+  -- picks up with the same darkness, the world still showing behind it)
+  if playing and player.dead and not menu.isOpen() and deadTime > DEATH_FADE_START then
+    local ww, wh = love.graphics.getDimensions()
+    local k = math.min(1, (deadTime - DEATH_FADE_START) / (RECAP_DELAY - DEATH_FADE_START))
+    love.graphics.setColor(0.05, 0.01, 0.02, 0.8 * k)
+    love.graphics.rectangle("fill", 0, 0, ww, wh)
+  end
   compare.draw(inv, render.uiScale())
+  toasts.draw(render.uiScale())
   menu.draw(render.uiScale())
   love.graphics.setColor(1, 1, 1)
 end
@@ -361,37 +568,45 @@ end
 -- Returns true if the key was handled (main.lua uses this so Escape closes
 -- the weapon panel or opens the pause menu instead of quitting)
 function game.keypressed(key)
-  if pending then
-    return false
+  if key == "f11" then
+    settings.set("fullscreen", not settings.get("fullscreen"))
+    return true
   end
   if menu.isOpen() then
-    menuAction(menu.keypressed(key))
+    menu.keypressed(key)
     return true -- a menu swallows every key
+  end
+  if pending then
+    return false
   end
   if compare.isOpen() then
     compare.keypressed(key)
     return true -- and so does the compare prompt
   end
-  if key == "tab" or (key == "escape" and itembar.isOpen()) then
+  if input.is("fuse", key) and not player.dead then
+    fuser.toggle(inv, player)
+    return true
+  end
+  if input.is("inventory", key) or (key == "escape" and itembar.isOpen()) then
     itembar.toggle()
     return true
   elseif key == "escape" then
     menu.open("pause")
     return true
-  elseif key == "1" or key == "2" or key == "3" then
-    inv:select(tonumber(key))
+  elseif input.is("weapon1", key) or input.is("weapon2", key) or input.is("weapon3", key) then
+    inv:select(input.is("weapon1", key) and 1 or (input.is("weapon2", key) and 2 or 3))
     return true
   end
   if itembar.isOpen() then
     return false -- everything else waits until the panel is closed
   end
-  if (key == "w" or key == "space") and not player.dead then
+  if input.is("jump", key) and not player.dead then
     player:pressJump()
-  elseif key == "f" and not player.dead then
+  elseif input.is("kick", key) and not player.dead then
     player:kick()
-  elseif (key == "lshift" or key == "rshift") and not player.dead then
+  elseif input.is("roll", key) and not player.dead then
     player:pressRoll()
-  elseif key == "e" and not player.dead then
+  elseif input.is("interact", key) and not player.dead then
     if not chests.interact(player) and not shop.interact(player) then
       pickups.interact(player)
     end
@@ -401,7 +616,7 @@ function game.keypressed(key)
     inv.weapons[inv.selected] = gun
     local px, py = player:center()
     effects.weaponCard(px, py - 22, gun)
-  elseif key == "r" then
+  elseif input.is("restart", key) then
     newRun()
   elseif key == "f9" then
     game.enter("testroom")
@@ -439,7 +654,7 @@ end
 
 function game.mousereleased(x, y, button)
   if menu.isOpen() then
-    menuAction(menu.mousereleased(x, y, button))
+    menu.mousereleased(x, y, button)
     return
   end
   if compare.isOpen() then
@@ -449,7 +664,11 @@ function game.mousereleased(x, y, button)
   itembar.mousereleased(inv, x, y, button)
 end
 
-function game.wheelmoved(_, dy)
+function game.wheelmoved(dx, dy)
+  if menu.isOpen() then
+    menu.wheelmoved(dx, dy)
+    return
+  end
   if dy ~= 0 and not itembar.isOpen() and not menu.isOpen() and not compare.isOpen() then
     inv:cycle(dy > 0 and -1 or 1)
   end

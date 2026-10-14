@@ -1,5 +1,6 @@
 -- Screen-space HUD: health bar and gun status (chambers + reload), Noita-style
 -- in the top-right corner.
+local input = require("src.input")
 local fontFace = require("src.fonts")
 local goldbag = require("src.goldbag")
 
@@ -248,11 +249,12 @@ local BRASS, BRASS_L, BRASS_D, RIM = { 0.95, 0.74, 0.26 }, { 1.0, 0.92, 0.55 }, 
 local HULL, HULL_L, HULL_D = { 0.80, 0.16, 0.13 }, { 0.98, 0.42, 0.34 }, { 0.50, 0.08, 0.08 }
 local ammoState = setmetatable({}, { __mode = "k" }) -- gun -> { last, puffs, fillAt, fillFrom }
 local POOF = 0.38
+local PIP_ROW = 50
 local POP = 0.2
 
 local function pipKind(gun, count)
   local model = gun.def.model
-  local kind = model == "shotgun" and "shell" or (model == "revolver" and "revolver" or (model == "automatic" and "mg" or "pistol"))
+  local kind = model == "shotgun" and "shell" or (model == "revolver" and "revolver" or ((model == "automatic" or model == "gatling") and "mg" or "pistol"))
   if count > 24 and kind ~= "mg" and kind ~= "shell" then
     kind = "mg"
   end
@@ -343,7 +345,11 @@ function hud.drawGunStatus(gun, ww, margin, top, u, f)
   local q = math.max(1, math.floor(u * 0.5 + 0.5))
   local spec = PIP[kind]
   local pitch, pw = spec.pitch * q, spec.w * q
-  local rowW = (count - 1) * pitch + pw
+  -- A big belt (the Gatling) wraps into rows of at most PIP_ROW
+  local perRow = math.min(count, PIP_ROW)
+  local rows = math.ceil(count / perRow)
+  local rowH = 9 * q
+  local rowW = (perRow - 1) * pitch + pw
   local cy = top + 8 * u
   local yb = math.floor(cy + 4 * q)
   local x0 = ww - margin - rowW
@@ -374,7 +380,7 @@ function hud.drawGunStatus(gun, ww, margin, top, u, f)
         lift = 0
       end
     end
-    drawPip(kind, x0 + (i - 1) * pitch, yb, q, i <= gun.chambers, math.floor(lift))
+    drawPip(kind, x0 + ((i - 1) % perRow) * pitch, yb + math.floor((i - 1) / perRow) * rowH, q, i <= gun.chambers, math.floor(lift))
   end
 
   for n = #st.puffs, 1, -1 do
@@ -383,7 +389,7 @@ function hud.drawGunStatus(gun, ww, margin, top, u, f)
     if age >= POOF or n > 24 then
       table.remove(st.puffs, n)
     else
-      drawPoof(kind, x0 + (pf.i - 1) * pitch + pw / 2, yb - 4 * q, q, age, pf.seed)
+      drawPoof(kind, x0 + ((pf.i - 1) % perRow) * pitch + pw / 2, yb - 4 * q + math.floor((pf.i - 1) / perRow) * rowH, q, age, pf.seed)
     end
   end
 
@@ -394,7 +400,7 @@ function hud.drawGunStatus(gun, ww, margin, top, u, f)
   if gun:isReloading() then
     local word = "RELOADING"
     local progress = gun:reloadProgress()
-    local ry = yb + 3 * u
+    local ry = yb + 3 * u + (rows - 1) * rowH
     local right = ww - margin
     local left = right - f:getWidth(word)
     local lx = left
@@ -451,7 +457,7 @@ function hud.drawDeath(scale)
   local big = font(math.max(16, math.floor(scale * 11)))
   local f = font(math.max(10, math.floor(scale * 4)))
   local y = math.floor(wh * 0.38)
-  local title, sub = "You Died", "Press R to begin a new hunt"
+  local title, sub = "You Died", ""
   love.graphics.setColor(0.86, 0.16, 0.2)
   shadowText(title, math.floor((ww - big:getWidth(title)) / 2), y, big)
   fontFace.rule(ww / 2, y + big:getHeight() + 2 * scale, math.max(big:getWidth(title) * 1.2, 80 * scale), math.max(1, math.floor(scale * 0.5)), 0.7, 0.14, 0.18)

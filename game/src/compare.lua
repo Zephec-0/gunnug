@@ -4,6 +4,7 @@
 -- the hunter picks which to replace (click it, or press 1-3). The replaced gun
 -- is dropped on the ground. Escape / E / Tab cancels and leaves the found
 -- weapon where it lay. The game is paused while it is open.
+local input = require("src.input")
 local inventory = require("src.inventory")
 local itembar = require("src.itembar")
 
@@ -45,7 +46,7 @@ function compare.keypressed(key)
   local n = tonumber(key)
   if n and n >= 1 and n <= inventory.WEAPON_SLOTS then
     choose(n)
-  elseif key == "escape" or key == "e" or key == "tab" or key == "backspace" then
+  elseif key == "escape" or input.is("interact", key) or input.is("inventory", key) or key == "backspace" then
     compare.close()
   end
 end

@@ -12,7 +12,7 @@
 -- and a soft vignette.
 local config = require("src.config")
 
-local render = { scale = 1, offsetX = 0, offsetY = 0 }
+local render = { scale = 1, offsetX = 0, offsetY = 0, post = true } -- post: bloom and grading (a setting)
 
 local W, H = config.VIRTUAL_W, config.VIRTUAL_H
 local BACKGROUND = { 0.08, 0.06, 0.13 }
@@ -101,6 +101,9 @@ end
 
 function render.beginWorld()
   love.graphics.setCanvas(canvas)
+  -- World lines (tracers, the guns in the hunter's hands) are one game pixel;
+  -- never inherit a thicker width left over from the full-resolution UI
+  love.graphics.setLineWidth(1)
   love.graphics.clear(BACKGROUND)
 end
 
@@ -139,7 +142,8 @@ end
 
 function render.endWorld()
   love.graphics.setColor(1, 1, 1)
-  local post = finalShader ~= nil
+  local post = finalShader ~= nil and render.post
+  local shader = post and finalShader or nil
   if post then
     makeBloom()
     finalShader:send("bloomNear", bloomA)
@@ -148,14 +152,14 @@ function render.endWorld()
   if math.abs(render.scale - upscale) < 1e-6 then
     love.graphics.setCanvas()
     love.graphics.clear(0, 0, 0)
-    love.graphics.setShader(finalShader)
+    love.graphics.setShader(shader)
     love.graphics.draw(canvas, render.offsetX, render.offsetY, 0, render.scale, render.scale)
     love.graphics.setShader()
     return
   end
   love.graphics.setCanvas(upscaled)
   love.graphics.clear(0, 0, 0)
-  love.graphics.setShader(finalShader)
+  love.graphics.setShader(shader)
   love.graphics.draw(canvas, 0, 0, 0, upscale, upscale)
   love.graphics.setShader()
   love.graphics.setCanvas()

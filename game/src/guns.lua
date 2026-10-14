@@ -142,6 +142,60 @@ guns.defs = {
   },
 }
 
+-- The Gatling: an old crank-style rotary gun with six barrels in a brass
+-- frame and a hopper of rounds on top. The biggest ammo pool and the highest
+-- rate of fire of any gun, but the barrels must spin up first: holding the
+-- trigger winds them up over spoolTime (it can't fire below spoolMin, and
+-- fires spoolSlow times slower at the start), and they wind down when let go.
+-- Refilling the hopper takes a long time.
+guns.defs.gatling = {
+  name = "Gatling Gun",
+  chambers = 150,
+  fireDelay = 0.03,
+  reloadTime = 6.0,
+  spread = 7,
+  damage = 4,
+  pellets = 1,
+  bulletSpeed = 1100,
+  recoil = 38,
+  impactForce = 100,
+  digRadius = 2,
+  digPower = 1,
+  slots = 3,
+  slotBias = -1,
+  model = "gatling",
+  casing = { size = 2, eject = "shot" },
+  length = 13,
+  kick = 0.3,
+  flash = 0.7,
+  spoolTime = 1.1, -- seconds of holding the trigger to full speed
+  spoolMin = 0.2, -- it starts firing this far into the spin-up...
+  spoolSlow = 5, -- ...this many times slower than full speed
+  icon = {
+    "      cccc      ",
+    "      cccc      ",
+    "WLLLLL##########",
+    "W#####WWcccc#W  ",
+    "WLLLLL##cccc#WW ",
+    "W#####WWcccc# WW",
+    "WLLLLL##########",
+    "        k  #    ",
+  },
+}
+
+-- Short descriptions for the compendium (src.compendium)
+local DESCS = {
+  revolver = "Six chambers, a sharp crack and a solid kick. Spent shells stay in the cylinder until it is reloaded.",
+  shotgun = "Two shells of buckshot in a wide cone, and a huge kick: the best gun for recoil jumping.",
+  semiauto = "A Broomhandle-style pistol. Fast follow-up shots and very little recoil.",
+  automatic = "An early drum-fed machine gun: a long hose of weak rounds and a long reload. Fired downward, it slowly lifts the hunter.",
+  gatling = "Six spinning barrels and a hopper of 150 rounds: the fastest-firing gun there is, once its barrels have spun up. Refilling the hopper takes a long while.",
+}
+for id, def in pairs(guns.defs) do
+  def.id = id
+  def.desc = def.desc or DESCS[id]
+end
+
 local Gun = {}
 Gun.__index = Gun
 
@@ -151,6 +205,7 @@ function guns.new(name, slotCount)
   local def = assert(guns.defs[name], "unknown gun: " .. tostring(name))
   local self = setmetatable({
     def = def,
+    id = name, -- the archetype (guns.defs key)
     name = def.name, -- generated guns get a prefix (e.g. "Rapid Revolver")
     rolls = nil, -- generated guns: stat multipliers rolled when they were made
     chambers = def.chambers,
@@ -165,6 +220,8 @@ function guns.new(name, slotCount)
     drawn = false, -- just switched to: Quickdraw Holster's shot is ready
     shotCount = 0, -- Mortar Breech fires every fifth shot big
     spent = 0, -- spent shells still in the gun (revolver, double-barrel)
+    spool = 0, -- Gatling: how far the barrels have spun up (0..1)
+    spin = 0, -- Gatling: the barrels' turn, for drawing
   }, Gun)
   return self
 end
@@ -200,7 +257,8 @@ local BULLET_FX = {
 function Gun:stats()
   local ids = { perks.version }
   for i = 1, self.slotCount do
-    ids[#ids + 1] = self.slots[i] and self.slots[i].id or "-"
+    local item = self.slots[i]
+    ids[#ids + 1] = item and (item.id .. "+" .. (item.level or 0)) or "-"
   end
   local signature = table.concat(ids, ",")
   if self.statsSignature == signature then
@@ -271,7 +329,7 @@ local SLOT_ROLLS = {
   { 0.10, -2 }, { 0.22, -1 }, { 0.50, 0 }, { 0.72, 1 }, { 0.86, 2 }, { 0.94, 3 }, { 0.98, 4 }, { 1.00, 5 },
 }
 local FIT_CHANCE = 0.22 -- chance each slot of a generated gun is already filled
-local ARCHETYPE_ORDER = { "revolver", "shotgun", "semiauto", "automatic" }
+local ARCHETYPE_ORDER = { "revolver", "shotgun", "semiauto", "automatic", "gatling" }
 
 -- How many slots a freshly generated gun of this archetype gets
 local function rollSlots(def, random)
@@ -355,6 +413,22 @@ end
 function Gun:updateHolstered(dt)
   self.fireTimer = math.max(0, self.fireTimer - dt)
   self.heat = math.max(0, self.heat - 4 * dt)
+  self.spool = math.max(0, self.spool - dt * 2)
+end
+
+-- Gatling: winds the barrels up while the trigger is held (and the gun isn't
+-- reloading), down when it's let go. Called every frame for the held gun.
+function Gun:spinUp(dt, held)
+  local def = self.def
+  if not def.spoolTime then
+    return
+  end
+  if held and self.reloadTimer <= 0 and self.chambers > 0 then
+    self.spool = math.min(1, self.spool + dt / def.spoolTime)
+  else
+    self.spool = math.max(0, self.spool - dt / (def.spoolTime * 0.7))
+  end
+  self.spin = (self.spin + dt * (1 + 30 * self.spool)) % 6
 end
 
 -- Switching away mid-reload throws the reload away: it starts over next time
@@ -425,6 +499,9 @@ function Gun:fire(angle, ctx)
   end
   ctx = ctx or {}
   local def, st = self.def, self:stats()
+  if def.spoolTime and self.spool < def.spoolMin then
+    return nil -- the barrels are still winding up
+  end
   self.chambers = self.chambers - 1
   self.shotCount = self.shotCount + 1
   if def.casing and def.casing.eject == "reload" then
@@ -432,6 +509,9 @@ function Gun:fire(angle, ctx)
   end
 
   local delay = st.fireDelay / (ctx.fireRate or 1)
+  if def.spoolTime then
+    delay = delay * (1 + (def.spoolSlow - 1) * (1 - self.spool) ^ 2)
+  end
   local mult = ctx.damageMult or 1
   if self.fresh and st.opener > 0 then
     mult = mult * (1 + st.opener) -- Primer Coil

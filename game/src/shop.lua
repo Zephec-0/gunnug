@@ -14,6 +14,7 @@
 --
 -- A weapon bought with all three weapon slots full opens the compare prompt
 -- first, and is only paid for once you pick which gun to replace.
+local input = require("src.input")
 local audio = require("src.audio")
 local fontFace = require("src.fonts")
 local compare = require("src.compare")
@@ -604,9 +605,9 @@ function shop.draw(view)
           if e.kind == "perk" then
             -- (the perk itself floats over its pedestal, drawn glowing)
           elseif e.kind == "weapon" then
-            local icon = itembar.weaponIcon(e.gun.def)
+            local icon = itembar.groundIcon(e.gun)
             love.graphics.setColor(dim, dim, dim)
-            love.graphics.draw(icon, e.x - 8, s.floorY - 5 - icon:getHeight())
+            love.graphics.draw(icon, math.floor(e.x - icon:getWidth() / 2), s.floorY - 5 - icon:getHeight())
           else
             local c = e.item.color
             local img = icons.get(e.item)
@@ -774,7 +775,7 @@ function shop.drawScreen(toScreen, font, player)
           label("Full health", hx, hy, { 0.7, 0.85, 0.7 })
         end
         if ns == s and nkind == "heal" then
-          label("[E] Heal +" .. math.max(amount, 0) .. " HP", hx, hy - font:getHeight() - 4, { 0.98, 0.99, 1 })
+          label("[" .. input.label("interact") .. "] Heal +" .. math.max(amount, 0) .. " HP", hx, hy - font:getHeight() - 4, { 0.98, 0.99, 1 })
         end
       end
       for _, e in ipairs(s.stock) do
@@ -788,7 +789,7 @@ function shop.drawScreen(toScreen, font, player)
             end
             if e == nentry then
               local thing = e.perk or e.item
-              local title = (e.kind == "perk" and "[E] Take " or "[E] Buy ") .. e.name
+              local title = (e.kind == "perk" and ("[" .. input.label("interact") .. "] Take ") or ("[" .. input.label("interact") .. "] Buy ")) .. e.name
               if thing and thing.rarity ~= "common" then
                 title = title .. " (" .. items.rarities[thing.rarity].name .. ")"
               end

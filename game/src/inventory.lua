@@ -4,6 +4,7 @@
 --
 -- An item is a table { kind = "ammo" | "attachment", name, short, color }.
 -- No items exist in the game yet; the slots are ready for them.
+local fuser = require("src.fuser")
 local guns = require("src.guns")
 local items = require("src.items")
 local perks = require("src.perks")
@@ -11,7 +12,7 @@ local perks = require("src.perks")
 local inventory = {}
 
 inventory.WEAPON_SLOTS = 3
-inventory.ITEM_SLOTS = 7
+inventory.ITEM_SLOTS = 11
 local START_ITEM_CHANCE = 0.5
 
 local Inventory = {}
@@ -22,7 +23,7 @@ function inventory.reloadsHolstered(gun)
 end
 
 function inventory.new()
-  local self = setmetatable({ weapons = {}, items = {}, perks = {}, selected = 1, gold = 0 }, Inventory)
+  local self = setmetatable({ weapons = {}, items = {}, perks = {}, selected = 1, gold = 0, fuse = fuser.new() }, Inventory)
   perks.bind(self)
   -- Every run starts with a revolver that has rolled its own stat variation
   -- and, half the time, one ammo type or attachment already fitted (never a
@@ -96,8 +97,11 @@ end
 --   { kind = "weapon", index }            one of the 3 weapon slots
 --   { kind = "item", index }              one of the 7 loose item slots
 --   { kind = "gunSlot", gun, index }      a slot on a specific gun
+--   { kind = "fuse", index }              one of the fuser's 2 slots (src.fuser)
 function Inventory:get(ref)
-  if ref.kind == "perk" then
+  if ref.kind == "fuse" then
+    return self.fuse.slots[ref.index]
+  elseif ref.kind == "perk" then
     return ref.perk -- shown in the panel for its tooltip only
   elseif ref.kind == "weapon" then
     return self.weapons[ref.index]
@@ -108,7 +112,9 @@ function Inventory:get(ref)
 end
 
 function Inventory:set(ref, value)
-  if ref.kind == "weapon" then
+  if ref.kind == "fuse" then
+    self.fuse.slots[ref.index] = value
+  elseif ref.kind == "weapon" then
     self.weapons[ref.index] = value
   elseif ref.kind == "item" then
     self.items[ref.index] = value
@@ -129,7 +135,11 @@ end
 -- Moves the contents of one slot to another, swapping if the target is full.
 -- Returns true if anything moved.
 function Inventory:move(from, to)
-  if from.kind == "perk" or to.kind == "perk" then
+  if from.kind == "perk" or to.kind == "perk" or from.kind == "fuseToggle" or to.kind == "fuseToggle" then
+    return false
+  end
+  -- A locked fuser holds on to its two items
+  if self.fuse.locked and (from.kind == "fuse" or to.kind == "fuse") then
     return false
   end
   local a, b = self:get(from), self:get(to)

@@ -5,6 +5,8 @@
 -- anything in a slot can be dragged to another slot (swapping if occupied).
 --
 -- Everything is drawn at full window resolution; u = one game pixel.
+local input = require("src.input")
+local fuser = require("src.fuser")
 local gunInfo = require("src.gunInfo")
 local gunhud = require("src.gunhud")
 local inventory = require("src.inventory")
@@ -13,6 +15,8 @@ local items = require("src.items")
 local perks = require("src.perks")
 
 local itembar = {}
+
+local BAR_SCALE = 0.8 -- the always-visible bar is drawn this much smaller than the rest of the UI (it was crowding the health display)
 
 local isOpen = false
 local hitboxes = {} -- slot rectangles from the last draw: { x, y, w, h, ref }
@@ -182,14 +186,37 @@ local function nameOf(thing)
   return thing.name
 end
 
+local GUN_FILL = 0.92 -- how much of a slot a gun's model fills
+local gunCanvases = {} -- "WxH@q" -> the canvas a model is drawn into
+
 -- Draws a weapon icon or item badge centred in a box
 local function drawThing(thing, x, y, size, u, alpha)
   alpha = alpha or 1
   if isWeapon(thing) and gunhud.supports(thing) then
-    -- Revolver, double-barrel and AK have drawn models with their own reload animations
+    -- The drawn models (each with its own reload animation) come in different
+    -- sizes, so each is scaled to fill the slot: drawn crisp at a whole-number
+    -- scale into a canvas, then scaled smoothly to the exact size ("sharp
+    -- bilinear", like the game's own screen), instead of snapping to 1x or 2x
     local w, h = gunhud.size(thing)
-    local q = math.max(1, math.floor(math.min(size / w, size / h)))
-    gunhud.drawModel(thing, math.floor(x + (size - w * q) / 2), math.floor(y + (size - h * q) / 2), q, alpha)
+    local fit = math.min(size * GUN_FILL / w, size * GUN_FILL / h) -- screen pixels per model pixel
+    local q0 = math.max(1, math.ceil(fit))
+    local key = w .. "x" .. h .. "@" .. q0
+    local canvas = gunCanvases[key]
+    if not canvas then
+      canvas = love.graphics.newCanvas(w * q0, h * q0)
+      canvas:setFilter("linear", "linear")
+      gunCanvases[key] = canvas
+    end
+    love.graphics.push("all")
+    love.graphics.setCanvas(canvas)
+    love.graphics.clear(0, 0, 0, 0)
+    love.graphics.origin()
+    gunhud.drawModel(thing, 0, 0, q0, 1)
+    love.graphics.pop()
+    love.graphics.setColor(alpha, alpha, alpha, alpha) -- (premultiplied)
+    love.graphics.setBlendMode("alpha", "premultiplied")
+    love.graphics.draw(canvas, math.floor(x + (size - w * fit) / 2), math.floor(y + (size - h * fit) / 2), 0, fit / q0, fit / q0)
+    love.graphics.setBlendMode("alpha")
   elseif isWeapon(thing) then
     local icon = weaponIcon(thing.def)
     local s = math.max(1, math.floor(size * 0.85 / icon:getWidth())) -- whole-number scale keeps pixels even
@@ -202,6 +229,9 @@ local function drawThing(thing, x, y, size, u, alpha)
     local ix, iy = x + (size - box) / 2, y + (size - box) / 2
     love.graphics.setColor(1, 1, 1, alpha)
     love.graphics.draw(img, ix, iy, 0, s, s)
+    if (thing.level or 0) > 0 then
+      itemIcons.drawLevel(thing.level, x, y, size, alpha)
+    end
     local rarity = thing.rarity and thing.rarity ~= "common" and items.rarities[thing.rarity]
     if rarity then
       love.graphics.setLineWidth(math.max(1, u * 0.7))
@@ -264,6 +294,110 @@ local function shadowPrint(text, x, y, f, color)
   love.graphics.print(text, math.floor(x), math.floor(y))
 end
 
+local FUSE_TEAL = { 0.25, 1.0, 0.82 }
+
+-- The fuser beside the item slots (src.fuser): two slots in a teal frame, the
+-- lock toggle, and the ether gauge under them
+local fuseKnob = 0 -- the switch's knob, eased between 0 (off, down) and 1 (on, up)
+
+local function drawFuser(inv, x, y, u, fusable, pip)
+  local f = inv.fuse
+  local size = ITEM_SIZE * u
+  local t = love.timer.getTime()
+  local pulse = f.locked and (0.65 + 0.35 * math.sin(t * 4)) or 0.55
+  local toggleW = 9 * u
+  local w = size * 2 + 2 * u + 2 * u + toggleW
+  -- The frame
+  love.graphics.setColor(0.03, 0.08, 0.08, 0.75)
+  love.graphics.rectangle("fill", x - 1.5 * u, y - 1.5 * u, w + 3 * u, size + 6 * u, 1.5 * u, 1.5 * u)
+  love.graphics.setLineWidth(math.max(1, u * 0.5))
+  love.graphics.setColor(FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], 0.35 + 0.4 * pulse * (f.locked and 1 or 0.5))
+  love.graphics.rectangle("line", x - 1.5 * u, y - 1.5 * u, w + 3 * u, size + 6 * u, 1.5 * u, 1.5 * u)
+  for i = 1, 2 do
+    local sx = x + (i - 1) * (size + 2 * u)
+    drawSlot(inv, { kind = "fuse", index = i }, sx, y, size, u, false)
+    local item = f.slots[i]
+    if item and fusable and fusable[item] and pip then
+      pip(math.floor(sx + 1.5 * u), math.floor(y + 1.5 * u))
+    end
+    if f.locked then
+      -- Locked in: a teal wash and a pulsing rim
+      love.graphics.setColor(FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], 0.12 * pulse)
+      love.graphics.rectangle("fill", sx, y, size, size, u, u)
+      love.graphics.setColor(FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], pulse)
+      love.graphics.rectangle("line", sx, y, size, size, u, u)
+    end
+  end
+  -- A "+" between the slots
+  love.graphics.setColor(FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], 0.8)
+  local cx, cy = x + size + u, y + size / 2
+  love.graphics.rectangle("fill", cx - 0.5 * u, cy - 1.5 * u, u, 3 * u)
+  love.graphics.rectangle("fill", cx - 1.5 * u, cy - 0.5 * u, 3 * u, u)
+  -- The toggle: a switch standing on end, in the same chunky pixels as the
+  -- icons. A 7x11 pill filling the whole slot, with a flat 3x3 knob that
+  -- slides up (on: the pill lit teal) or down (off: dark)
+  local tx = x + size * 2 + 4 * u
+  local dt = love.timer.getDelta()
+  fuseKnob = fuseKnob + ((f.locked and 1 or 0) - fuseKnob) * math.min(1, dt * 14)
+  local cell = math.max(1, math.floor(math.min(toggleW / 7, size / 11)))
+  local gx = math.floor(tx + (toggleW - 7 * cell) / 2)
+  local gy = math.floor(y + (size - 11 * cell) / 2)
+  local function px(cx, cy, cw, ch, c, a)
+    love.graphics.setColor(c[1], c[2], c[3], a or 1)
+    love.graphics.rectangle("fill", gx + cx * cell, gy + cy * cell, cw * cell, ch * cell)
+  end
+  local outline, fill, knob
+  if f.locked then
+    local glow = 0.8 + 0.2 * pulse
+    outline = { FUSE_TEAL[1] * 0.5 * glow, FUSE_TEAL[2] * 0.62 * glow, FUSE_TEAL[3] * 0.55 * glow }
+    fill = { FUSE_TEAL[1] * 0.85, FUSE_TEAL[2] * 0.85, FUSE_TEAL[3] * 0.85 }
+    knob = { 1, 1, 1 }
+  else
+    outline = { 0.03, 0.06, 0.06 }
+    fill = { 0.10, 0.14, 0.15 }
+    knob = { 0.72, 0.76, 0.78 }
+  end
+  -- The pill: outline, then fill (the corners cut away)
+  px(2, 0, 3, 11, outline)
+  px(1, 1, 5, 9, outline)
+  px(0, 2, 7, 7, outline)
+  px(2, 1, 3, 9, fill)
+  px(1, 2, 5, 7, fill)
+  -- The knob, a flat square moving a cell at a time
+  local ky = 6 - math.floor(4 * fuseKnob + 0.5)
+  px(2, ky, 3, 3, knob)
+  hitboxes[#hitboxes + 1] = { x = tx, y = y, w = toggleW, h = size, ref = { kind = "fuseToggle" } }
+  -- The ether gauge
+  local gx, gy, gw, gh = x, y + size + 1.5 * u, size * 2 + 2 * u, math.max(2, 1.6 * u)
+  love.graphics.setColor(0.02, 0.05, 0.05, 0.9)
+  love.graphics.rectangle("fill", gx, gy, gw, gh)
+  local k = fuser.progress(f)
+  if k > 0 then
+    love.graphics.setColor(FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], 0.9)
+    love.graphics.rectangle("fill", gx, gy, gw * k, gh)
+    love.graphics.setColor(0.85, 1, 0.95, 0.6 + 0.4 * math.sin(t * 6))
+    love.graphics.rectangle("fill", gx + gw * k - u, gy, u, gh)
+  end
+end
+
+-- What hovering over the fuser's toggle says
+local function fuserTip(inv)
+  local f = inv.fuse
+  if f.locked then
+    local id, level = fuser.result(f)
+    return "Fuser locked", string.format("Ether %d / %d. Slay monsters to charge it; it fuses into %s. Toggle again (%s) to release it: the ether gathered is lost.", math.floor(f.ether), fuser.NEED, id and items.new(id, level).name or "?", input.label("fuse"))
+  end
+  if not (f.slots[1] and f.slots[2]) then
+    return "Fuser", "Put two common ammo types or attachments in the slots, then lock them in (" .. input.label("fuse") .. "). Kills charge it with ether."
+  end
+  local id, level = fuser.result(f)
+  if not id then
+    return "Fuser", level == "max" and ("Together these would go past +" .. items.MAX_LEVEL .. ".") or "These two won't fuse."
+  end
+  local known = level > 0 or (itembar.isKnown and itembar.isKnown(items.defs[id].kind, items.key(id, level)))
+  return "Fuser", "These fuse into " .. (known and items.new(id, level).name or "something new") .. ". Lock them in (" .. input.label("fuse") .. ") and slay " .. fuser.NEED .. " monsters' worth of ether."
+end
+
 -- The always-visible bar along the top-left
 local function drawBar(inv, u)
   local margin = 6 * u
@@ -277,11 +411,44 @@ local function drawBar(inv, u)
   end
   x = x + 5 * u
   local itemY = y + (WEAPON_SIZE - ITEM_SIZE) / 2 * u
+  -- Which loose items (and items waiting in an unlocked fuser) have a partner
+  -- they could be fused with: those get a small teal pip
+  local pool = {}
+  for i = 1, inventory.ITEM_SLOTS do
+    pool[#pool + 1] = inv.items[i]
+  end
+  if not inv.fuse.locked then
+    pool[#pool + 1] = inv.fuse.slots[1]
+    pool[#pool + 1] = inv.fuse.slots[2]
+  end
+  local fusable = {}
+  for a = 1, #pool do
+    for b = a + 1, #pool do
+      if pool[a] and pool[b] and fuser.combine(pool[a], pool[b]) then
+        fusable[pool[a]], fusable[pool[b]] = true, true
+      end
+    end
+  end
+  local t = love.timer.getTime()
+  local function pip(px, py)
+    local p = math.max(2, math.floor(2.2 * u))
+    local glow = 0.75 + 0.25 * math.sin(t * 5)
+    love.graphics.setColor(0.02, 0.06, 0.06, 0.9)
+    love.graphics.rectangle("fill", px - 1, py - 1, p + 2, p + 2)
+    love.graphics.setColor(FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], glow)
+    love.graphics.rectangle("fill", px, py, p, p)
+    love.graphics.setColor(0.85, 1, 0.95, glow)
+    love.graphics.rectangle("fill", px, py, math.max(1, math.floor(p / 2)), math.max(1, math.floor(p / 2)))
+  end
   for i = 1, inventory.ITEM_SLOTS do
     local size = ITEM_SIZE * u
     drawSlot(inv, { kind = "item", index = i }, x, itemY, size, u, false)
+    if inv.items[i] and fusable[inv.items[i]] then
+      pip(math.floor(x + 1.5 * u), math.floor(itemY + 1.5 * u))
+    end
     x = x + size + 2 * u
   end
+  drawFuser(inv, x + 5 * u, itemY, u, fusable, pip)
   -- The perks taken this run, as small badges under the bar
   local list = perks.list()
   if #list > 0 then
@@ -418,7 +585,7 @@ local function drawPanel(inv, u)
     end
   end
 
-  local hint = "Drag ammo between slots; drag a weapon or item off the bar to drop it.   1-3 / wheel: switch   Tab: close"
+  local hint = "Drag ammo between slots; drag a weapon or item off the bar to drop it.   1-3 / wheel: switch   " .. input.label("inventory") .. ": close"
   shadowPrint(hint, math.floor((ww - textFont:getWidth(hint)) / 2), y + 2 * u, textFont, { 1, 1, 1, 0.75 })
 end
 
@@ -427,7 +594,7 @@ function itembar.draw(inv, u)
   if isOpen then
     drawPanel(inv, u)
   end
-  drawBar(inv, u)
+  drawBar(inv, u * BAR_SCALE)
 
   local mx, my = love.mouse.getPosition()
   if drag then
@@ -438,7 +605,12 @@ function itembar.draw(inv, u)
     end
   elseif isOpen then
     local h = hitTest(mx, my)
-    local thing = h and inv:get(h.ref)
+    local thing = h and h.ref.kind ~= "fuseToggle" and inv:get(h.ref)
+    if h and h.ref.kind == "fuseToggle" then
+      thing = { name = "", desc = "" }
+      thing.name, thing.desc = fuserTip(inv)
+      thing.color = FUSE_TEAL
+    end
     if thing then
       -- Name, and for ammo and attachments what they do
       local f = font(3.4 * u)
@@ -472,6 +644,11 @@ itembar.shadowPrint = shadowPrint
 itembar.drawThing = drawThing
 itembar.statLine = statLine
 itembar.weaponIcon = weaponIcon
+-- A gun's picture in the world (lying on the ground, on a shop pedestal): its
+-- drawn model at half size, matching the item bar (the old pixel map if none)
+function itembar.groundIcon(gun)
+  return gunhud.groundImage(gun) or weaponIcon(gun.def)
+end
 
 -- Returns true if the click was used by the item bar
 function itembar.mousepressed(inv, x, y, button)
@@ -479,11 +656,23 @@ function itembar.mousepressed(inv, x, y, button)
     return false
   end
   local h = hitTest(x, y)
+  if h and h.ref.kind == "fuseToggle" then
+    if itembar.onFuseToggle then
+      itembar.onFuseToggle()
+    end
+    return true
+  end
+  if h and h.ref.kind == "fuse" and inv.fuse.locked then
+    return true
+  end
   if h and h.ref.kind ~= "perk" and inv:get(h.ref) then
     drag = { ref = h.ref }
   end
   return true
 end
+
+-- Set by src.game: called when the fuser's toggle is clicked
+itembar.onFuseToggle = nil
 
 -- Called with an item (or, for onDropWeapon, a weapon) that was dragged out of
 -- its slot and released outside every slot (set by src.game: it drops it on
@@ -496,6 +685,11 @@ function itembar.mousereleased(inv, x, y, button)
     return
   end
   local h = hitTest(x, y)
+  if h and h.ref.kind == "fuseToggle" then
+    h = nil -- (not a slot: nothing happens)
+    drag = nil
+    return
+  end
   if h then
     inv:move(drag.ref, h.ref)
   elseif drag.ref.kind ~= "weapon" and itembar.onDrop then

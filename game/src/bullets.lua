@@ -84,7 +84,7 @@ local function explode(b, w, x, y)
     local dx, dy = px - x, py - y
     local dist = math.sqrt(dx * dx + dy * dy)
     if dist < radius + 6 then
-      player:hurt(math.max(1, math.floor(damage * (1 - 0.6 * dist / (radius + 6)) + 0.5)), x, y)
+      player:hurt(math.max(1, math.floor(damage * (1 - 0.6 * dist / (radius + 6)) + 0.5)), x, y, b.cause or "selfblast")
     end
   end
   enemies.damageArea(x, y, radius, math.max(1, math.floor(damage + 0.5)), 260 * scale)
@@ -102,9 +102,10 @@ local function explode(b, w, x, y)
 end
 
 -- A blast out of nowhere (Unstable Rounds going off in the barrel)
-function bullets.blast(x, y, count, scale, dig, digPower)
+-- cause: what set it off, for the death recap (src.deaths): "dynamite", "keg"; default his own
+function bullets.blast(x, y, count, scale, dig, digPower, cause)
   if world then
-    explode({ explosive = { count = count, scale = scale }, dx = 0, dy = -1, blastDig = dig, blastPower = digPower }, world, x, y)
+    explode({ explosive = { count = count, scale = scale }, dx = 0, dy = -1, blastDig = dig, blastPower = digPower, cause = cause }, world, x, y)
   end
 end
 

@@ -38,7 +38,7 @@ end
 -- a thin needle for the machine gun
 function effects.muzzleFlash(x, y, angle, size, style)
   size = size or 1
-  flashes[#flashes + 1] = { x = x, y = y, angle = angle, life = style == "automatic" and 0.035 or 0.05, size = size, style = style }
+  flashes[#flashes + 1] = { x = x, y = y, angle = angle, life = (style == "automatic" or style == "gatling") and 0.035 or 0.05, size = size, style = style }
   local dx, dy = math.cos(angle), math.sin(angle)
   for _ = 1, math.floor(7 * size + 0.5) do
     local a = angle + (love.math.random() - 0.5) * 0.9
@@ -303,7 +303,7 @@ function effects.drawEmissive()
       love.graphics.polygon("fill", f.x, f.y, f.x + dx * 15 + px * 8, f.y + dy * 15 + py * 8, f.x + dx * 18, f.y + dy * 18, f.x + dx * 15 - px * 8, f.y + dy * 15 - py * 8)
       love.graphics.setColor(1, 0.95, 0.6)
       love.graphics.polygon("fill", f.x, f.y, f.x + dx * 11 + px * 4, f.y + dy * 11 + py * 4, f.x + dx * 13, f.y + dy * 13, f.x + dx * 11 - px * 4, f.y + dy * 11 - py * 4)
-    elseif style == "automatic" then
+    elseif style == "automatic" or style == "gatling" then
       -- A thin, fast needle of light
       love.graphics.setColor(1, 0.85, 0.4)
       love.graphics.setLineWidth(2)

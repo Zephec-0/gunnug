@@ -170,6 +170,78 @@ enemies.defs.wisp = {
   fireproof = true,
 }
 
+-- Tunnel worm: bores through the rock after the hunter; in open air it is
+-- only carried by its momentum and gravity (see updateWorm)
+enemies.defs.worm = {
+  w = 4,
+  h = 4,
+  hp = 28,
+  speed = 135, -- it swims through the rock: fast, and never slowed by it
+  lungeSpeed = 215,
+  turn = 5.5, -- radians per second it can swing its head
+  segments = 17,
+  segGap = 2.8,
+  digRadius = 2.4,
+  lungeRange = 150,
+  lungeTime = 0.8,
+  lungeCooldown = 1.6,
+  sight = 300,
+  forget = 600,
+  damage = 10,
+  bodyDamage = 0.6, -- the body's touch hurts this fraction as much as the head's
+  gold = { 5, 9 },
+  knockback = 0.25,
+  weight = 0.5,
+}
+
+-- Skeleton miner: lobs sticks of dynamite from a distance
+enemies.defs.miner = {
+  ground = true,
+  w = 10,
+  h = 19,
+  hp = 22,
+  speed = 40,
+  jump = 230,
+  sight = 280,
+  forget = 480,
+  damage = 9,
+  gold = { 4, 8 },
+  knockback = 0.45,
+  weight = 3,
+  pushForce = 260,
+  throwRange = 230,
+  holdMin = 80, -- backs away when the hunter is closer than this...
+  holdMax = 150, -- ...and closes in when he is further
+  throwCooldown = 3.2,
+  windup = 0.55,
+  fuse = 1.6,
+  throwGravity = 420,
+  blast = 1.2, -- the stick's blast, as a multiple of a basic explosive round's
+}
+
+-- Cave roller: an armoured pillbug that curls up and rolls at the hunter
+enemies.defs.roller = {
+  ground = true,
+  w = 12,
+  h = 10,
+  hp = 30,
+  speed = 30,
+  jump = 200,
+  sight = 240,
+  forget = 420,
+  damage = 12,
+  gold = { 3, 7 },
+  knockback = 0.2,
+  weight = 4,
+  armor = 0.3, -- curled or rolling, it takes this fraction of the damage
+  curlTime = 0.55,
+  rollSpeed = 165,
+  rollTime = 2.8,
+  rollCooldown = 1.0,
+  rollRange = 190,
+  dizzyTime = 1.5,
+}
+
 -- Bosses: one per area, drawn as bigger versions of the monsters they grew
 -- from (spriteW/H is the base sprite, scaled up). Very tough, hard to shove
 -- about, and they drop a lot of gold and loot.
@@ -228,7 +300,7 @@ enemies.defs.dreadbat = giant("bat", {
 enemies.defs.queen = giant("bloater", {
   name = "The Sulfur Queen",
   scale = 6,
-  w = 84, h = 84, hp = 1400, speed = 78, accel = 260,
+  w = 84, h = 84, hp = 1000, speed = 78, accel = 260,
   sight = 560, forget = 4000, damage = 24,
   knockback = 0.02, gold = { 200, 260 }, weight = 30,
   knockMul = 0.1, -- 90% less shove from bullets, kicks, blasts and singularities
@@ -236,7 +308,7 @@ enemies.defs.queen = giant("bloater", {
   puff = true,
   globSpeed = 210, globGravity = 60, globDamage = 14,
   holdDist = 60, -- she keeps this far from the hunter (plus her own size); dashes in when further
-  splitDepth = 4, -- below 33% health she splits in two, down to this many splits in a line
+  splitDepth = 1, -- below 33% health she splits in two, down to this many splits in a line
   splitDamage = 0.75, -- each split deals this much of the damage of the one before
 })
 
@@ -257,6 +329,7 @@ local GLOB_LIFE = 4
 
 local list = {}
 local globs = {}
+local sticks = {} -- thrown dynamite
 local clock = 0 -- game time (stops while paused), for the DPS meter
 
 -- Set by src.game: called as onKill(enemy, fx) when an enemy dies, with the
@@ -264,7 +337,7 @@ local clock = 0 -- game time (stops while paused), for the DPS meter
 enemies.onKill = nil
 
 function enemies.clear()
-  list, globs = {}, {}
+  list, globs, sticks = {}, {}, {}
 end
 
 function enemies.count()
@@ -303,6 +376,15 @@ function enemies.spawn(kind, x, y, toughness, level, swarm)
     grounded = false,
   }
   list[#list + 1] = e
+  if kind == "worm" then
+    e.wx, e.wy = e.body.x + e.body.w / 2, e.body.y + e.body.h / 2
+    e.ang = love.math.random() * math.pi * 2
+    e.segs = {}
+    for i = 1, def.segments do
+      e.segs[i] = { e.wx, e.wy }
+    end
+    e.air, e.lungeT, e.lungeCd, e.digged = false, 0, 0, 0
+  end
   if swarm then
     swarm.members = swarm.members or {}
     swarm.members[#swarm.members + 1] = e
@@ -418,6 +500,28 @@ local function die(e)
     for _ = 1, 10 do
       effects.particle(cx, cy, (r() - 0.5) * 90, (r() - 0.5) * 90, 0.4, { 1, 0.6, 0.2 }, 0, true)
     end
+  elseif kind == "worm" then
+    -- Comes apart in pink rings and goo along its whole length
+    for _, sg in ipairs(e.segs or {}) do
+      effects.chunk(sg[1], sg[2], (r() - 0.5) * 60, -20 - r() * 40, 2, 2, r() < 0.5 and { 0.74, 0.52, 0.48 } or { 0.56, 0.36, 0.36 }, 3)
+      effects.particle(sg[1], sg[2], (r() - 0.5) * 50, -r() * 40, 0.5, { 0.7, 0.3, 0.3 }, 300)
+    end
+  elseif kind == "miner" then
+    -- Clatters apart: bones, a rusted hat, a dropped pickaxe
+    for _ = 1, 9 do
+      effects.chunk(cx + (r() - 0.5) * 6, cy + (r() - 0.5) * 10, (r() - 0.5) * 70, -30 - r() * 60, 1 + math.floor(r() * 2), 3, { 0.84, 0.82, 0.72 }, 3)
+    end
+    effects.chunk(cx, cy - 8, (r() - 0.5) * 50, -70, 5, 2, { 0.66, 0.50, 0.16 }, 3)
+    effects.chunk(cx + 3, cy, 30, -40, 4, 1, { 0.46, 0.48, 0.54 }, 3)
+    effects.particle(cx, cy - 7, 0, -20, 0.8, { 1, 0.86, 0.42 }, 80, true)
+  elseif kind == "roller" then
+    -- The shell cracks into plates
+    for _ = 1, 8 do
+      effects.chunk(cx + (r() - 0.5) * 8, cy + (r() - 0.5) * 6, (r() - 0.5) * 80, -30 - r() * 50, 2, 2, r() < 0.5 and { 0.50, 0.47, 0.44 } or { 0.32, 0.30, 0.30 }, 3)
+    end
+    for _ = 1, 6 do
+      effects.particle(cx, cy, (r() - 0.5) * 70, (r() - 0.5) * 50, 0.4, { 0.74, 0.62, 0.54 }, 300)
+    end
   elseif kind == "bat" then
     -- Folds up and plummets in pieces: two wings and the fuzzy body
     effects.chunk(cx - 2, cy, -50 - r() * 30, -50, 4, 1, { 0.26, 0.17, 0.24 }, 3)
@@ -472,6 +576,11 @@ local function dpsSpan(m)
   return math.max(span, 1) -- one hit alone reads as its damage per second
 end
 
+-- A burrowing worm's heading is its own; shoving its head would just fight the steering
+local function kindMovable(e)
+  return not (e.kind == "worm" and not e.air)
+end
+
 -- Damages an enemy. (dx, dy) is the hit direction, force the impact
 function enemies.damage(e, amount, dx, dy, force, crit, fx)
   if e.dead then
@@ -479,6 +588,24 @@ function enemies.damage(e, amount, dx, dy, force, crit, fx)
   end
   if e.acid and e.acid > 0 then
     amount = math.floor(amount * 1.3 + 0.5) -- corroded
+  end
+  if e.vulnerable then
+    -- A spent Queen is open to attack
+    amount = math.floor(amount * 1.5 + 0.5)
+    local ax, ay = center(e)
+    effects.particle(ax + (love.math.random() - 0.5) * e.body.w * 0.6, ay + (love.math.random() - 0.5) * e.body.h * 0.6, 0, -20, 0.3, { 1, 0.95, 0.5 }, 0, true)
+  end
+  if e.armored and e.def.armor then
+    -- A curled roller turns most of it aside in a shower of sparks
+    amount = math.max(1, math.floor(amount * e.def.armor + 0.5))
+    e.armorHit = 0.12
+    audio.play("clank", 0.3, 1.8)
+    local ax, ay = center(e)
+    for _ = 1, 3 do
+      effects.particle(ax, ay, (love.math.random() - 0.5) * 120, -love.math.random() * 70, 0.18, { 1, 0.9, 0.55 }, 200, true)
+    end
+  elseif e.state == "dizzy" then
+    amount = math.floor(amount * 1.5 + 0.5) -- soft and uncurled
   end
   if e.def.dummy then
     recordDps(e, amount)
@@ -490,6 +617,9 @@ function enemies.damage(e, amount, dx, dy, force, crit, fx)
     e.lastFx = fx
   end
   local knock = e.def.knockback * (e.def.knockMul or 1)
+  if not (e.def.ground and e.grounded) then
+    knock = knock * 0.4 -- in the air they are shoved much less
+  end
   if dx and dx ~= 0 and not e.def.knockMul then
     -- A hit shoves the sprite back for a moment
     e.stagger = math.min(0.2, 0.08 + (force or 0) / 2500)
@@ -509,7 +639,7 @@ function enemies.damage(e, amount, dx, dy, force, crit, fx)
     e.state = e.kind == "spitter" and "watch" or "chase"
   end
   e.seesPlayer = true
-  if force and force > 0 and knock > 0 then
+  if force and force > 0 and knock > 0 and not e.armored and kindMovable(e) then
     e.body.vx = e.body.vx + (dx or 0) * force * knock
     e.body.vy = e.body.vy + (dy or 0) * force * knock - 30 * (e.def.knockMul or 1)
     if not e.def.knockMul then
@@ -580,6 +710,7 @@ end
 
 function enemies.stun(e, time)
   e.stun = math.max(e.stun, time)
+  e.dazed = math.max(e.dazed or 0, time) -- concussive rounds: stars circle its head
 end
 
 -- The closest living enemy to (x, y) within range, skipping `skip` (a set)
@@ -612,7 +743,9 @@ function enemies.chain(from, damage, fx)
       local t = i / 8
       effects.particle(ax + (bx - ax) * t + (love.math.random() - 0.5) * 3, ay + (by - ay) * t + (love.math.random() - 0.5) * 3, 0, 0, 0.12, { 0.65, 0.75, 1 }, 0, true)
     end
+    from.zap = 0.4
     enemies.damage(target, math.max(1, math.floor(damage * 0.5 + 0.5)), 0, 0, 0, false, fx)
+    target.zap = 0.4
     ax, ay = bx, by
   end
 end
@@ -720,12 +853,161 @@ local function updatePoison(e, dt)
   end
 end
 
+-- Status particles ---------------------------------------------------------
+-- Each debuff has its own look: frost throws drifting flakes and glints, venom
+-- bubbles up, acid drips and sizzles, a shock crackles with sparks, concussion
+-- circles its head with stars (drawn in drawDazed). The sprite itself is washed
+-- in the status colour by the tint shader in enemies.draw.
+local function updateStatusFx(e, dt)
+  local b = e.body
+  local rnd = love.math.random
+  -- Bigger monsters throw more
+  local size = math.sqrt(b.w * b.h) / 10
+  local function chance(rate)
+    return rnd() < rate * size * dt
+  end
+  local function onBody()
+    return b.x + rnd() * b.w, b.y + rnd() * b.h
+  end
+  if e.zap and e.zap > 0 then
+    e.zap = e.zap - dt
+    if chance(60) then
+      local x, y = onBody()
+      effects.particle(x, y, (rnd() - 0.5) * 70, (rnd() - 0.5) * 70, 0.08, rnd() < 0.5 and { 0.75, 0.85, 1 } or { 1, 0.95, 0.5 }, 0, true)
+    end
+  end
+  if e.dazed and e.dazed > 0 then
+    e.dazed = e.dazed - dt
+  end
+  if e.slow and e.slow > 0 then
+    if chance(7) then
+      local x, y = onBody()
+      effects.particle(x, y, (rnd() - 0.5) * 6, 4 + rnd() * 6, 0.9, { 0.85, 0.95, 1 }, 6) -- flakes of frost
+    end
+    if chance(5) then
+      local x, y = onBody()
+      effects.particle(x, y, 0, 0, 0.22, { 1, 1, 1 }, 0, true) -- a glint
+    end
+  end
+  if e.poisoned then
+    if chance(6) then
+      local x = b.x + rnd() * b.w
+      effects.particle(x, b.y + b.h * (0.4 + rnd() * 0.5), 0, -10 - rnd() * 8, 0.7, { 0.55, 0.95, 0.35 }, -8, true) -- bubbles
+    end
+    if chance(1.5) then
+      local x, y = onBody()
+      effects.particle(x, y, (rnd() - 0.5) * 10, -6, 0.6, { 0.25, 0.5, 0.18 }, -4) -- a wisp of green fume
+    end
+  end
+  if e.acid and e.acid > 0 then
+    if chance(5) then
+      effects.particle(b.x + rnd() * b.w, b.y + b.h * (0.5 + rnd() * 0.5), 0, 0, 0.7, { 0.78, 0.98, 0.18 }, 260) -- a drip falling away
+    end
+    if chance(3) then
+      local x, y = onBody()
+      effects.particle(x, y, (rnd() - 0.5) * 16, -14 - rnd() * 10, 0.25, { 0.95, 1, 0.5 }, 40, true) -- sizzle
+    end
+  end
+  if e.burn and chance(2) then
+    local x, y = onBody()
+    effects.particle(x, y, (rnd() - 0.5) * 8, -12, 0.8, { 0.28, 0.25, 0.25 }, -20) -- smoke
+  end
+end
+
+-- The tint a monster's sprite is washed in: the blend of every status on it,
+-- and how strongly (0 when it has none)
+local TINT_FROST, TINT_VENOM, TINT_ACID, TINT_FIRE, TINT_SHOCK = { 0.50, 0.82, 1.0 }, { 0.30, 0.90, 0.22 }, { 0.80, 1.0, 0.12 }, { 1.0, 0.42, 0.08 }, { 0.72, 0.86, 1.0 }
+
+local function statusTint(e, t)
+  local r, g, b, w = 0, 0, 0, 0
+  local function add(c, weight)
+    r, g, b, w = r + c[1] * weight, g + c[2] * weight, b + c[3] * weight, w + weight
+  end
+  if e.slow and e.slow > 0 then
+    add(TINT_FROST, 0.62 * math.min(1, e.slow / 0.6))
+  end
+  if e.poisoned then
+    add(TINT_VENOM, 0.5 * math.min(1, e.poisoned.left / 0.6))
+  end
+  if e.acid and e.acid > 0 then
+    add(TINT_ACID, 0.5 * math.min(1, e.acid / 0.6))
+  end
+  if e.burn then
+    add(TINT_FIRE, 0.30 + 0.14 * math.sin(t * 17 + e.phase))
+  end
+  if e.zap and e.zap > 0 and math.floor(t * 28) % 2 == 0 then
+    add(TINT_SHOCK, 0.9)
+  end
+  if w == 0 then
+    return
+  end
+  return r / w, g / w, b / w, math.min(0.8, w)
+end
+
+local tintShader
+local tintTried = false
+
+local function getTintShader()
+  if not tintTried then
+    tintTried = true
+    local ok, shader = pcall(
+      love.graphics.newShader,
+      [[
+      uniform vec3 tint;
+      uniform float amount;
+      vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
+        vec4 c = Texel(tex, uv) * color;
+        // Keep the sprite's own shading: dark parts take the tint dark, light parts bright
+        float l = dot(c.rgb, vec3(0.30, 0.59, 0.11));
+        vec3 toned = tint * (0.40 + 1.0 * l);
+        c.rgb = mix(c.rgb, toned, amount);
+        return c;
+      }
+      ]]
+    )
+    tintShader = ok and shader or nil
+  end
+  return tintShader
+end
+
+-- Stars circling the head of a concussed monster
+local function drawDazed(e, t)
+  if not (e.dazed and e.dazed > 0) then
+    return
+  end
+  local b = e.body
+  local cx, top = b.x + b.w / 2, b.y - 3
+  local rx = math.max(4, b.w * 0.35)
+  for i = 0, 2 do
+    local a = t * 7 + i * 2.094
+    local x, y = cx + math.cos(a) * rx, top + math.sin(a) * 2
+    local front = math.sin(a) > 0
+    love.graphics.setColor(1, 0.92, 0.35, front and 1 or 0.5)
+    love.graphics.rectangle("fill", math.floor(x), math.floor(y), 2, 2)
+    love.graphics.setColor(1, 1, 0.85, front and 1 or 0.5)
+    love.graphics.rectangle("fill", math.floor(x), math.floor(y), 1, 1)
+  end
+end
+
 -- Bullet hit test: an enemy or an acid glob at the pixel (globs can be shot down)
 function enemies.hitTest(px, py)
   for _, e in ipairs(list) do
     local b = e.body
     if not e.dead and px >= b.x and px < b.x + b.w and py >= b.y and py < b.y + b.h then
       return e
+    end
+    -- A worm can be hit anywhere along its length
+    if e.segs and not e.dead and e.state ~= "sleep" then
+      for _, sg in ipairs(e.segs) do
+        if math.abs(px - sg[1]) <= 2 and math.abs(py - sg[2]) <= 2 then
+          return e
+        end
+      end
+    end
+  end
+  for _, s in ipairs(sticks) do
+    if not s.dead and math.abs(px - s.x) <= 3 and math.abs(py - s.y) <= 3 then
+      return s
     end
   end
   for _, g in ipairs(globs) do
@@ -738,7 +1020,9 @@ end
 
 -- Applies a bullet to whatever hitTest returned
 function enemies.hit(thing, amount, dx, dy, force, crit, fx)
-  if thing.isGlob then
+  if thing.isStick then
+    thing.dead = true -- shot out of the air: it goes off where it is
+  elseif thing.isGlob then
     thing.dead = true
     for _ = 1, 6 do
       effects.particle(thing.x, thing.y, (love.math.random() - 0.5) * 90, -love.math.random() * 60, 0.4, { 0.55, 0.95, 0.35 }, 300, true)
@@ -755,7 +1039,7 @@ function enemies.kick(x, y, w, h, dir, damage)
     if not e.dead and overlaps(x, y, w, h, b.x, b.y, b.w, b.h) then
       enemies.damage(e, damage, dir, -0.3, 0)
       if e.def.knockback > 0 then
-        local k = e.def.knockMul or 1
+        local k = (e.def.knockMul or 1) * ((e.def.ground and e.grounded) and 1 or 0.5)
         b.vx = dir * 220 * k
         b.vy = -140 * k
         if k >= 1 then
@@ -1421,8 +1705,8 @@ local function splitQueen(e)
     q.body.x, q.body.y = math.floor(cx - size / 2), math.floor(cy - size / 2)
     q.body.vx, q.body.vy = (i == 1 and -1 or 1) * 170, -40
     q.orbit = -math.pi / 2 + (i == 1 and -1 or 1) * (0.35 + love.math.random() * 0.5)
-    q.globT, q.colT, q.puffT, q.minionT, q.dashT, q.dashCd = 1.5 + love.math.random(), nil, nil, 3 + love.math.random() * 2, nil, 1
-    q.burstLeft, q.novaWind, q.novaT, q.flash = nil, nil, nil, 0.15
+    q.qs, q.qt, q.atk, q.atkI, q.dashT, q.fanLeft, q.recoverSet, q.vulnerable = "hover", 1.5 + love.math.random(), nil, love.math.random(0, 2), nil, nil, nil, nil
+    q.puffT, q.novaWind, q.flash = nil, nil, 0.15
     q.minions = {}
     q.phase = love.math.random() * 10
     removePhysics(q) -- (rebuilt at its new size next frame)
@@ -1438,14 +1722,90 @@ local function splitQueen(e)
   effects.popup(cx, cy - size / 2 - 6, "SPLIT", { 0.85, 0.95, 0.35 })
 end
 
--- Sulfur Queen. Three stages by health (over 66%, over 33%, below): she
--- breathes gas faster and wider each time, shoots triple shots and then
--- straight-line bursts in turn, calls bloaters and then wisps (which light
--- her own gas), and drops pillars of gas across the arena. Below a third of
--- her health she splits in two (see splitQueen); the remnants keep the same
--- attacks, minus the pillars and with less damage. She holds a set distance
--- from the hunter, dashing in when she falls behind. She wakes when the hunter
--- enters her arena and never leaves it.
+-- Sulfur Queen. She fights in a cycle: she hovers high over the arena, picks an
+-- attack and TELLS you (she stops dead and swells, glowing), carries it out,
+-- and then she is spent: for a couple of seconds she sinks down to where the
+-- hunter can reach her, dazed and taking 50% more damage. Hit her hard in
+-- those windows; the rest of the time it is about reading the attack and
+-- getting out of its way (a dodge roll slips through globs and her dash):
+--   fan     three fans of gas globs with a two-glob gap to slip through
+--   dash    she locks on and barrels across the arena in a line, leaving gas
+--   bloom   she swells and bursts: a ring of globs and a cloud of gas
+--   vents   gas columns crack open across the arena (they show a warning first)
+--   spawn   calls bloaters (and later wisps)
+-- Each stage (by health) adds attacks and shortens the pauses. Below a third
+-- she splits in two (see splitQueen); the remnants only fan and dash. She is
+-- immune to fire, flies through rock and platforms, and never leaves her arena.
+local QUEEN_CYCLES = {
+  { "fan", "dash", "fan", "spawn" },
+  { "fan", "bloom", "dash", "vents", "fan", "dash" },
+  { "fan", "dash", "bloom", "dash", "vents", "fan", "dash", "bloom" },
+}
+local REMNANT_CYCLE = { "fan", "dash", "fan" }
+local QUEEN_WIND = { fan = 0.9, dash = 1.1, bloom = 1.3, vents = 0.7, spawn = 0.7 }
+
+-- Starts the attack once its telegraph is over
+local function queenAttack(e, px, py, aimAng, stage, gen, sf)
+  local def, b = e.def, e.body
+  local a = e.arena
+  local cx, cy = center(e)
+  local atk = e.atk
+  e.qs = "attack"
+  if atk == "fan" then
+    e.fanLeft = gen > 0 and 2 or (stage == 3 and 4 or 3)
+    e.fanT = 0
+  elseif atk == "dash" then
+    e.dashT = 0.9
+    audio.play("bat_screech", 0.9, 0.7)
+    effects.ring(cx, cy, 40 * sf + 14, { 0.9, 0.95, 0.4 })
+  elseif atk == "bloom" then
+    audio.play("explosion", 0.7, 0.5)
+    effects.ring(cx, cy, 110 * sf, { 0.85, 0.95, 0.35 })
+    fluids.addGas(cx, cy, 1, 70 * sf)
+    local n = 14
+    local gap = love.math.random(1, n)
+    for i = 1, n do
+      if i ~= gap and i ~= gap % n + 1 then
+        fireGlob(e, (i / n) * math.pi * 2 + e.phase, def.globSpeed * 0.65)
+      end
+    end
+    e.qs = "recover"
+    e.qt = 0.1
+  elseif atk == "vents" then
+    if a and gen == 0 then
+      local n = 1 + stage
+      local lo, hi = a.x0 + 110, a.x1 - 110
+      local seg = (hi - lo) / n
+      for k = 1, n do
+        local x = lo + (k - 0.5 + (love.math.random() - 0.5) * 0.7) * seg
+        fluids.addColumn(x, 64, a.top + 12, a.floorY - 2, 1.4, 7)
+      end
+      audio.play("explosion", 0.5, 0.5)
+    end
+    e.qs = "recover"
+    e.qt = 0.1
+  elseif atk == "spawn" then
+    local alive = {}
+    for _, m in ipairs(e.minions or {}) do
+      if not m.dead then
+        alive[#alive + 1] = m
+      end
+    end
+    e.minions = alive
+    for side = -1, 1, 2 do
+      if #e.minions < 3 + stage then
+        local kind = (stage == 1 or (stage == 3 and side == -1)) and "bloater" or "wisp"
+        local m = enemies.spawn(kind, cx + side * 30 * sf - 7, cy + 10 * sf, e.toughness * 0.4, e.level)
+        m.state = "chase"
+        e.minions[#e.minions + 1] = m
+        effects.ring(cx + side * 30 * sf, cy + 10 * sf, 16, { 0.8, 0.92, 0.3 })
+      end
+    end
+    e.qs = "recover"
+    e.qt = 0.1
+  end
+end
+
 local function updateQueen(e, dt, world, player, px, py)
   local def, b = e.def, e.body
   local cx, cy = center(e)
@@ -1462,6 +1822,7 @@ local function updateQueen(e, dt, world, player, px, py)
       e.state = "chase"
       e.stage = 1
       e.group = e.group or { alive = 1 }
+      e.qs, e.qt = "hover", 2.5
       audio.play("bat_screech", 1, 0.4)
     else
       b.vx, b.vy = 0, math.sin(e.phase) * 4
@@ -1476,139 +1837,129 @@ local function updateQueen(e, dt, world, player, px, py)
     -- A new stage: a roar and a burst of gas
     audio.play("bat_screech", 1, 0.4)
     effects.ring(cx, cy, 70 * sf, { 0.8, 0.92, 0.3 })
-    fluids.addGas(cx, cy, 1, 50 * sf)
+    fluids.addGas(cx, cy, 1, 40 * sf)
   end
   e.stage = stage
-
-  -- Breathes poison
-  e.puffT = (e.puffT or 0) - dt
-  if e.puffT <= 0 then
-    e.puffT = ({ 0.38, 0.28, 0.2 })[stage] * (1 + gen * 0.5)
-    fluids.addGas(cx, cy + 16 * sf, 0.5, (28 + stage * 8) * sf)
-  end
-  -- Shots, alternating: a triple shot fanned at the hunter, then a burst of
-  -- shots one after the other down a single line. Remnants fire less often.
-  local shotSpeed = def.globSpeed
+  e.qs = e.qs or "hover"
+  e.qt = e.qt or 2
+  local timeScale = 1 + gen * 0.35
   local aimAng = math.atan2(py - cy, px - cx)
-  e.globT = (e.globT or 1.8) - dt
-  if e.globT <= 0 and not (e.burstLeft and e.burstLeft > 0) then
-    e.globT = ({ 2.2, 1.8, 1.4 })[stage] * (1 + gen * 0.4)
-    e.volley = (e.volley or 0) + 1
-    if e.volley % 2 == 1 then
-      for i = -1, 1 do
-        fireGlob(e, aimAng + i * 0.2, shotSpeed)
-      end
-      audio.play("shot_pistol", 0.5, 0.45)
-    else
-      e.burstLeft = 4 + stage * 2
-      e.burstAng = aimAng -- the line is fixed when the burst starts
-      e.burstT = 0
-    end
-  end
-  if e.burstLeft and e.burstLeft > 0 then
-    e.burstT = e.burstT - dt
-    if e.burstT <= 0 then
-      e.burstT = 0.1
-      e.burstLeft = e.burstLeft - 1
-      fireGlob(e, e.burstAng, shotSpeed * 1.15)
-      audio.play("shot_pistol", 0.3, 0.6)
-    end
-  end
-  -- Gas columns (only before she splits): vents crack open across the arena,
-  -- and after a short warning dense gas pours up through its whole height in
-  -- several places, walling off parts of it. A new set, in new places, every
-  -- few seconds.
-  e.colT = (e.colT or 2.5) - dt
-  if e.colT <= 0 and a and gen == 0 then
-    e.colT = ({ 8, 7, 6 })[stage]
-    local n = 1 + stage
-    local lo, hi = a.x0 + 110, a.x1 - 110
-    local seg = (hi - lo) / n
-    for k = 1, n do
-      local x = lo + (k - 0.5 + (love.math.random() - 0.5) * 0.7) * seg
-      fluids.addColumn(x, 64, a.top + 12, a.floorY - 2, 1.4, 8)
-    end
-    audio.play("explosion", 0.5, 0.5)
-    effects.ring(cx, cy, 50, { 0.9, 0.95, 0.4 })
-  end
-  -- Calls minions: bloaters first, wisps from the second stage. Remnants call
-  -- fewer, less often.
-  e.minionT = (e.minionT or 4) - dt
-  if e.minionT <= 0 then
-    e.minionT = (stage == 1 and 6 or 4.5) * (1 + gen * 1.5)
-    local alive = {}
-    for _, m in ipairs(e.minions or {}) do
-      if not m.dead then
-        alive[#alive + 1] = m
-      end
-    end
-    e.minions = alive
-    if #alive < (3 + stage) - gen then
-      local kind = (stage == 1 or (stage == 3 and #alive % 2 == 0)) and "bloater" or "wisp"
-      local side = love.math.random() < 0.5 and -1 or 1
-      local m = enemies.spawn(kind, cx + side * 24 * sf - 7, cy + 10 * sf, e.toughness * 0.4, e.level)
-      m.state = "chase"
-      e.minions[#e.minions + 1] = m
-      effects.ring(cx + side * 24 * sf, cy + 10 * sf, 16, { 0.8, 0.92, 0.3 })
-    end
-  end
-  -- The last stage: swells for a moment, then bursts a huge cloud
-  if stage == 3 then
-    e.novaT = (e.novaT or 4) - dt
-    if e.novaT <= 0 and not e.novaWind then
-      e.novaWind = 1.2
-      audio.play("bat_screech", 0.8, 0.5)
-    end
-    if e.novaWind then
-      e.novaWind = e.novaWind - dt
-      if love.math.random() < dt * 30 then
-        effects.particle(cx + (love.math.random() - 0.5) * 50 * sf, cy + (love.math.random() - 0.5) * 50 * sf, 0, 0, 0.3, { 0.85, 0.95, 0.35 }, 0, true)
-      end
-      if e.novaWind <= 0 then
-        e.novaWind = nil
-        e.novaT = 4.5
-        fluids.addGas(cx, cy, 1, 96 * sf)
-        effects.ring(cx, cy, 110 * sf, { 0.85, 0.95, 0.35 })
-      end
-    end
+  e.vulnerable = e.qs == "recover" and e.qt > 0.2
+
+  -- A faint leak from her sac, no more
+  e.puffT = (e.puffT or 1.5) - dt
+  if e.puffT <= 0 then
+    e.puffT = 1.4
+    fluids.addGas(cx, cy + 14 * sf, 0.3, 9 * sf)
   end
 
-  -- Movement. She holds a set distance from the hunter (further out the bigger
-  -- she is), hovering above him, aiming where he is going rather than where he
-  -- is. She hurries in proportion to how far behind she is, and when she is
-  -- well outside that distance (on screen or not) she dashes in. Nothing in the
-  -- arena stops her: she passes through the platforms, and the rock.
-  local function nothing()
-    return false
-  end
-  local hold = def.holdDist + b.w * 0.6
-  e.orbit = e.orbit or -math.pi / 2
-  local ang = e.orbit + math.sin(e.phase * 0.5) * 0.25
-  local pvx, pvy = player.body.vx * 0.5, player.body.vy * 0.3
-  local gx, gy = px + pvx + math.cos(ang) * hold, py + pvy + math.sin(ang) * hold
-  local d = math.max(1, math.sqrt((gx - cx) ^ 2 + (gy - cy) ^ 2))
-  e.dashCd = (e.dashCd or 0) - dt
-  if e.dashT then
-    -- Dashing: a straight, fast line at the spot, ending once she is there
-    e.dashT = e.dashT - dt
-    if e.dashT <= 0 or d < 24 then
-      e.dashT = nil
-      e.dashCd = 1.2
-    else
-      b.vx, b.vy = (gx - cx) / d * 420, (gy - cy) / d * 420
+  local wantX, wantY, speed = cx, cy, 0
+  local dashing = false
+  if e.qs == "hover" then
+    -- High over the arena, drifting along it after the hunter
+    local ax = px + math.sin(e.phase * 0.35 + (e.orbit or 0)) * 150
+    local ay = a and (a.top + 90 + math.sin(e.phase * 0.5) * 18) or (py - 130)
+    if a then
+      ax = math.max(a.x0 + 100, math.min(a.x1 - 100, ax))
+    end
+    wantX, wantY, speed = ax, ay, 90 + 30 * (stage - 1)
+    e.qt = e.qt - dt
+    if e.qt <= 0 then
+      local cycle = gen > 0 and REMNANT_CYCLE or QUEEN_CYCLES[stage]
+      e.atkI = (e.atkI or 0) % #cycle + 1
+      e.atk = cycle[e.atkI]
+      e.qs = "windup"
+      e.qt = QUEEN_WIND[e.atk] * timeScale
+      e.qtTotal = e.qt
+      e.dashAng = aimAng
+      audio.play("bat_screech", 0.6, 0.55)
+    end
+  elseif e.qs == "windup" then
+    -- The telegraph: she stops and swells, glowing; a dash shows its line, which
+    -- follows the hunter until the last third of a second and then locks
+    e.qt = e.qt - dt
+    e.novaWind = e.qt
+    if e.atk == "dash" and e.qt > 0.3 then
+      e.dashAng = aimAng
+    end
+    b.vx, b.vy = b.vx * math.max(0, 1 - 8 * dt), b.vy * math.max(0, 1 - 8 * dt)
+    if love.math.random() < dt * 30 then
+      local ang = love.math.random() * math.pi * 2
+      effects.particle(cx + math.cos(ang) * 30 * sf, cy + math.sin(ang) * 30 * sf, -math.cos(ang) * 40, -math.sin(ang) * 40, 0.4, { 0.85, 0.95, 0.35 }, 0, true)
+    end
+    if e.qt <= 0 then
+      e.novaWind = nil
+      queenAttack(e, px, py, aimAng, stage, gen, sf)
+    end
+    wantX, wantY, speed = cx, cy, 0
+  elseif e.qs == "attack" then
+    if e.atk == "fan" then
+      e.fanT = e.fanT - dt
+      if e.fanT <= 0 and e.fanLeft > 0 then
+        e.fanT = 0.5 * timeScale
+        e.fanLeft = e.fanLeft - 1
+        local n = gen > 0 and 5 or (stage == 3 and 11 or 9)
+        local arc = gen > 0 and 1.0 or 1.5
+        local gap = love.math.random(2, n - 2) -- two neighbouring shots left out
+        for i = 1, n do
+          if i ~= gap and i ~= gap + 1 then
+            fireGlob(e, aimAng + (i - (n + 1) / 2) / (n - 1) * arc, def.globSpeed)
+          end
+        end
+        audio.play("shot_pistol", 0.5, 0.45)
+      end
+      if e.fanLeft <= 0 and e.fanT <= 0 then
+        e.qs = "recover"
+        e.qt = 0.1
+      end
+    elseif e.atk == "dash" then
+      dashing = true
+      e.dashT = e.dashT - dt
+      b.vx, b.vy = math.cos(e.dashAng) * 560, math.sin(e.dashAng) * 560
       if love.math.random() < dt * 40 then
         effects.particle(cx, cy, 0, 0, 0.4, { 0.72, 0.85, 0.3 }, 0, true)
       end
+      e.dashGas = (e.dashGas or 0) - dt
+      if e.dashGas <= 0 then
+        e.dashGas = 0.07
+        fluids.addGas(cx, cy, 0.5, 12 * sf)
+      end
+      if e.dashT <= 0 then
+        e.qs = "recover"
+        e.qt = 0.1
+        b.vx, b.vy = b.vx * 0.3, b.vy * 0.3
+        e.afterDash = true
+      end
     end
-  elseif dist > hold + 170 and e.dashCd <= 0 and e.stun <= 0 then
-    e.dashT = math.min(1.4, d / 420 + 0.1)
-    audio.play("bat_screech", 0.5, 0.8)
-    effects.ring(cx, cy, 36 * sf + 14, { 0.9, 0.95, 0.4 })
   end
-  if not e.dashT then
-    local speed = math.min(300, def.speed * (1 + 0.35 * (stage - 1)) + math.max(0, d - 20) * 1.8)
-    local tx, ty = (gx - cx) / d * speed, (gy - cy) / d * speed + math.sin(e.phase) * 6
-    if e.stun <= 0 then
+  if e.qs == "recover" then
+    -- Spent: she sinks to the hunter's height, dazed and open to attack. The
+    -- first instant after an attack sets how long this lasts.
+    if e.qt <= 0.1 and not e.recoverSet then
+      e.recoverSet = true
+      e.qt = (({ 2.8, 2.3, 1.9 })[stage] + (e.afterDash and 0.8 or 0)) * timeScale
+      e.afterDash = nil
+    end
+    e.qt = e.qt - dt
+    e.dazed = math.max(e.dazed or 0, e.qt)
+    local side = px >= cx and -1 or 1
+    wantX, wantY, speed = px + side * 90 * (0.4 + sf), py - 40, 110
+    if e.qt <= 0 then
+      e.qs = "hover"
+      e.qt = ({ 1.9, 1.5, 1.1 })[stage] * timeScale
+      e.recoverSet = nil
+      e.dazed = 0
+    end
+  end
+
+  if not dashing then
+    local d = math.max(1, math.sqrt((wantX - cx) ^ 2 + (wantY - cy) ^ 2))
+    local sp = math.min(speed, d * 2.2)
+    local tx, ty = (wantX - cx) / d * sp, (wantY - cy) / d * sp + math.sin(e.phase) * 5
+    if speed == 0 then
+      tx, ty = 0, 0
+    end
+    if e.stun <= 0 and e.qs ~= "windup" then
       local step = def.accel * dt
       b.vx = b.vx < tx and math.min(b.vx + step, tx) or math.max(b.vx - step, tx)
       b.vy = b.vy < ty and math.min(b.vy + step, ty) or math.max(b.vy - step, ty)
@@ -1630,6 +1981,9 @@ local function updateQueen(e, dt, world, player, px, py)
     end
   end
   e.facing = px >= cx and 1 or -1
+  local function nothing()
+    return false
+  end
   Body.moveX(b, nothing, b.vx * dt, 0)
   Body.moveY(b, nothing, b.vy * dt)
   if a then
@@ -1727,7 +2081,425 @@ local function updateDummy(e)
   end
 end
 
+-- Tunnel worm: a long, thin burrower that bores through anything but bedrock
+-- and masonry. While it has rock around its head it steers freely (toward the
+-- hunter, lunging when close); the moment its head breaks into open air it is
+-- just a thrown thing, carried by its momentum and gravity, until it hits the
+-- ground or a wall and digs back in.
+local function wormTouching(world, x, y)
+  -- Any rock within about five pixels of the head?
+  if world:isSolid(x, y) then
+    return true
+  end
+  for i = 0, 7 do
+    local a = i * math.pi / 4
+    if world:isSolid(x + math.floor(math.cos(a) * 4 + 0.5), y + math.floor(math.sin(a) * 4 + 0.5)) then
+      return true
+    end
+  end
+  return false
+end
+
+local function angleDiff(a, b)
+  return (a - b + math.pi) % (2 * math.pi) - math.pi
+end
+
+local function wormInit(e)
+  if e.segs then
+    return
+  end
+  local b = e.body
+  e.wx, e.wy = b.x + b.w / 2, b.y + b.h / 2
+  e.ang = love.math.random() * math.pi * 2
+  e.segs = {}
+  for i = 1, e.def.segments do
+    e.segs[i] = { e.wx, e.wy }
+  end
+  e.air = false
+  e.lungeT, e.lungeCd, e.digged = 0, 0, 0
+end
+
+local function updateWorm(e, dt, world, player, px, py)
+  local def, b = e.def, e.body
+  wormInit(e)
+  local dist = math.sqrt((px - e.wx) ^ 2 + (py - e.wy) ^ 2)
+  -- Its sounds are only heard as it gets close
+  local function wormSound(name, volume)
+    local near = math.max(0, 1 - dist / 260)
+    if near > 0.03 then
+      audio.play(name, volume * near ^ 1.5)
+    end
+  end
+  e.phase = e.phase + dt * 9
+  e.lungeCd = math.max(0, e.lungeCd - dt)
+  local r = love.math.random
+
+  if e.state == "sleep" then
+    -- Coiled in the rock until the hunter comes near (no line of sight needed:
+    -- it feels the footsteps through the stone)
+    if dist < def.sight then
+      e.state = "chase"
+      wormSound("worm_wake", 0.9)
+      for _ = 1, 8 do
+        effects.particle(e.wx, e.wy, (r() - 0.5) * 50, -r() * 40, 0.5, { 0.42, 0.36, 0.30 }, 200)
+      end
+    else
+      return
+    end
+  elseif e.state == "chase" and dist > def.forget then
+    e.state = "wander"
+    e.wanderAng = r() * math.pi * 2
+  elseif e.state == "wander" and dist < def.sight then
+    e.state = "chase"
+  end
+
+  if e.air then
+    -- Out in the open: momentum and gravity only
+    b.vy = math.min(b.vy + config.gravity * 0.225 * dt, 520) -- (70% lighter than before, so it can fly)
+    local drag = math.max(0, 1 - 0.3 * dt)
+    b.vx, b.vy = b.vx * drag, b.vy * drag -- (the only place it loses speed)
+    e.wx, e.wy = e.wx + b.vx * dt, e.wy + b.vy * dt
+    e.ang = math.atan2(b.vy, b.vx)
+    local hx, hy = math.floor(e.wx), math.floor(e.wy)
+    if hardTerrain(world, hx - 2, hy - 2, 4, 4) then
+      -- Bedrock and masonry can't be dug: it glances off
+      e.wx, e.wy = e.wx - b.vx * dt, e.wy - b.vy * dt
+      b.vx, b.vy = -b.vx * 0.4, -b.vy * 0.4
+    elseif wormTouching(world, hx, hy) then
+      -- Hit the ground or a wall: it plunges in and can steer again
+      e.air = false
+      e.digged = 0
+      wormSound("worm_dig", 0.9)
+      for _ = 1, 6 do
+        effects.particle(e.wx, e.wy, (r() - 0.5) * 70, -r() * 60, 0.5, { 0.42, 0.36, 0.30 }, 300)
+      end
+    end
+  else
+    -- Burrowing: steer toward the hunter (or drift when it has lost him)
+    local target = math.atan2(py + player.body.vy * 0.25 - 3 - e.wy, px + player.body.vx * 0.25 - e.wx)
+    if e.state == "chase" and e.lungeT <= 0 and dist < 190 then
+      -- About to break the surface close to the hunter: a burst of speed, to leap at him
+      local ax, ay = math.floor(e.wx + math.cos(e.ang) * 8), math.floor(e.wy + math.sin(e.ang) * 8)
+      if not world:isSolid(ax, ay) and e.lungeCd <= 0 then
+        e.lungeT = 0.35
+      end
+    end
+    if e.state == "wander" then
+      e.wanderAng = e.wanderAng + (r() - 0.5) * 2 * dt
+      target = e.wanderAng
+    end
+    local speed = e.state == "wander" and def.speed * 0.5 or def.speed
+    if e.lungeT > 0 then
+      speed = def.lungeSpeed
+      e.lungeT = e.lungeT - dt
+      if e.lungeT <= 0 then
+        e.lungeCd = def.lungeCooldown
+      end
+    elseif e.state == "chase" and dist < def.lungeRange and e.lungeCd <= 0 and e.stun <= 0 then
+      e.lungeT = def.lungeTime
+      wormSound("worm_lunge", 0.9)
+    end
+    if e.stun > 0 then
+      speed = speed * 0.3
+    end
+    local turn = def.turn * (e.lungeT > 0 and 0.7 or 1)
+    local want = -angleDiff(e.ang, target)
+    e.ang = e.ang + math.max(-turn * dt, math.min(turn * dt, want)) + math.sin(e.phase * 0.35) * 1.1 * dt
+    local dx, dy = math.cos(e.ang), math.sin(e.ang)
+    local travel = speed * dt
+    local steps = math.max(1, math.ceil(travel / 1.5))
+    for _ = 1, steps do
+      local nx, ny = e.wx + dx * travel / steps, e.wy + dy * travel / steps
+      if hardTerrain(world, math.floor(nx) - 2, math.floor(ny) - 2, 4, 4) then
+        e.ang = e.ang + (r() < 0.5 and 1 or -1) * (1.2 + r() * 0.8)
+        break
+      end
+      e.wx, e.wy = nx, ny
+      e.digged = e.digged - travel / steps
+      if e.digged <= 0 then
+        e.digged = 3.2
+        destruction.dig(world, e.wx + dx * 3, e.wy + dy * 3, def.digRadius * (e.lungeT > 0 and 1.25 or 1), 40, dx, dy)
+        if r() < 0.5 then
+          effects.particle(e.wx - dx * 2, e.wy - dy * 2, -dx * 20 + (r() - 0.5) * 30, -dy * 20 - r() * 20, 0.4, { 0.40, 0.34, 0.28 }, 260)
+        end
+      end
+    end
+    b.vx, b.vy = dx * speed, dy * speed
+    if r() < dt * 1.2 then
+      wormSound("worm_dig", 0.5)
+    end
+    -- Broke through into open air: it flies out on the speed it had
+    if not wormTouching(world, math.floor(e.wx), math.floor(e.wy)) then
+      e.air = true
+      e.lungeT = 0
+      wormSound("worm_burst", 0.9)
+      for _ = 1, 8 do
+        effects.particle(e.wx, e.wy, (r() - 0.5) * 80, -r() * 60, 0.5, { 0.42, 0.36, 0.30 }, 300)
+      end
+    end
+  end
+
+  e.facing = b.vx >= 0 and 1 or -1
+  b.x, b.y = math.floor(e.wx - b.w / 2), math.floor(e.wy - b.h / 2)
+
+  -- The body follows the head, each segment held a fixed distance behind the
+  -- last (and drooping while it is in the air)
+  local lx, ly = e.wx, e.wy
+  for _, s in ipairs(e.segs) do
+    if e.air then
+      s[2] = s[2] + 140 * dt
+    end
+    local dx, dy = s[1] - lx, s[2] - ly
+    local d = math.sqrt(dx * dx + dy * dy)
+    if d > def.segGap then
+      s[1], s[2] = lx + dx / d * def.segGap, ly + dy / d * def.segGap
+    end
+    lx, ly = s[1], s[2]
+  end
+end
+
+-- Skeleton miner: shambles after the hunter, keeping its distance, and lobs
+-- sticks of lit dynamite (which bounce and go off a moment later, or at once
+-- if shot in the air)
+local function throwDynamite(e, px, py)
+  local def = e.def
+  local cx, cy = center(e)
+  local hx, hy = cx + e.facing * 4, cy - 6
+  local dx, dy = px - hx, py - hy
+  local T = math.max(0.45, math.min(1.0, math.abs(dx) / 170))
+  local g = def.throwGravity
+  sticks[#sticks + 1] = {
+    isStick = true,
+    isGlob = true, -- (to bullets a stick is a shootable projectile, like an acid glob)
+    x = hx,
+    y = hy,
+    vx = dx / T,
+    vy = (dy - 0.5 * g * T * T) / T,
+    grav = g,
+    fuse = def.fuse,
+    spin = 0,
+    mul = e.dmgMul * def.blast,
+  }
+  audio.play("worm_lunge", 0.5, 1.6)
+end
+
+local function updateMiner(e, dt, world, player, px, py)
+  local def, b = e.def, e.body
+  local collide = collider(e, world)
+  local cx, cy = center(e)
+  local dist = math.sqrt((px - cx) ^ 2 + (py - cy) ^ 2)
+  e.grounded = Body.isGrounded(b, collide) and b.vy >= 0
+  if e.state == "idle" and e.seesPlayer and dist < def.sight then
+    e.state = "chase"
+  elseif e.state == "chase" and dist > def.forget then
+    e.state = "idle"
+  end
+  e.throwT = math.max(0, (e.throwT or 0) - dt)
+
+  local want = 0
+  if e.stun > 0 then
+    want = nil
+    e.windT = nil
+  elseif e.state == "chase" then
+    local dir = px >= cx and 1 or -1
+    e.facing = dir
+    if e.windT then
+      want = 0
+      e.windT = e.windT - dt
+      if e.windT <= 0 then
+        e.windT = nil
+        e.throwT = 0.35
+        throwDynamite(e, px, py)
+      end
+    else
+      if dist > def.holdMax then
+        want = dir
+      elseif dist < def.holdMin then
+        want = -dir -- backs away to keep throwing range
+      end
+      if e.cooldown <= 0 and e.seesPlayer and dist < def.throwRange and e.grounded then
+        e.windT = def.windup
+        e.cooldown = def.throwCooldown + def.windup
+        audio.play("miner_light", 0.7)
+      end
+    end
+  else
+    e.timer = e.timer - dt
+    if e.timer <= 0 then
+      e.wander = love.math.random() < 0.5 and 0 or (love.math.random() < 0.5 and -1 or 1)
+      e.timer = 1 + love.math.random() * 2
+    end
+    want = e.wander or 0
+    if want ~= 0 then
+      e.facing = want
+    end
+  end
+
+  if want and e.grounded then
+    local speed = e.state == "chase" and def.speed or def.speed * 0.35
+    local target = want * speed
+    local step = 900 * dt
+    b.vx = b.vx < target and math.min(b.vx + step, target) or math.max(b.vx - step, target)
+  elseif e.grounded then
+    b.vx = b.vx * math.max(0, 1 - 8 * dt)
+  end
+  b.vy = math.min(b.vy + config.gravity * dt, 450)
+  local blocked, blocker = Body.moveX(b, collide, b.vx * dt, 4)
+  if blocked then
+    if blocker and want and want ~= 0 then
+      props.push(blocker, want * def.pushForce, 0)
+    end
+    if e.grounded and want and want ~= 0 then
+      if e.state == "chase" and want == e.facing then
+        b.vy = -def.jump
+      else
+        e.wander = -want
+      end
+    end
+    b.vx = 0
+  end
+  if Body.moveY(b, collide, b.vy * dt) then
+    b.vy = 0
+  end
+  if e.grounded and b.vy >= 0 then
+    Body.snapDown(b, collide, 4)
+  end
+  e.phase = e.phase + dt * (math.abs(b.vx) / 6 + 0.6)
+end
+
+-- Cave roller: a plated, grey pillbug. It crawls, then curls into a ball and
+-- rolls at the hunter, bouncing off the walls; curled or rolling, its armour
+-- takes most of the damage. Spent, it uncurls dizzy and soft.
+local function updateRoller(e, dt, world, player, px, py)
+  local def, b = e.def, e.body
+  local collide = collider(e, world)
+  local cx, cy = center(e)
+  local dist = math.sqrt((px - cx) ^ 2 + (py - cy) ^ 2)
+  e.grounded = Body.isGrounded(b, collide) and b.vy >= 0
+  e.armored = e.state == "curl" or e.state == "roll"
+  e.contactMul = e.state == "roll" and 1.3 or 0.4
+  e.armorHit = math.max(0, (e.armorHit or 0) - dt)
+
+  if e.state == "idle" and e.seesPlayer and dist < def.sight then
+    e.state = "chase"
+  elseif e.state == "chase" and dist > def.forget then
+    e.state = "idle"
+  end
+
+  local want = 0
+  if e.state == "chase" and e.stun <= 0 then
+    local dir = px >= cx and 1 or -1
+    e.facing = dir
+    want = dir
+    if e.grounded and e.cooldown <= 0 and e.seesPlayer and dist < def.rollRange then
+      e.state = "curl"
+      e.timer = def.curlTime
+      audio.play("roller_curl", 0.8)
+    end
+  elseif e.state == "curl" then
+    e.facing = px >= cx and 1 or -1
+    e.timer = e.timer - dt
+    e.spin = (e.spin or 0) + (math.sin(e.timer * 40) > 0 and 1 or -1) * dt * 3
+    if e.timer <= 0 then
+      e.state = "roll"
+      e.timer = def.rollTime
+      b.vx = e.facing * def.rollSpeed
+      b.vy = -80
+      e.grounded = false
+      audio.play("roller_roll", 0.8)
+    end
+  elseif e.state == "roll" then
+    e.timer = e.timer - dt
+    e.spin = (e.spin or 0) + e.facing * dt * 16
+    if e.grounded then
+      local target = e.facing * def.rollSpeed
+      b.vx = b.vx < target and math.min(b.vx + 700 * dt, target) or math.max(b.vx - 700 * dt, target)
+      if love.math.random() < dt * 14 then
+        effects.particle(cx - e.facing * 4, b.y + b.h - 1, -e.facing * 14, -10 - love.math.random() * 14, 0.4, { 0.42, 0.40, 0.40 }, 60)
+      end
+    end
+    if e.timer <= 0 then
+      e.state = "dizzy"
+      e.timer = def.dizzyTime
+      e.cooldown = def.rollCooldown
+    end
+  elseif e.state == "dizzy" then
+    e.timer = e.timer - dt
+    e.dazed = math.max(e.dazed or 0, e.timer)
+    want = nil
+    b.vx = b.vx * math.max(0, 1 - 6 * dt)
+    if e.timer <= 0 then
+      e.state = "chase"
+      e.dazed = 0
+      e.cooldown = def.rollCooldown + 1.2 -- a breather before it rolls again
+    end
+  elseif e.state == "idle" then
+    e.timer = e.timer - dt
+    if e.timer <= 0 then
+      e.wander = love.math.random() < 0.5 and 0 or (love.math.random() < 0.5 and -1 or 1)
+      e.timer = 1 + love.math.random() * 2
+    end
+    want = e.wander or 0
+    if want ~= 0 then
+      e.facing = want
+    end
+  elseif e.stun > 0 then
+    want = nil
+  end
+
+  if e.state ~= "roll" then
+    if want and e.grounded then
+      local target = want * (e.state == "chase" and def.speed or def.speed * 0.4)
+      local step = 700 * dt
+      b.vx = b.vx < target and math.min(b.vx + step, target) or math.max(b.vx - step, target)
+    elseif e.grounded then
+      b.vx = b.vx * math.max(0, 1 - 8 * dt)
+    end
+  end
+  b.vy = math.min(b.vy + config.gravity * dt, 450)
+
+  local blocked, blocker = Body.moveX(b, collide, b.vx * dt, e.state == "roll" and 2 or 3)
+  if blocked then
+    if blocker and e.state == "roll" then
+      props.damage(blocker, 8)
+      props.push(blocker, e.facing * 900, -200)
+    end
+    if e.state == "roll" then
+      -- Bounces off the wall, usually back toward the hunter
+      e.facing = (px >= cx and 1 or -1)
+      if love.math.random() < 0.35 then
+        e.facing = -e.facing
+      end
+      b.vx = e.facing * def.rollSpeed * 0.9
+      b.vy = -70
+      audio.play("clank", 0.35, 1.5)
+      for _ = 1, 4 do
+        effects.particle(cx, cy, (love.math.random() - 0.5) * 90, -love.math.random() * 50, 0.2, { 1, 0.9, 0.55 }, 200, true)
+      end
+    elseif e.grounded and want and want ~= 0 then
+      if e.state == "chase" then
+        b.vy = -def.jump
+      else
+        e.wander = -want
+      end
+      b.vx = 0
+    else
+      b.vx = 0
+    end
+  end
+  if Body.moveY(b, collide, b.vy * dt) then
+    b.vy = 0
+  end
+  if e.grounded and b.vy >= 0 and e.state ~= "roll" then
+    Body.snapDown(b, collide, 4)
+  end
+  e.phase = e.phase + dt * (math.abs(b.vx) / 5 + 0.8)
+end
+
 local UPDATE = {
+  worm = updateWorm,
+  miner = updateMiner,
+  roller = updateRoller,
   ghoul = updateGhoul,
   warden = updateGhoul,
   bat = updateBat,
@@ -1799,19 +2571,60 @@ function enemies.update(dt, world, player)
         propImpacts(e, dt)
         updateBurn(e, dt)
         updatePoison(e, dt)
+        updateStatusFx(e, dt)
         if not e.def.dummy then
           updateMotes(e, dt)
         end
         -- Touching the hunter hurts him
         local b = e.body
         if not player.dead and e.state ~= "sleep" and overlaps(b.x, b.y, b.w, b.h, pb.x, pb.y, pb.w, pb.h) then
-          if e.def.damage and player:hurt(math.floor(e.def.damage * e.dmgMul + 0.5), center(e)) and e.def.retreat then
+          if e.def.damage and player:hurt(math.floor(e.def.damage * e.dmgMul * (e.contactMul or 1) + 0.5), center(e)) and e.def.retreat then
             e.state = "retreat"
             e.timer = e.def.retreat
             e.attackCd = e.def.chargeCooldown
           end
         end
+        -- A worm's whole length hurts, not just its head
+        if e.segs and e.state ~= "sleep" and not player.dead then
+          for _, sg in ipairs(e.segs) do
+            if overlaps(sg[1] - 1, sg[2] - 1, 2, 2, pb.x, pb.y, pb.w, pb.h) then
+              player:hurt(math.floor(e.def.damage * e.def.bodyDamage * e.dmgMul + 0.5), sg[1], sg[2])
+              break
+            end
+          end
+        end
       end
+    end
+  end
+
+  -- Dynamite: arcs, bounces, and goes off when the fuse runs out (or when shot)
+  for i = #sticks, 1, -1 do
+    local s = sticks[i]
+    s.fuse = s.fuse - dt
+    s.vy = s.vy + s.grav * dt
+    s.spin = s.spin + dt * (s.vx > 0 and 9 or -9)
+    local steps = math.max(1, math.ceil(math.max(math.abs(s.vx), math.abs(s.vy)) * dt / 2))
+    for _ = 1, steps do
+      local nx = s.x + s.vx * dt / steps
+      if world:isSolid(math.floor(nx), math.floor(s.y)) then
+        s.vx = -s.vx * 0.4
+      else
+        s.x = nx
+      end
+      local ny = s.y + s.vy * dt / steps
+      if world:isSolid(math.floor(s.x), math.floor(ny)) then
+        s.vy = math.abs(s.vy) < 40 and 0 or -s.vy * 0.35
+        s.vx = s.vx * 0.7
+      else
+        s.y = ny
+      end
+    end
+    if love.math.random() < dt * 40 then
+      effects.particle(s.x, s.y - 4, (love.math.random() - 0.5) * 20, -10 - love.math.random() * 20, 0.25, { 1, 0.6, 0.2 }, 0, true)
+    end
+    if s.fuse <= 0 or s.dead then
+      table.remove(sticks, i)
+      require("src.bullets").blast(s.x, s.y, 1, s.mul)
     end
   end
 
@@ -2415,28 +3228,21 @@ local function scaled(fn)
   end
 end
 
--- The Queen's crown: five gold spikes along the top of the sac, the middle
--- one tallest, with a pale gem (glowing, see drawQueenGlow)
-local function drawQueenCrown(e)
-  local b = e.body
-  local k = b.w / 56
-  local cx, top = math.floor(b.x + b.w / 2), math.floor(b.y) + 2
-  local white = e.flash > 0
-  for i = -2, 2 do
-    local h = (11 - math.abs(i) * 3) * k
-    local x = cx + i * 9 * k
-    love.graphics.setColor(white and { 1, 1, 1 } or { 0.74, 0.64, 0.22 })
-    love.graphics.rectangle("fill", x - 2 * k, top - h * 0.5, 5 * k, h * 0.5 + 2)
-    love.graphics.setColor(white and { 1, 1, 1 } or { 0.90, 0.80, 0.34 })
-    love.graphics.rectangle("fill", x - k, top - h * 0.8, 3 * k, h * 0.4)
-    love.graphics.rectangle("fill", x, top - h, k, h * 0.3)
-  end
-  love.graphics.setColor(white and { 1, 1, 1 } or { 0.90, 0.80, 0.34 })
-  love.graphics.rectangle("fill", cx - 12 * k, top + 1, 25 * k, 3 * k)
-end
-
 local function drawQueenGlow(e)
   local b = e.body
+  if e.qs == "windup" and e.atk == "dash" and e.dashAng then
+    -- Where she will go: a dotted line that flickers faster once it locks
+    local lock = (e.qt or 0) < 0.3
+    local qx, qy = b.x + b.w / 2, b.y + b.h / 2
+    local t = love.timer.getTime()
+    for d = b.w * 0.6, 800, 7 do
+      local on = math.floor(t * (lock and 30 or 9) + d / 7) % 2 == 0
+      if on then
+        love.graphics.setColor(1, lock and 0.35 or 0.8, 0.2, lock and 0.9 or 0.55)
+        px(qx + math.cos(e.dashAng) * d, qy + math.sin(e.dashAng) * d, 2, 2)
+      end
+    end
+  end
   local k = b.w / 56
   local cx, top = math.floor(b.x + b.w / 2), math.floor(b.y) + 2
   love.graphics.setColor(1, 0.95, 0.5, 0.6 + 0.3 * math.sin(e.phase * 1.7))
@@ -2444,46 +3250,1010 @@ local function drawQueenGlow(e)
   love.graphics.setColor(1, 1, 0.85)
   love.graphics.rectangle("fill", cx, top - 2 * k, k, 2 * k)
   if e.novaWind then
-    -- Swelling up for the big burst
-    love.graphics.setColor(0.85, 0.95, 0.35, 0.35 + 0.3 * math.sin(love.timer.getTime() * 25))
-    love.graphics.rectangle("fill", b.x - 3, b.y - 3, b.w + 6, b.h + 6)
+    -- Swelling up for an attack: the whole sac glows, row by row, in its own outline
+    local pulse = 0.22 + 0.2 * math.sin(love.timer.getTime() * 25)
+    local W, H = b.w, b.h
+    local midx = b.x + W / 2
+    for row = 0, H - 1 do
+      local u = ((row + 0.5) / H - 0.46) / 0.54
+      local ww = math.floor(math.max(0.3, math.sqrt(math.max(0, 1 - u * u))) * W) + 4
+      love.graphics.setColor(0.85, 0.95, 0.35, pulse)
+      px(midx - ww / 2, b.y + row, ww, 1)
+    end
+  end
+end
+
+-- The tunnel worm: a ring-banded pink body that thins to a point, ending in a
+-- round blind head with a ring of teeth around its maw
+local WORM = {
+  skin = { 0.74, 0.52, 0.48 },
+  ring = { 0.56, 0.36, 0.36 },
+  top = { 0.88, 0.68, 0.62 },
+  head = { 0.62, 0.38, 0.36 },
+  maw = { 0.22, 0.07, 0.09 },
+  tooth = { 0.94, 0.90, 0.80 },
+}
+
+local function drawWorm(e)
+  if e.state == "sleep" or not e.segs then
+    return -- coiled out of sight in the rock
+  end
+  local white = e.flash > 0
+  local function col(c)
+    love.graphics.setColor(white and { 1, 1, 1 } or c)
+  end
+  local n = #e.segs
+  -- Tail to head, so each segment overlaps the one behind it: thin, tapering
+  -- to a single pixel at the tail
+  for i = n, 1, -1 do
+    local s = e.segs[i]
+    local k = 1 - (i - 1) / n -- 1 at the neck, 0 at the tail
+    local size = k > 0.5 and 3 or (k > 0.2 and 2 or 1)
+    local o = size / 2
+    col(i % 2 == 0 and WORM.ring or WORM.skin)
+    px(s[1] - o, s[2] - o, size, size)
+    if size == 3 and i % 2 == 1 then
+      col(WORM.top)
+      px(s[1] - o, s[2] - o, 2, 1)
+    end
+  end
+  -- The head: a small round knob with a pinprick maw ringed with teeth
+  local hx, hy = e.wx, e.wy
+  local fx, fy = math.cos(e.ang), math.sin(e.ang)
+  col(WORM.head)
+  px(hx - 2, hy - 2, 4, 4)
+  px(hx - 1, hy - 3, 2, 1)
+  px(hx - 1, hy + 2, 2, 1)
+  col(WORM.maw)
+  px(hx + fx * 1.6 - 0.5, hy + fy * 1.6 - 0.5)
+  col(WORM.tooth)
+  for k = 0, 3 do
+    local a = e.ang + (k - 1.5) * 0.9
+    px(hx + math.cos(a) * 2.6 - 0.5, hy + math.sin(a) * 2.6 - 0.5)
+  end
+end
+
+-- The skeleton miner: a bony figure in a rusted hard hat with a lamp, tattered
+-- rags and a pickaxe over one shoulder; the other hand lights and throws
+-- dynamite
+local MINER = {
+  bone = { 0.84, 0.82, 0.72 },
+  boneDark = { 0.58, 0.55, 0.48 },
+  hat = { 0.66, 0.50, 0.16 },
+  hatDark = { 0.44, 0.33, 0.10 },
+  rag = { 0.34, 0.27, 0.20 },
+  wood = { 0.45, 0.30, 0.16 },
+  iron = { 0.46, 0.48, 0.54 },
+  tnt = { 0.78, 0.16, 0.14 },
+}
+
+local function minerPose(e)
+  local wind = e.windT and (1 - e.windT / e.def.windup) or 0
+  local throw = (e.throwT or 0) / 0.35
+  return wind, throw
+end
+
+local function drawMiner(e)
+  local r, x, y = mirror(e, 10)
+  local white = e.flash > 0
+  local function col(c)
+    love.graphics.setColor(white and { 1, 1, 1 } or c)
+  end
+  local b = e.body
+  local moving = e.grounded and math.abs(b.vx) > 6
+  local t = e.phase
+  local wind, throw = minerPose(e)
+  local bob = moving and (math.abs(math.sin(t)) > 0.5 and 1 or 0) or 0
+  -- Legs
+  col(MINER.boneDark)
+  local sw = moving and math.floor(math.sin(t) * 2 + 0.5) or 0
+  r(3 + sw, 15, 1, 4)
+  r(6 - sw, 15, 1, 4)
+  r(2 + sw, 18, 2, 1)
+  r(6 - sw, 18, 2, 1)
+  -- Pelvis, spine, ribs under rags
+  col(MINER.bone)
+  r(3, 14 - bob, 4, 1)
+  r(4, 8 - bob, 2, 6)
+  col(MINER.boneDark)
+  r(3, 9 - bob, 4, 1)
+  r(3, 11 - bob, 4, 1)
+  col(MINER.rag)
+  r(2, 8 - bob, 2, 5)
+  r(2, 12 - bob, 1, 2)
+  -- Skull and jaw
+  col(MINER.bone)
+  r(3, 3 - bob, 5, 4)
+  r(4, 7 - bob, 3, 1)
+  col({ 0.10, 0.08, 0.08 })
+  r(6, 4 - bob, 1, 2)
+  r(4, 4 - bob, 1, 1)
+  -- Hard hat with its lamp
+  col(MINER.hatDark)
+  r(2, 2 - bob, 7, 1)
+  col(MINER.hat)
+  r(3, 0 - bob, 5, 2)
+  r(2, 1 - bob, 6, 1)
+  r(8, 1 - bob, 2, 2)
+  col(MINER.iron)
+  r(8, 1 - bob, 1, 1)
+  -- The pickaxe over the back shoulder
+  col(MINER.wood)
+  r(1, 5 - bob, 1, 7)
+  col(MINER.iron)
+  r(0, 4 - bob, 4, 1)
+  r(0, 5 - bob, 1, 1)
+  -- The throwing arm: down when idle, raised with a lit stick when winding up,
+  -- flung forward after
+  local ax, ay
+  if throw > 0 then
+    ax, ay = 8 + math.floor((1 - throw) * 1), 5
+  elseif wind > 0 then
+    ax, ay = 6, 1 - math.floor(wind * 2)
+  else
+    ax, ay = 7, 12 - bob
+  end
+  col(MINER.bone)
+  r(5, 9 - bob, 1, 1)
+  r(6, 9 - bob + math.floor((ay - 9 + bob) * 0.4), 1, 1)
+  r(ax, ay, 1, 2)
+  if wind > 0 and throw <= 0 then
+    col(MINER.tnt)
+    r(ax - 1, ay - 5, 3, 5)
+    col({ 0.14, 0.10, 0.08 })
+    r(ax, ay - 6, 1, 1)
+  end
+end
+
+-- The lamp on its hat, a dim amber glow in the eye socket, and the fuse of the
+-- stick it is about to throw
+local function drawMinerGlow(e)
+  local r = mirror(e, 10)
+  love.graphics.setColor(1, 0.86, 0.42)
+  r(8, 1, 1, 2)
+  love.graphics.setColor(1, 0.95, 0.7)
+  r(9, 1, 1, 1)
+  love.graphics.setColor(0.95, 0.62, 0.2, 0.9)
+  r(6, 4, 1, 1)
+  if e.windT then
+    local wind = 1 - e.windT / e.def.windup
+    local f = math.floor(love.timer.getTime() * 30) % 2
+    love.graphics.setColor(1, 0.7 + f * 0.2, 0.25)
+    r(6, -5 - math.floor(wind * 2) + 1, 1, 1 + f)
+  end
+end
+
+-- The cave roller: a plated pillbug that crawls on a fringe of legs, or a
+-- striped grey ball once curled
+local ROLLER = {
+  plate = { 0.50, 0.47, 0.44 },
+  dark = { 0.32, 0.30, 0.30 },
+  light = { 0.68, 0.65, 0.60 },
+  belly = { 0.74, 0.62, 0.54 },
+}
+
+local function drawRoller(e)
+  local b = e.body
+  local white = e.flash > 0
+  local function col(c)
+    love.graphics.setColor(white and { 1, 1, 1 } or c)
+  end
+  local x, y = math.floor(b.x), math.floor(b.y)
+  if e.armored then
+    -- A ball, its plates banding across it as it spins
+    local cx, cy = x + b.w / 2, y + b.h / 2
+    local rad = 5
+    local spin = e.spin or 0
+    local rows = { 4, 8, 10, 10, 10, 10, 10, 10, 8, 4 }
+    for i, w in ipairs(rows) do
+      col(i <= 3 and ROLLER.light or (i >= 8 and ROLLER.dark or ROLLER.plate))
+      px(cx - w / 2, y + i - 1, w, 1)
+    end
+    col(ROLLER.dark)
+    for k = 0, 3 do
+      local o = math.sin(spin + k * 1.1) * 4.2
+      local half = math.floor(math.sqrt(math.max(0, rad * rad - o * o)))
+      if math.cos(spin + k * 1.1) > 0 then
+        px(cx + o, cy - half, 1, half * 2)
+      end
+    end
+    if e.armorHit and e.armorHit > 0 then
+      love.graphics.setColor(1, 0.95, 0.7, e.armorHit / 0.12)
+      px(x + 2, y + 1, 3, 1)
+    end
+    return
+  end
+  local r = mirror(e, 12)
+  local t = e.phase
+  local wob = e.state == "dizzy" and math.floor(math.sin(t * 3) * 1.5 + 0.5) or 0
+  -- Legs, a rippling fringe underneath
+  col(ROLLER.belly)
+  for i = 0, 4 do
+    local lift = (math.sin(t * 2 + i * 1.3) > 0.4) and 1 or 0
+    r(2 + i * 2, 9 - lift, 1, 1 + lift)
+  end
+  -- Plates, front to back
+  for i = 0, 5 do
+    col(i % 2 == 0 and ROLLER.plate or ROLLER.dark)
+    local h = i == 0 and 4 or (i == 5 and 4 or 6)
+    r(1 + i * 2 + wob, 8 - h - (i == 0 and 0 or 1), 2, h + 1)
+  end
+  col(ROLLER.light)
+  r(3 + wob, 2, 6, 1)
+  -- Head and antennae
+  col(ROLLER.dark)
+  r(10, 4, 2, 4)
+  r(11, 2, 1, 2)
+  col({ 0.06, 0.05, 0.05 })
+  r(11, 5, 1, 1)
+end
+
+-- Sticks of dynamite in flight
+local function drawSticks()
+  for _, s in ipairs(sticks) do
+    love.graphics.push()
+    love.graphics.translate(math.floor(s.x), math.floor(s.y))
+    love.graphics.rotate(s.spin)
+    love.graphics.setColor(0.78, 0.16, 0.14)
+    love.graphics.rectangle("fill", -1, -3, 3, 6)
+    love.graphics.setColor(0.95, 0.38, 0.32)
+    love.graphics.rectangle("fill", -1, -3, 1, 6)
+    love.graphics.setColor(0.85, 0.78, 0.60)
+    love.graphics.rectangle("fill", -1, -1, 3, 1)
+    love.graphics.setColor(0.14, 0.10, 0.08)
+    love.graphics.rectangle("fill", 0, -4, 1, 1)
+    love.graphics.pop()
+  end
+end
+
+local function drawSticksGlow()
+  local t = love.timer.getTime()
+  for _, s in ipairs(sticks) do
+    local f = math.floor(t * 30 + s.x) % 2
+    local c, sn = math.cos(s.spin), math.sin(s.spin)
+    -- The fuse's spark rides at the tip of the stick
+    local fx, fy = s.x + sn * 4, s.y - c * 4
+    love.graphics.setColor(1, 0.7 + f * 0.2, 0.25)
+    love.graphics.rectangle("fill", math.floor(fx), math.floor(fy) - f, 1, 1 + f)
+    local urgency = 1 - math.min(1, s.fuse / 0.5)
+    if urgency > 0 then
+      love.graphics.setColor(1, 0.4, 0.2, urgency * 0.5)
+      love.graphics.rectangle("fill", math.floor(s.x) - 3, math.floor(s.y) - 3, 6, 6)
+    end
+  end
+end
+
+-- The bosses ---------------------------------------------------------------------
+-- Each is drawn at its own size, in detail: the bigger body has room for more
+-- than the small monster it grew from, so none of these is just that sprite
+-- blown up. They share the small monster's animation state (pose, wing beat,
+-- swell) but have their own art.
+
+local function noise2(a, b)
+  local n = math.sin(a * 127.1 + b * 311.7) * 43758.5453
+  return n - math.floor(n)
+end
+
+-- The Ashen Warden: a giant ghoul in a dented iron half-helm, a spiked
+-- pauldron, manacles and chains, a rope belt hung with a skull, ribs showing
+-- through its rags and a row of bone spikes down its back
+local WARDEN = {
+  skin = { 0.60, 0.62, 0.64 },
+  skinDark = { 0.38, 0.40, 0.44 },
+  skinLight = { 0.78, 0.80, 0.82 },
+  deep = { 0.24, 0.25, 0.29 },
+  rags = { 0.26, 0.27, 0.31 },
+  ragsDark = { 0.14, 0.15, 0.18 },
+  ragsLight = { 0.38, 0.39, 0.44 },
+  iron = { 0.38, 0.39, 0.45 },
+  ironLight = { 0.64, 0.65, 0.72 },
+  ironDark = { 0.19, 0.19, 0.24 },
+  rust = { 0.52, 0.30, 0.18 },
+  bone = { 0.86, 0.82, 0.68 },
+  boneDark = { 0.60, 0.56, 0.46 },
+  claw = { 0.90, 0.86, 0.68 },
+  eye = { 0.78, 0.95, 1.0 },
+}
+
+-- The ghoul's pose, worked out on a 12x19 body and doubled to the Warden's 24x38
+local function wardenPose(e)
+  local b = e.body
+  local proxy = setmetatable({ body = { x = 0, y = 0, w = 12, h = 19, vx = b.vx, vy = b.vy } }, { __index = e })
+  return ghoulPose(proxy)
+end
+
+local function drawWarden(e)
+  local b = e.body
+  local pose = wardenPose(e)
+  local f = pose.f
+  local white = e.flash > 0
+  local W = WARDEN
+  local function color(c)
+    love.graphics.setColor(white and { 1, 1, 1 } or c)
+  end
+  local ox, oy = b.x, b.y
+  local function P(p)
+    return ox + p[1] * 2, oy + p[2] * 2
+  end
+  local sx, sy = P(pose.shoulder)
+  local hx, hy = P(pose.head)
+  local pvx, pvy = P(pose.pelvis)
+  local reaching = pose.strike > 0.2
+  local open = math.max(pose.wind, pose.strike)
+  local t = e.phase
+
+  local function arm(hand, off, upperC, lowerC, front)
+    local hx2, hy2 = P(hand)
+    local ax, ay = sx + off, sy + 3
+    local ex, ey = (ax + hx2) / 2 - f, (ay + hy2) / 2 + 4 * (1 - pose.strike)
+    color(upperC)
+    thick(ax, ay, ex, ey, 5)
+    color(lowerC)
+    thick(ex, ey, hx2, hy2, 4)
+    if front then
+      color(W.skinLight)
+      limb(ax, ay - 2, ex, ey - 2)
+      limb(ex, ey - 1, hx2, hy2 - 1)
+    end
+    color(W.deep) -- scars across the forearm
+    px(ex + f, ey, 1, 2)
+    px((ex + hx2) / 2, (ey + hy2) / 2 - 1, 2, 1)
+    -- An iron manacle at the wrist, with a chain swinging from it
+    color(W.ironDark)
+    px(hx2 - 3, hy2 - 3, 6, 4)
+    color(W.iron)
+    px(hx2 - 3, hy2 - 3, 6, 2)
+    color(W.ironLight)
+    px(hx2 - 3, hy2 - 3, 6, 1)
+    for k = 1, 3 do
+      color(k % 2 == 0 and W.ironLight or W.iron)
+      px(hx2 - 1, hy2 + 1 + k * 2 + math.floor(math.sin(t + k) * 0.7), 2, 1)
+    end
+    -- The hand, and three long claws
+    color(front and W.skin or W.skinDark)
+    px(hx2 - 2, hy2 - 2, 5, 5)
+    local cd = reaching and f or -f
+    color(W.claw)
+    for k = -1, 1 do
+      limb(hx2 + cd * 2, hy2 + k * 2, hx2 + cd * 6, hy2 + k * 2 + k)
+    end
+  end
+
+  -- The back arm, then the legs
+  arm(pose.hands[2], -f * 2, W.skinDark, W.skinDark, false)
+  for i = 2, 1, -1 do
+    local fx, fy = P(pose.feet[i])
+    local c = i == 1 and W.skin or W.skinDark
+    local kx, ky = (pvx + fx) / 2 + f * 4, (pvy + fy) / 2 - 1
+    color(c)
+    thick(pvx, pvy + 2, kx, ky, 5)
+    thick(kx, ky, fx, fy - 2, 4)
+    if i == 1 then
+      color(W.skinLight)
+      limb(pvx + 1, pvy + 1, kx + 1, ky - 1)
+    end
+    color(W.ragsDark) -- a knee wrapped in rag
+    px(kx - 2, ky - 1, 5, 3)
+    color(W.ragsLight)
+    px(kx - 2, ky - 1, 5, 1)
+    color(c) -- a broad foot with claws
+    px(fx - 3, fy - 1, 7, 2)
+    color(W.skinDark)
+    px(fx - 3, fy, 7, 1)
+    color(W.claw)
+    px(fx + f * 4, fy - 1, 1, 1)
+    px(fx + f * 4, fy, 1, 1)
+  end
+
+  -- The torso: ragged cloth over the hunched mass, shaded front and back
+  color(W.rags)
+  thick(pvx, pvy, sx, sy + 2, 11)
+  color(W.ragsDark)
+  thick(pvx - f * 4, pvy, sx - f * 4, sy + 3, 3)
+  color(W.ragsLight)
+  thick(pvx + f * 3, pvy - 1, sx + f * 3, sy + 3, 1)
+  for k = 1, 7 do -- patches and stitching
+    local tt = noise2(k, 3)
+    local x = sx + (pvx - sx) * tt + (noise2(k, 9) - 0.5) * 8
+    local y = sy + (pvy - sy) * tt
+    color(noise2(k, 5) < 0.5 and W.ragsDark or W.ragsLight)
+    px(x, y, 2 + math.floor(noise2(k, 1) * 3), 2)
+  end
+  -- Ribs showing through a tear
+  local rx, ry = sx + (pvx - sx) * 0.45 + f * 2, sy + (pvy - sy) * 0.45
+  color(W.deep)
+  px(rx - 4, ry - 3, 8, 9)
+  color(W.bone)
+  for k = 0, 3 do
+    px(rx - 3, ry - 2 + k * 2, 6 - k, 1)
+  end
+  -- A rope belt and a skull hung from it
+  color(W.rust)
+  thick(pvx - 5, pvy + 1, pvx + 5, pvy + 1, 2)
+  color(W.bone)
+  px(pvx + f * 2, pvy + 3, 3, 3)
+  color(W.ragsDark)
+  px(pvx + f * 2, pvy + 4, 1, 1)
+  px(pvx + f * 2 + 2, pvy + 4, 1, 1)
+  -- A tattered hem
+  for k = -5, 5 do
+    color(k % 2 == 0 and W.rags or W.ragsDark)
+    px(pvx + k, pvy + 3, 1, 3 + ((k + math.floor(t * 0.5)) % 3))
+  end
+  -- A great bare hump of a back, with bone spikes down it
+  color(W.skin)
+  px(sx - f * 7 - 3, sy - 4, 9, 7)
+  color(W.skinLight)
+  px(sx - f * 7 - 3, sy - 4, 9, 2)
+  color(W.skinDark)
+  px(sx - f * 7 - 3, sy + 1, 9, 2)
+  for k = 0, 4 do
+    local tt = k / 4
+    local x = sx - f * 5 + (pvx - f * 5 - (sx - f * 5)) * tt
+    local y = sy - 3 + (pvy - 1 - (sy - 3)) * tt
+    color(W.boneDark)
+    px(x, y - 3, 2, 4)
+    color(W.bone)
+    px(x, y - 4, 1, 3)
+  end
+
+  -- The head: a heavy skull under a dented iron half-helm with a fin along the top
+  color(W.skin)
+  px(hx - 5, hy - 2, 11, 8)
+  color(W.skinLight)
+  px(hx - 5, hy - 2, 11, 1)
+  color(W.skinDark)
+  px(hx - 5, hy + 5, 11, 1)
+  color(W.ironDark)
+  px(hx - 6, hy - 4, 13, 3)
+  color(W.iron)
+  px(hx - 6, hy - 4, 13, 2)
+  color(W.ironLight)
+  px(hx - 5, hy - 4, 11, 1)
+  color(W.rust)
+  px(hx - 3, hy - 3, 2, 1)
+  px(hx + 2, hy - 3, 2, 1)
+  color(W.iron)
+  px(hx - 1, hy - 7, 3, 3)
+  color(W.ironLight)
+  px(hx, hy - 7, 1, 2)
+  color(W.ragsDark) -- the brow and the hollow sockets
+  px(hx - 5, hy, 11, 1)
+  local ex, ey = ghoulEyes(pose)
+  px(ox + ex * 2, oy + ey * 2 + 1, 4, 3)
+  color(W.skinDark)
+  px(hx - 5, hy + 3, 2, 2)
+  -- The jaw drops open when it attacks; tusks and teeth
+  local jx = ox + (pose.head[1] - 1 + (f > 0 and 1 or -1)) * 2
+  local drop = open > 0.3 and 2 or 0
+  color(W.ragsDark)
+  px(jx - 2, hy + 6, 6, drop)
+  color(W.skin)
+  px(jx - 3, hy + 6 + drop, 8, 2)
+  color(W.bone)
+  for k = 0, 3 do
+    px(jx - 2 + k * 2, hy + 5 + drop, 1, 2)
+  end
+  px(jx + (f > 0 and 5 or -4), hy + 4, 1, 4)
+
+  -- The front arm over the body, and the spiked iron pauldron on its shoulder
+  arm(pose.hands[1], 0, W.skin, W.skin, true)
+  color(W.ironDark)
+  px(sx - 3, sy - 2, 7, 5)
+  color(W.iron)
+  px(sx - 3, sy - 2, 7, 3)
+  color(W.ironLight)
+  px(sx - 3, sy - 2, 7, 1)
+  px(sx - 3, sy - 2, 1, 3)
+  color(W.rust)
+  px(sx + 1, sy + 1, 2, 1)
+  color(W.ironLight)
+  px(sx - 1, sy, 1, 1)
+  px(sx + 2, sy, 1, 1)
+  color(W.iron)
+  px(sx - 1, sy - 5, 3, 3)
+  color(W.ironLight)
+  px(sx, sy - 6, 1, 3)
+end
+
+local function drawWardenGlow(e)
+  local pose = wardenPose(e)
+  local b = e.body
+  local ex, ey = ghoulEyes(pose)
+  local glare = math.max(pose.wind, pose.strike)
+  love.graphics.setColor(WARDEN.eye[1], WARDEN.eye[2], WARDEN.eye[3], 0.75 + 0.25 * glare)
+  px(b.x + ex * 2 + (pose.f > 0 and 1 or 0), b.y + ey * 2 + 2, glare > 0.3 and 3 or 2, 2)
+end
+
+-- The Mire Matron: a giant toad with a crest of bone spines down her back,
+-- purple warts, a pulsing throat, a ridged brow over great golden eyes,
+-- webbed feet, and a mouth of small teeth
+local MATRON = {
+  skin = { 0.26, 0.42, 0.32 },
+  dark = { 0.15, 0.27, 0.23 },
+  light = { 0.40, 0.58, 0.40 },
+  belly = { 0.64, 0.70, 0.46 },
+  bellyDark = { 0.50, 0.56, 0.36 },
+  wart = { 0.46, 0.32, 0.50 },
+  wartLight = { 0.64, 0.48, 0.68 },
+  bone = { 0.86, 0.82, 0.66 },
+  mouth = { 0.10, 0.06, 0.08 },
+  eye = { 1, 0.85, 0.3 },
+}
+
+local WART_SPOTS = { { 6, 6 }, { 9, 5 }, { 12, 7 }, { 8, 9 }, { 5, 9 }, { 13, 10 } }
+
+local function drawMatron(e)
+  local r = mirror(e, 24)
+  local white = e.flash > 0
+  local M = MATRON
+  local function col(c)
+    love.graphics.setColor(white and { 1, 1, 1 } or c)
+  end
+  local air = not e.grounded
+  local sq = e.windT and 2 or 0
+  local t = e.phase
+  local breath = math.floor(math.sin(t * 2) * 0.6 + 0.6)
+  -- Hind legs: stretched out behind in a leap, folded under her otherwise
+  if air then
+    col(M.dark)
+    r(3, 9, 6, 4)
+    r(-3, 12, 7, 2)
+    col(M.skin)
+    r(-7, 12, 5, 2)
+    col(M.dark)
+    r(-9, 11, 1, 1)
+    r(-9, 13, 1, 1)
+    r(-8, 12, 1, 1)
+    col(M.light)
+    r(3, 9, 5, 1)
+    -- Front legs reaching out ahead
+    col(M.dark)
+    r(17, 12, 6, 2)
+    col(M.skin)
+    r(22, 11, 3, 3)
+  else
+    col(M.dark)
+    r(2, 8 + sq, 9, 8 - sq)
+    r(3, 14, 11, 3)
+    col(M.skin)
+    r(2, 8 + sq, 8, 3)
+    col(M.light)
+    r(3, 8 + sq, 6, 1)
+    col(M.skin)
+    r(11, 15, 8, 2)
+    col(M.dark)
+    r(18, 15, 3, 2)
+    r(18, 17, 1, 1)
+    r(20, 17, 1, 1) -- the webbed toes
+    col(M.dark)
+    r(14, 11 + sq, 3, 6 - sq)
+    col(M.skin)
+    r(14, 11 + sq, 2, 5 - sq)
+    r(14, 16, 6, 1)
+  end
+  -- The body, belly and crest of spines
+  col(M.skin)
+  r(4, 5 + sq, 13, 9 - sq)
+  r(6, 4 + sq, 9, 2)
+  col(M.light)
+  r(6, 4 + sq, 8, 1)
+  r(4, 6 + sq, 1, 4)
+  col(M.dark)
+  r(4, 11, 13, 3 - sq)
+  col(M.belly)
+  r(6, 12, 10, 3 - sq)
+  col(M.bellyDark)
+  r(7, 13, 8, 1)
+  for k = 0, 4 do
+    col(M.bone)
+    r(6 + k * 2, 2 + sq + (k % 2), 1, 3)
+    col(M.dark)
+    r(7 + k * 2, 3 + sq + (k % 2), 1, 2)
+  end
+  for _, w in ipairs(WART_SPOTS) do
+    col(M.wart)
+    r(w[1], w[2] + sq, 2, 2)
+    col(M.wartLight)
+    r(w[1], w[2] + sq, 1, 1)
+  end
+  col(M.dark) -- mottling
+  r(10, 8 + sq, 2, 1)
+  r(7, 11, 1, 1)
+  r(14, 8 + sq, 1, 1)
+  -- The head: ridged brow, bulging eyes, a wide mouth of small teeth, a throat sac
+  col(M.skin)
+  r(14, 3 + sq, 10, 9 - sq)
+  r(22, 6 + sq, 3, 5 - sq)
+  col(M.light)
+  r(15, 3 + sq, 8, 1)
+  col(M.dark)
+  r(15, 2 + sq, 8, 2) -- brow
+  col(M.skin)
+  r(16, 0 + sq, 5, 4)
+  col(M.dark)
+  r(16, 0 + sq, 5, 1)
+  r(16, 3 + sq, 5, 1)
+  col(M.bone)
+  r(21, 1 + sq, 1, 2)
+  r(23, 2 + sq, 1, 1)
+  col(M.mouth)
+  r(15, 9 + sq, 10, 1)
+  col(M.bone)
+  for k = 0, 3 do
+    r(17 + k * 2, 10 + sq, 1, 1)
+  end
+  col(M.belly)
+  r(15, 11 + sq, 7, 2 + breath)
+  col(M.bellyDark)
+  r(16, 12 + sq, 5, 1)
+  col(M.dark)
+  r(24, 6 + sq, 1, 1) -- a nostril
+end
+
+local function drawMatronGlow(e)
+  local r = mirror(e, 24)
+  local sq = e.windT and 2 or 0
+  love.graphics.setColor(MATRON.eye[1], MATRON.eye[2], MATRON.eye[3], 0.9)
+  r(17, 1 + sq, 3, 2)
+  love.graphics.setColor(1, 1, 0.8)
+  r(18, 1 + sq, 1, 1)
+end
+
+-- The Dread Bat: shaggy fur, a pig-like snout full of fangs, ears with pink
+-- insides, and wings of dark membrane stretched over four finger bones, with
+-- veins and ragged edges. It hangs from the ceiling wrapped in its wings when
+-- asleep, spreads wide and shakes while it locks on, and sweeps back to dive.
+local DREAD = {
+  fur = { 0.20, 0.15, 0.20 },
+  furLight = { 0.34, 0.26, 0.34 },
+  furDark = { 0.11, 0.08, 0.12 },
+  membrane = { 0.22, 0.14, 0.21 },
+  membraneLight = { 0.34, 0.22, 0.32 },
+  bone = { 0.12, 0.09, 0.13 },
+  vein = { 0.42, 0.14, 0.20 },
+  ear = { 0.55, 0.30, 0.38 },
+  fang = { 0.94, 0.92, 0.84 },
+}
+
+local function drawDreadBat(e)
+  local b = e.body
+  local D = DREAD
+  local white = e.flash > 0
+  local function color(c)
+    love.graphics.setColor(white and { 1, 1, 1 } or c)
+  end
+  local x, y = b.x, b.y
+  local mid = x + b.w / 2
+  if e.state == "sleep" then
+    -- Hanging upside down from its feet, the wings wrapped round like a cloak
+    local top = y + 1
+    local rows = { 6, 10, 13, 15, 16, 16, 16, 15, 14, 12, 10, 8, 5, 3 }
+    for i, w in ipairs(rows) do
+      color(i <= 3 and D.membraneLight or (i >= 10 and D.furDark or D.membrane))
+      px(mid - w / 2, top + 2 + i, w, 1)
+    end
+    color(D.bone)
+    for k = -3, 3 do
+      limb(mid + k * 2, top + 4, mid + k * 1.6, top + 14)
+    end
+    color(D.fur)
+    px(mid - 3, top, 2, 4)
+    px(mid + 1, top, 2, 4)
+    color(D.furLight)
+    px(mid - 4, top, 1, 1)
+    px(mid + 3, top, 1, 1)
+    color(D.fur) -- the head, tucked at the bottom, eyes closed
+    px(mid - 3, top + 16, 6, 3)
+    px(mid - 4, top + 17, 1, 3)
+    px(mid + 3, top + 17, 1, 3)
+    color(D.furDark)
+    px(mid - 2, top + 17, 2, 1)
+    px(mid + 1, top + 17, 2, 1)
+    return
+  end
+  local lock = e.state == "lock"
+  local dive = e.state == "charge"
+  local shake = lock and (math.sin(love.timer.getTime() * 70) * 1.2) or 0
+  local flap = math.sin(e.phase)
+  local cx, cy = mid + shake, y + 10.5
+  for side = -1, 1, 2 do
+    local sh = { cx + side * 3, cy - 2 }
+    local el, wr, p1, p2, p3
+    if dive then
+      el, wr = { cx + side * 6, cy + 1 }, { cx + side * 7, cy + 9 }
+      p1, p2, p3 = { cx + side * 5, cy + 13 }, { cx + side * 3, cy + 12 }, { cx + side * 2, cy + 9 }
+    elseif lock then
+      el, wr = { cx + side * 10, cy - 3 + flap * 0.8 }, { cx + side * 22, cy - 1 + flap * 1.5 }
+      p1, p2, p3 = { cx + side * 19, cy + 8 + flap }, { cx + side * 12, cy + 9 }, { cx + side * 6, cy + 8 }
+    else
+      el, wr = { cx + side * 9, cy - 4 - flap * 5 }, { cx + side * 20, cy + 1 + flap * 9 }
+      p1, p2, p3 = { cx + side * 16, cy + 9 + flap * 4 }, { cx + side * 10, cy + 10 + flap * 2 }, { cx + side * 5, cy + 8 }
+    end
+    -- The membrane, in panels between the fingers, lighter near the body
+    color(D.membrane)
+    love.graphics.polygon("fill", sh[1], sh[2], el[1], el[2], wr[1], wr[2])
+    love.graphics.polygon("fill", sh[1], sh[2], wr[1], wr[2], p1[1], p1[2])
+    love.graphics.polygon("fill", sh[1], sh[2], p1[1], p1[2], p2[1], p2[2])
+    love.graphics.polygon("fill", sh[1], sh[2], p2[1], p2[2], p3[1], p3[2])
+    color(D.membraneLight)
+    love.graphics.polygon("fill", sh[1], sh[2], p2[1], p2[2], p3[1], p3[2])
+    -- Veins in the membrane
+    color(D.vein)
+    limb((el[1] + wr[1]) / 2, (el[2] + wr[2]) / 2 + 1, (p1[1] + p2[1]) / 2, (p1[2] + p2[2]) / 2 - 2)
+    limb((p2[1] + sh[1]) / 2, (p2[2] + sh[2]) / 2, p2[1], p2[2] - 2)
+    -- The arm and the finger bones
+    color(D.bone)
+    thick(sh[1], sh[2], el[1], el[2], 2)
+    thick(el[1], el[2], wr[1], wr[2], 2)
+    limb(wr[1], wr[2], p1[1], p1[2])
+    limb(wr[1], wr[2], p2[1], p2[2])
+    limb(el[1], el[2], p3[1], p3[2])
+    color(D.fang) -- the claw at the wrist
+    px(wr[1] + side, wr[2] - 2, 1, 2)
+    color(D.furDark) -- ragged notches in the trailing edge
+    px(p1[1] - side * 2, p1[2] - 1, 1, 2)
+    px(p2[1] + side, p2[2] - 1, 1, 2)
+  end
+  -- The body: shaggy fur, a lighter chest, small clawed feet
+  local body = { 3, 6, 8, 9, 10, 10, 9, 8, 6, 4 }
+  for i, w in ipairs(body) do
+    color(i <= 2 and D.furLight or (i >= 8 and D.furDark or D.fur))
+    px(cx - w / 2, cy - 4 + i, w, 1)
+  end
+  color(D.furLight)
+  px(cx - 2, cy - 1, 4, 5)
+  color(D.fur)
+  px(cx - 1, cy, 1, 1)
+  px(cx + 1, cy + 2, 1, 1)
+  color(D.fang)
+  px(cx - 2, cy + 6, 1, 2)
+  px(cx + 1, cy + 6, 1, 2)
+  -- The head: broad skull, big ears with pink insides, a snout and fangs
+  local head = { 4, 7, 8, 8, 6 }
+  for i, w in ipairs(head) do
+    color(i == 1 and D.furLight or D.fur)
+    px(cx - w / 2, cy - 11 + i, w, 1)
+  end
+  color(D.fur)
+  px(cx - 5, cy - 14, 3, 4)
+  px(cx + 2, cy - 14, 3, 4)
+  color(D.ear)
+  px(cx - 4, cy - 13, 1, 3)
+  px(cx + 3, cy - 13, 1, 3)
+  color(D.furDark)
+  px(cx - 2, cy - 7, 4, 2) -- the snout
+  if lock or dive then
+    color({ 0.55, 0.08, 0.1 })
+    px(cx - 2, cy - 5, 4, 2)
+  end
+  color(D.fang)
+  px(cx - 2, cy - 5, 1, 2)
+  px(cx + 1, cy - 5, 1, 2)
+end
+
+local function drawDreadBatGlow(e)
+  local b = e.body
+  if e.state == "sleep" then
+    return
+  end
+  local mid = b.x + b.w / 2
+  local cy = b.y + 10.5
+  local angry = e.state == "lock" or e.state == "charge"
+  if angry then
+    mid = mid + (e.state == "lock" and math.sin(love.timer.getTime() * 70) * 1.2 or 0)
+    love.graphics.setColor(1, 0.15, 0.1)
+    px(mid - 3, cy - 9, 3, 2)
+    px(mid + 1, cy - 9, 3, 2)
+  else
+    love.graphics.setColor(1, 0.35, 0.25)
+    px(mid - 3, cy - 9, 2, 1)
+    px(mid + 1, cy - 9, 2, 1)
+  end
+end
+
+-- The gas bag, for the Behemoth and the Sulfur Queen (and her remnants): a
+-- big veined sac, mottled and pustuled, with pores along its belly, a slack
+-- toothed mouth and a fringe of swaying tendrils. Everything is laid out by
+-- the body's size, so the smaller remnants keep the same look. The glowing
+-- core is drawn after the lighting.
+local SAC = {
+  base = { 0.58, 0.62, 0.26 },
+  light = { 0.76, 0.80, 0.40 },
+  dark = { 0.44, 0.48, 0.20 },
+  deep = { 0.30, 0.34, 0.14 },
+  vein = { 0.34, 0.38, 0.14 },
+  pale = { 0.84, 0.88, 0.54 },
+  mouth = { 0.18, 0.10, 0.10 },
+}
+
+local function sacWidth(t)
+  -- A round bag, a little narrower at the top and tapering at the foot
+  local u = (t - 0.46) / 0.54
+  return math.max(0.3, math.sqrt(math.max(0, 1 - u * u)))
+end
+
+local function drawSac(e)
+  local b = e.body
+  local W, H = b.w, b.h
+  local x0, y0 = math.floor(b.x), math.floor(b.y)
+  local white = e.flash > 0
+  local function col(c)
+    love.graphics.setColor(white and { 1, 1, 1 } or c)
+  end
+  local sd = e.detail
+  if not sd then
+    sd = love.math.random(1, 1000)
+    e.detail = sd
+  end
+  local swell = (e.puffT and e.puffT < 0.25) and math.max(1, W / 14) or 0
+  local cx = x0 + W / 2
+  local rim = math.max(1, math.floor(W / 24))
+  for row = 0, H - 1 do
+    local t = (row + 0.5) / H
+    local ww = math.floor(sacWidth(t) * W + swell)
+    local xs = math.floor(cx - ww / 2)
+    col(t < 0.2 and SAC.light or (t > 0.85 and SAC.deep or (t > 0.62 and SAC.dark or SAC.base)))
+    px(xs, y0 + row, ww, 1)
+    if t > 0.08 then
+      col(SAC.light)
+      px(xs, y0 + row, rim, 1)
+    end
+    col(SAC.deep)
+    px(xs + ww - rim, y0 + row, rim, 1)
+  end
+  -- Mottling
+  for k = 1, math.floor(W * H / 55) do
+    local py = math.floor(noise2(k + 17, sd) * H)
+    local half = sacWidth((py + 0.5) / H) * W / 2 - 2
+    col(noise2(k, sd + 3) < 0.55 and SAC.dark or SAC.pale)
+    px(cx + (noise2(k, sd) - 0.5) * 2 * half, y0 + py, 1 + math.floor(noise2(k, 5) * 2), 1)
+  end
+  -- Veins running out from the core, branching as they go
+  local coreY = y0 + H * 0.45
+  for v = 1, 8 do
+    local a = (v / 8) * 6.283 + noise2(v, sd) * 0.8
+    local x, y = cx, coreY
+    col(SAC.vein)
+    for s = 1, math.floor(W * (0.26 + 0.12 * noise2(v, 2))) do
+      a = a + (noise2(v * 31 + s, sd) - 0.5) * 0.7
+      x, y = x + math.cos(a), y + math.sin(a)
+      px(x, y)
+      if s % 6 == 0 then
+        for q = 1, 3 do
+          px(x + math.cos(a + 1) * q, y + math.sin(a + 1) * q)
+        end
+      end
+    end
+  end
+  -- Pustules
+  for k = 1, math.max(2, math.floor(W / 11)) do
+    local py = math.floor((0.15 + noise2(k, sd + 7) * 0.6) * H)
+    local half = sacWidth((py + 0.5) / H) * W / 2 - 3
+    local x = cx + (noise2(k + 5, sd) - 0.5) * 2 * half
+    col(SAC.pale)
+    px(x, y0 + py, 2, 2)
+    col(SAC.dark)
+    px(x, y0 + py + 2, 2, 1)
+  end
+  -- The slack, toothed mouth and the pores beneath it
+  local my = y0 + math.floor(H * 0.72)
+  local mw = math.max(4, math.floor(W * 0.3))
+  col(SAC.dark)
+  px(cx - mw / 2 - 1, my - 1, mw + 2, 1)
+  col(SAC.mouth)
+  px(cx - mw / 2, my, mw, math.max(2, math.floor(H / 10)))
+  col(SAC.pale)
+  for k = 0, math.floor(mw / 3) do
+    px(cx - mw / 2 + 1 + k * 3, my, 1, 1)
+  end
+  col(SAC.deep)
+  for k = 1, 5 do
+    px(cx + (k - 3) * W / 8, y0 + math.floor(H * 0.86), 1, 1)
+  end
+  -- Tendrils hanging from the underside
+  local n = math.max(3, math.floor(W / 5))
+  local len = math.floor(H * 0.2)
+  local thickness = W > 40 and 2 or 1
+  for i = 0, n - 1 do
+    local tx = cx - W * 0.32 + i * (W * 0.64 / (n - 1))
+    for s = 0, len do
+      local sway = math.sin(e.phase * 1.5 + i * 2 + s * 0.25) * (1 + s * 0.12)
+      col(s > len - 2 and SAC.pale or SAC.deep)
+      px(tx + sway, y0 + H - 2 + s, thickness, 1)
+    end
+  end
+end
+
+local function drawSacGlow(e)
+  local b = e.body
+  local W, H = b.w, b.h
+  local cx, cy = b.x + W / 2, b.y + H * 0.45
+  local pulse = 0.55 + 0.25 * math.sin(e.phase * 1.7)
+  love.graphics.setColor(0.8, 0.95, 0.3, 0.3 * pulse)
+  px(cx - W * 0.17, cy - W * 0.14, W * 0.34, W * 0.28)
+  love.graphics.setColor(0.8, 0.95, 0.3, pulse)
+  px(cx - W * 0.1, cy - W * 0.08, W * 0.2, W * 0.16)
+  love.graphics.setColor(1, 0.92, 0.35)
+  px(cx - W * 0.04, cy - W * 0.03, math.max(2, W * 0.08), math.max(2, W * 0.06))
+end
+
+-- The Queen's crown: a gold band studded with gems under five faceted spikes,
+-- the middle one tallest, with a pale gem set in the middle (it glows, see drawQueenGlow)
+local function drawQueenCrown(e)
+  local b = e.body
+  local k = b.w / 56
+  local cx, top = math.floor(b.x + b.w / 2), math.floor(b.y) + 2
+  local white = e.flash > 0
+  local function col(c)
+    love.graphics.setColor(white and { 1, 1, 1 } or c)
+  end
+  for i = -2, 2 do
+    local h = (11 - math.abs(i) * 3) * k
+    local x = cx + i * 9 * k
+    col({ 0.62, 0.52, 0.16 })
+    px(x - 2 * k, top - h * 0.5, 5 * k, h * 0.5 + 2)
+    col({ 0.90, 0.80, 0.34 })
+    px(x - 2 * k, top - h * 0.7, 2 * k, h * 0.7 + 2) -- the lit facet
+    px(x, top - h, math.max(1, k), h * 0.35)
+    col({ 0.46, 0.38, 0.10 })
+    px(x + k, top - h * 0.6, 2 * k, h * 0.6 + 2) -- the shadowed facet
+    col({ 1, 0.95, 0.6 })
+    px(x - 2 * k, top - h * 0.7, math.max(1, k), math.max(1, k))
+  end
+  -- The band, with a stud for every spike and a stud between
+  col({ 0.78, 0.66, 0.24 })
+  px(cx - 13 * k, top + 1, 27 * k, 3 * k)
+  col({ 0.96, 0.86, 0.40 })
+  px(cx - 13 * k, top + 1, 27 * k, math.max(1, k))
+  col({ 0.50, 0.40, 0.12 })
+  px(cx - 13 * k, top + 1 + 2 * k, 27 * k, math.max(1, k))
+  for i = -3, 3 do
+    col(i % 2 == 0 and { 0.80, 0.14, 0.22 } or { 0.45, 0.85, 0.95 })
+    px(cx + i * 4.5 * k - k / 2, top + 1 + k, math.max(1, k), math.max(1, k))
   end
 end
 
 local DRAW = {
+  worm = drawWorm,
+  miner = drawMiner,
+  roller = drawRoller,
   ghoul = drawGhoul,
-  warden = scaled(drawGhoul),
+  warden = drawWarden,
   bat = drawBat,
   swarmbat = drawBat,
-  dreadbat = scaled(drawBat),
+  dreadbat = drawDreadBat,
   queen = function(e)
-    scaled(drawBloater)(e)
+    drawSac(e)
     drawQueenCrown(e)
   end,
   spitter = drawSpitter,
   dummy = drawDummy,
   hopper = drawHopper,
-  matron = scaled(drawHopper),
+  matron = drawMatron,
   bloater = drawBloater,
-  behemoth = scaled(drawBloater),
+  behemoth = drawSac,
   wisp = function() end,
 }
 local GLOW = {
+  worm = function() end,
+  miner = drawMinerGlow,
+  roller = function() end,
   ghoul = drawGhoulEyes,
-  warden = scaled(drawGhoulEyes),
+  warden = drawWardenGlow,
   bat = drawBatEyes,
   swarmbat = drawBatEyes,
-  dreadbat = scaled(drawBatEyes),
+  dreadbat = drawDreadBatGlow,
   queen = function(e)
-    scaled(drawBloaterGlow)(e)
+    drawSacGlow(e)
     drawQueenGlow(e)
   end,
   spitter = drawSpitterGlow,
   dummy = function() end,
   hopper = drawHopperEyes,
-  matron = scaled(drawHopperEyes),
+  matron = drawMatronGlow,
   bloater = drawBloaterGlow,
-  behemoth = scaled(drawBloaterGlow),
+  behemoth = drawSacGlow,
   wisp = drawWispGlow,
 }
 
@@ -2497,7 +4267,8 @@ end
 
 local function onScreen(e, view)
   local b = e.body
-  return b.x + b.w > view.x - 8 and b.x < view.x + view.w + 8 and b.y + b.h > view.y - 8 and b.y < view.y + view.h + 8
+  local m = e.segs and 80 or 8 -- (a worm's tail trails far behind its head)
+  return b.x + b.w > view.x - m and b.x < view.x + view.w + m and b.y + b.h > view.y - m and b.y < view.y + view.h + m
 end
 
 -- view: { x, y, w, h } in world pixels
@@ -2510,28 +4281,36 @@ function enemies.draw(view)
       if not e.def.dummy then
         drawAura(e)
       end
+      -- Status tints: frost, venom, acid, fire and shock wash over the sprite's
+      -- own pixels (never a box round it); a hit flash stays plain white
+      local t = love.timer.getTime()
+      local tr, tg, tb, amount
+      if e.flash <= 0 then
+        tr, tg, tb, amount = statusTint(e, t)
+      end
+      local shader = amount and getTintShader()
+      if shader then
+        love.graphics.setShader(shader)
+        shader:send("tint", { tr, tg, tb })
+        shader:send("amount", amount)
+      end
       DRAW[e.kind](e)
-      -- Status tints: frost, venom and acid wash over the sprite
-      local b = e.body
-      if e.slow and e.slow > 0 then
-        love.graphics.setColor(0.55, 0.85, 1, 0.35)
-        love.graphics.rectangle("fill", math.floor(b.x), math.floor(b.y), b.w, b.h)
+      if shader then
+        love.graphics.setShader()
       end
-      if e.poisoned then
-        love.graphics.setColor(0.4, 0.9, 0.3, 0.25)
-        love.graphics.rectangle("fill", math.floor(b.x), math.floor(b.y), b.w, b.h)
-      end
-      if e.acid and e.acid > 0 then
-        love.graphics.setColor(0.8, 1, 0.2, 0.25)
-        love.graphics.rectangle("fill", math.floor(b.x), math.floor(b.y), b.w, b.h)
-      end
+      drawDazed(e, t)
       love.graphics.pop()
     end
   end
+  drawSticks()
 end
+
+-- (for the art tests: the drawing functions by kind)
+enemies.DRAW, enemies.GLOW = DRAW, GLOW
 
 -- After the lighting: eyes, glowing mouths and acid globs
 function enemies.drawEmissive(view)
+  drawSticksGlow()
   for _, e in ipairs(list) do
     if onScreen(e, view) then
       love.graphics.push()
@@ -2550,6 +4329,9 @@ end
 
 -- Globs and spitters' mouths give off a faint sickly light
 function enemies.addLights(lighting, view)
+  for _, s in ipairs(sticks) do
+    lighting.add(s.x, s.y, 36, 1, 0.55, 0.25, 0.6)
+  end
   for _, g in ipairs(globs) do
     lighting.add(g.x, g.y, 26, 0.5, 1, 0.35, 0.7)
   end
@@ -2562,6 +4344,8 @@ function enemies.addLights(lighting, view)
       end
       if e.kind == "spitter" then
         lighting.add(cx, cy + 4, e.windup and 30 or 16, 0.5, 1, 0.35, 0.5)
+      elseif e.kind == "miner" then
+        lighting.add(cx + e.facing * 4, cy - 6, 64, 1, 0.84, 0.45, e.windT and 0.6 or 0.4) -- the hat lamp
       elseif e.kind == "wisp" then
         lighting.add(cx, cy, 46, 1, 0.6, 0.25, 0.7)
       elseif e.kind == "dreadbat" then

@@ -104,6 +104,11 @@ function testroom.populate(world)
     end
   end
   onGround("crate", 718, 2)
+  -- The old mine's TNT barrels (shoot one: they set each other off) and an ore cart
+  onGround("tntBarrel", 224, 0, 464)
+  onGround("tntBarrel", 241, 0, 464)
+  onGround("tntBarrel", 232, 1, 464)
+  onGround("minecart", 84, 0, 464)
   -- Heavy iron crates: one on the plateau, one on the ledge
   onGround("ironCrate", 456)
   onGround("ironCrate", 864)
@@ -124,6 +129,11 @@ function testroom.populate(world)
   enemies.spawn("ghoul", 760, world:findGround(760, BORDER + 160))
   enemies.spawn("bat", 880, 391)
   enemies.spawn("spitter", 960, 391)
+  -- The deeper monsters, near the start so they are easy to try: a skeleton
+  -- miner, a cave roller, and a worm coiled in the dirt under the floor
+  enemies.spawn("miner", 560, world:findGround(560, BORDER + 160))
+  enemies.spawn("roller", 672, world:findGround(640, BORDER + 160))
+  enemies.spawn("worm", 880, 510)
   -- A DPS dummy, like the one in every shop
   enemies.spawn("dummy", 290, world:findGround(290, BORDER + 160))
 end

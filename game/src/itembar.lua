@@ -6,6 +6,7 @@
 --
 -- Everything is drawn at full window resolution; u = one game pixel.
 local gunInfo = require("src.gunInfo")
+local gunhud = require("src.gunhud")
 local inventory = require("src.inventory")
 local itemIcons = require("src.icons")
 local items = require("src.items")
@@ -184,7 +185,12 @@ end
 -- Draws a weapon icon or item badge centred in a box
 local function drawThing(thing, x, y, size, u, alpha)
   alpha = alpha or 1
-  if isWeapon(thing) then
+  if isWeapon(thing) and gunhud.supports(thing) then
+    -- Revolver, double-barrel and AK have drawn models with their own reload animations
+    local w, h = gunhud.size(thing)
+    local q = math.max(1, math.floor(math.min(size / w, size / h)))
+    gunhud.drawModel(thing, math.floor(x + (size - w * q) / 2), math.floor(y + (size - h * q) / 2), q, alpha)
+  elseif isWeapon(thing) then
     local icon = weaponIcon(thing.def)
     local s = math.max(1, math.floor(size * 0.85 / icon:getWidth())) -- whole-number scale keeps pixels even
     drawWeaponIcon(thing, x + (size - icon:getWidth() * s) / 2, y + (size - icon:getHeight() * s) / 2, s, alpha)
@@ -236,13 +242,6 @@ local function drawSlot(inv, ref, x, y, size, u, selected)
   if thing then
     local dragged = drag and drag.ref.kind == ref.kind and drag.ref.index == ref.index and drag.ref.gun == ref.gun
     drawThing(thing, x, y, size, u, dragged and 0.3 or 1)
-    if isWeapon(thing) and thing:isReloading() then
-      -- A thin bar along the bottom fills as it reloads (holstered guns too)
-      love.graphics.setColor(0.04, 0.03, 0.07, 0.8)
-      love.graphics.rectangle("fill", x + u, y + size - 2.2 * u, size - 2 * u, 1.2 * u)
-      love.graphics.setColor(0.45, 0.85, 1)
-      love.graphics.rectangle("fill", x + u, y + size - 2.2 * u, (size - 2 * u) * thing:reloadProgress(), 1.2 * u)
-    end
   end
   hitboxes[#hitboxes + 1] = { x = x, y = y, w = size, h = size, ref = ref }
 end

@@ -72,7 +72,7 @@ local function explode(b, w, x, y)
   -- explosives aren't a tunnelling tool)
   local radius = (26 + 6 * (count - 1)) * (scale < 1 and 0.75 or 1)
   local damage = (10 + 4 * (count - 1)) * scale
-  destruction.dig(w, x, y, math.max(3, radius * 0.25), 1.5, b.dx, b.dy)
+  destruction.dig(w, x, y, b.blastDig or math.max(3, radius * 0.25), b.blastPower or 1.5, b.dx, b.dy)
   effects.explosion(x, y, radius)
   fluids.explosion(x, y, radius) -- lights any gas it reaches
   audio.play("explosion")
@@ -102,9 +102,9 @@ local function explode(b, w, x, y)
 end
 
 -- A blast out of nowhere (Unstable Rounds going off in the barrel)
-function bullets.blast(x, y, count, scale)
+function bullets.blast(x, y, count, scale, dig, digPower)
   if world then
-    explode({ explosive = { count = count, scale = scale }, dx = 0, dy = -1 }, world, x, y)
+    explode({ explosive = { count = count, scale = scale }, dx = 0, dy = -1, blastDig = dig, blastPower = digPower }, world, x, y)
   end
 end
 

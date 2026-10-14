@@ -37,6 +37,9 @@ local SIZES = {
   spitter = { 10, 8 },
   bloater = { 14, 14 },
   wisp = { 8, 8 },
+  miner = { 10, 19, true },
+  roller = { 12, 10, true },
+  worm = { 6, 6 },
   queen = { 84, 84 },
   warden = { 24, 38, true }, -- the bosses
   matron = { 24, 18, true },
@@ -759,6 +762,43 @@ function cavegen.generate(world, area, seed, tick)
   if counts.wisp then
     place("wisp", findCeilingSpots(scaled(counts.wisp), 26, avoidForEnemies))
   end
+  if counts.miner then
+    place("miner", findFloorSpots(scaled(counts.miner), 22, avoidForEnemies))
+  end
+  if counts.roller then
+    place("roller", findFloorSpots(scaled(counts.roller), 14, avoidForEnemies))
+  end
+  if counts.worm then
+    -- Worms lie coiled in solid rock: spots with nothing but rock all round
+    local anchored = materials.anchored
+    local wanted, found = scaled(counts.worm), 0
+    for _ = 1, wanted * 60 do
+      if found >= wanted then
+        break
+      end
+      tick()
+      local x = math.floor(X0 + BORDER + 30 + rng:random() * (W - 2 * BORDER - 60))
+      local y = math.floor(Y0 + 140 + rng:random() * (H - 360))
+      local buried = not avoidForEnemies(x, y)
+      for oy = -9, 9, 3 do
+        for ox = -9, 9, 3 do
+          local id = world:get(x + ox, y + oy)
+          if not world:isSolid(x + ox, y + oy) or anchored[id] then
+            buried = false
+          end
+        end
+      end
+      for _, m in ipairs(enemies) do
+        if math.abs(m.x - x) < 48 and math.abs(m.y - y) < 48 then
+          buried = false
+        end
+      end
+      if buried and rng:random() < 0.35 + 0.65 * ((y - Y0) / H) then
+        found = found + 1
+        enemies[#enemies + 1] = { kind = "worm", x = x, y = y, toughness = toughnessAt(y) }
+      end
+    end
+  end
 
   -- Swarms: colonies that hang together under a ceiling and wake as one
   local SWARM_SIZE = { swarmbat = { 8, 12 }, wisp = { 4, 6 } }
@@ -830,7 +870,7 @@ function cavegen.generate(world, area, seed, tick)
       return nearEntrance or nearShop or inArena(x, y, 60)
     end
     -- (most floor spots aren't basins, so plenty are tried)
-    for _, s in ipairs(findFloorSpots(wanted * 8, 24, avoidForPools)) do
+    for _, s in ipairs(findFloorSpots(wanted * 14, 24, avoidForPools)) do
       if #pools >= wanted then
         break
       end
@@ -858,7 +898,7 @@ function cavegen.generate(world, area, seed, tick)
             end
           end
         end
-        if ok and #cells >= 54 then
+        if ok and #cells >= 40 then
           local pool = { cells = {}, vent = vents and { s[1], s[2] } or nil, level = level }
           for i = 1, #cells, 2 do
             local gx, gy = cells[i], cells[i + 1]
@@ -874,7 +914,7 @@ function cavegen.generate(world, area, seed, tick)
     return pools
   end
   local gas = makePools(area.gasPools, 22, 52, true)
-  local water = makePools(area.waterPools, 14, 44, false)
+  local water = makePools(area.waterPools, 20, 64, false) -- (deeper than before, and more of them)
   local result = {
     seed = seed,
     area = area,
@@ -900,6 +940,159 @@ function cavegen.generate(world, area, seed, tick)
   for _, b in ipairs(area.breakables or {}) do
     result.breakables[#result.breakables + 1] = { name = b[1], spots = findFloorSpots(scaled(b[2]), 16, avoid) }
   end
+
+  -- Stalactites: tapering cones of the area's rock hanging from the cave
+  -- ceilings (real terrain, so they can be shot down). Each is given room below
+  -- it, so none of them blocks a passage.
+  for _, s in ipairs(findCeilingSpots(scaled(area.stalactites or 0), 44, avoidForEnemies)) do
+    tick()
+    local x, cy = s[1], s[2]
+    local len = rng:random(6, 24)
+    local base = rng:random(2, 4)
+    local clear = true
+    for _, m in ipairs(enemies) do
+      if math.abs(m.x - x) < base + 14 and m.y > cy - 14 and m.y < cy + len + 10 then
+        clear = false
+      end
+    end
+    for _, o in ipairs(result.stalactites or {}) do
+      if math.abs(o[1] - x) < 9 and math.abs(o[2] - cy) < 6 then
+        clear = false
+      end
+    end
+    if clear then
+      result.stalactites = result.stalactites or {}
+      result.stalactites[#result.stalactites + 1] = { x, cy }
+      for dy = 0, len do
+        local half = math.floor(base * (1 - dy / len) + 0.5)
+        for dx = -half, half do
+          if not world:isSolid(x + dx, cy + dy) then
+            world:setRaw(x + dx, cy + dy, ROCKID)
+          end
+        end
+      end
+      world:repaintRegion(x - base - 2, cy - 2, x + base + 2, cy + len + 2)
+    end
+  end
+
+  -- The old mine's furnishings (area.mine): rail tracks with ore carts, timber
+  -- shoring (standing, half fallen and collapsed), oil lamps, skeletal remains
+  -- and pickaxes. All but the carts are scenery (see src.minedecor).
+  if area.mine then
+    local mine = { tracks = {}, carts = {}, supports = {}, skeletons = {}, picks = {}, lamps = {} }
+    result.mine = mine
+    local function solidAt(x, y)
+      return world:isSolid(x, y)
+    end
+    -- The ground surface at x within a few pixels of y (air above, rock at it)
+    local function groundNear(x, y)
+      for yy = y - 4, y + 4 do
+        if not solidAt(x, yy - 1) and solidAt(x, yy) then
+          return yy
+        end
+      end
+    end
+    local function clearAbove(x, y, h)
+      for yy = y - h, y - 1 do
+        if solidAt(x, yy) then
+          return false
+        end
+      end
+      return true
+    end
+
+    -- Rail tracks: laid along level stretches of floor, with a cart on some
+    for _, s in ipairs(findFloorSpots(scaled(40), 14, avoid)) do
+      tick()
+      local ys = { [s[1]] = s[2] }
+      local x0, x1 = s[1], s[1]
+      for dir = -1, 1, 2 do
+        local x, y = s[1], s[2]
+        for _ = 1, rng:random(28, 95) do
+          local ny = groundNear(x + dir, y)
+          if not ny or not clearAbove(x + dir, ny, 12) then
+            break
+          end
+          x, y = x + dir, ny
+          ys[x] = ny
+        end
+        if dir < 0 then
+          x0 = x
+        else
+          x1 = x
+        end
+      end
+      local overlaps = false
+      for _, t in ipairs(mine.tracks) do
+        if x0 < t.x1 + 10 and x1 > t.x0 - 10 and math.abs(ys[s[1]] - (t.ys[t.x0] or ys[s[1]])) < 80 then
+          overlaps = true
+        end
+      end
+      if x1 - x0 >= 40 and not overlaps then
+        mine.tracks[#mine.tracks + 1] = { x0 = x0, x1 = x1, ys = ys }
+        if rng:random() < 0.6 then
+          local cx = rng:random(x0 + 12, x1 - 12)
+          mine.carts[#mine.carts + 1] = { x = cx, y = ys[cx] }
+        end
+      end
+    end
+
+    -- Timber shoring: two posts and a cap beam between floor and ceiling
+    local function ceilAt(cx, from)
+      for yy = from, from - 130, -1 do
+        if solidAt(cx, yy) then
+          return yy
+        end
+      end
+    end
+    for _, s in ipairs(findFloorSpots(scaled(240), 8, avoid)) do
+      tick()
+      local x, gy = s[1], s[2]
+      local gap = rng:random(11, 19)
+      local c1, c2 = ceilAt(x, gy - 6), ceilAt(x + gap, gy - 6)
+      local g2 = groundNear(x + gap, gy)
+      if c1 and c2 and g2 and math.abs(c1 - c2) <= 3 and gy - c1 >= 26 and gy - c1 <= 120 and math.abs(g2 - gy) <= 5 then
+        local open = true
+        for yy = c1 + 1, gy - 1 do
+          if solidAt(x + math.floor(gap / 2), yy) then
+            open = false
+          end
+        end
+        local roll = rng:random()
+        if open then
+          mine.supports[#mine.supports + 1] = {
+            x = x,
+            gap = gap,
+            g1 = gy,
+            g2 = g2,
+            c = math.floor((c1 + c2) / 2),
+            state = roll < 0.5 and "standing" or (roll < 0.8 and "broken" or "fallen"),
+            side = rng:random(1, 2),
+            breakH = rng:random(8, math.max(9, gy - c1 - 10)),
+            lantern = rng:random() < 0.5,
+            seed = rng:random(1, 1000),
+          }
+        end
+      end
+    end
+    for _, sp in ipairs(mine.supports) do
+      if sp.lantern and sp.state ~= "fallen" then
+        mine.lamps[#mine.lamps + 1] = { x = sp.x + sp.gap / 2, y = sp.c + 11, hung = true }
+      end
+    end
+
+    -- Oil lamps on posts, skeletons, pickaxes
+    for _, s in ipairs(findFloorSpots(scaled(22), 24, avoid)) do
+      mine.lamps[#mine.lamps + 1] = { x = s[1], y = s[2] - 14, post = s[2], flip = rng:random() < 0.5 }
+    end
+    for _, s in ipairs(findFloorSpots(scaled(34), 8, avoid)) do
+      mine.skeletons[#mine.skeletons + 1] = { x = s[1], y = s[2], kind = rng:random(1, 4), flip = rng:random() < 0.5, pick = rng:random() < 0.4 }
+    end
+    for _, s in ipairs(findFloorSpots(scaled(28), 12, avoid)) do
+      mine.picks[#mine.picks + 1] = { x = s[1], y = s[2], flip = rng:random() < 0.5, tilt = rng:random(-4, 4) / 10 }
+    end
+  end
+
   return result
 end
 

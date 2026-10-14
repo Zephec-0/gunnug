@@ -20,6 +20,7 @@ local enemies = require("src.enemies")
 local fluids = require("src.fluids")
 local hud = require("src.hud")
 local materials = require("src.materials")
+local minedecor = require("src.minedecor")
 local physics = require("src.physics")
 local props = require("src.props")
 local shop = require("src.shop")
@@ -42,12 +43,14 @@ local THEMES = {
     backTop = { 0.10, 0.08, 0.14 },
     backDeep = { 0.06, 0.05, 0.09 },
     pillars = { { 0.03, 0.025, 0.05 }, { 0.16, 0.13, 0.22 }, { 0.10, 0.08, 0.15 } },
-    monsters = { ghoul = 60, bat = 40, spitter = 26, hopper = 10 }, -- per 1920x3680; the classics, and a few hoppers
+    monsters = { ghoul = 38, bat = 28, spitter = 14, hopper = 6, miner = 28, roller = 10, worm = 12 }, -- per 1920x3680; an old mine: skeletal miners, rollers and worms in the rock
     boss = { "warden", "dreadbat" }, -- one of the two, chosen per run
-    waterPools = 8,
+    waterPools = 30,
     swarms = { swarmbat = 4 }, -- colonies of bats under the ceilings
     -- Breakables beside the crates { prop, count per 1920x3680 }: pots and pouches of coin, candle-lit skulls and lanterns
-    breakables = { { "urn", 24 }, { "pouch", 16 }, { "lantern", 12 }, { "skullCandle", 16 }, { "sporePod", 8 } },
+    breakables = { { "urn", 14 }, { "pouch", 12 }, { "lantern", 8 }, { "skullCandle", 8 }, { "sporePod", 6 }, { "tntBarrel", 22 }, { "tntBarrel", 8 }, { "crate", 12 } },
+    mine = true, -- an old mine: rails and carts, shoring, oil lamps, skeletons, pickaxes, TNT
+    stalactites = 150,
   },
   {
     name = "The Sunken Hollows",
@@ -61,11 +64,12 @@ local THEMES = {
     backTop = { 0.045, 0.06, 0.105 },
     backDeep = { 0.03, 0.04, 0.075 },
     pillars = { { 0.02, 0.03, 0.05 }, { 0.10, 0.14, 0.22 }, { 0.06, 0.08, 0.14 } },
-    monsters = { ghoul = 28, bat = 20, spitter = 24, hopper = 52, bloater = 10 }, -- a fen: hoppers everywhere
+    monsters = { ghoul = 20, bat = 14, spitter = 20, hopper = 44, bloater = 10, worm = 12, roller = 14, miner = 5 }, -- a fen: hoppers everywhere
     boss = "matron",
-    waterPools = 36,
+    waterPools = 60,
     swarms = { swarmbat = 2 },
     breakables = { { "sporePod", 36 }, { "urn", 10 }, { "pouch", 14 }, { "lantern", 8 } }, -- glowing spore pods in the fen
+    stalactites = 70,
   },
   {
     name = "The Sulfur Vents",
@@ -80,13 +84,14 @@ local THEMES = {
     backTop = { 0.085, 0.09, 0.04 },
     backDeep = { 0.05, 0.055, 0.025 },
     pillars = { { 0.035, 0.035, 0.012 }, { 0.20, 0.20, 0.08 }, { 0.11, 0.11, 0.05 } },
-    monsters = { ghoul = 18, bat = 12, spitter = 14, hopper = 10, bloater = 50, wisp = 45 }, -- gas bags and fire wisps
+    monsters = { ghoul = 14, bat = 10, spitter = 12, hopper = 8, bloater = 46, wisp = 40, worm = 12, roller = 8, miner = 8 }, -- gas bags and fire wisps
     boss = "queen", -- the Sulfur Queen, in the arena that fills the last quarter
     arena = true,
     gasPools = 34, -- pools of poison gas in low spots (src.fluids)
-    waterPools = 6,
+    waterPools = 22,
     swarms = { swarmbat = 2, wisp = 3 }, -- and flocks of wisps
     breakables = { { "geode", 30 }, { "urn", 10 }, { "pouch", 12 }, { "lantern", 10 } }, -- sulfur geodes that glow (no open flames: the gas)
+    stalactites = 40,
   },
   {
     -- Left of the Queen's arena (area 4a): scorched basalt and ash, ember light
@@ -101,10 +106,11 @@ local THEMES = {
     backTop = { 0.10, 0.05, 0.045 },
     backDeep = { 0.06, 0.03, 0.03 },
     pillars = { { 0.04, 0.02, 0.02 }, { 0.26, 0.12, 0.08 }, { 0.14, 0.06, 0.05 } },
-    monsters = { ghoul = 40, bat = 20, spitter = 22, hopper = 6, wisp = 40 },
+    monsters = { ghoul = 30, bat = 16, spitter = 18, hopper = 4, wisp = 36, worm = 14, roller = 14, miner = 14 },
     swarms = { swarmbat = 3, wisp = 3 },
-    waterPools = 2,
+    waterPools = 14,
     breakables = { { "emberPot", 30 }, { "urn", 16 }, { "pouch", 14 }, { "skullCandle", 14 }, { "lantern", 8 } },
+    stalactites = 80,
   },
   {
     -- Right of the Queen's arena (area 4b): a flooded slate maze
@@ -119,10 +125,11 @@ local THEMES = {
     backTop = { 0.035, 0.07, 0.09 },
     backDeep = { 0.02, 0.045, 0.06 },
     pillars = { { 0.015, 0.035, 0.05 }, { 0.08, 0.17, 0.24 }, { 0.05, 0.10, 0.15 } },
-    monsters = { ghoul = 14, bat = 14, spitter = 20, hopper = 60, bloater = 20 },
+    monsters = { ghoul = 10, bat = 10, spitter = 16, hopper = 52, bloater = 18, worm = 12, roller = 10, miner = 4 },
     swarms = { swarmbat = 3 },
-    waterPools = 70,
+    waterPools = 100,
     breakables = { { "sporePod", 30 }, { "geode", 12 }, { "urn", 16 }, { "pouch", 14 }, { "lantern", 12 } },
+    stalactites = 90,
   },
 }
 
@@ -229,6 +236,8 @@ local function areaFor(i)
   base.arena = lv.theme.arena
   base.glowCount = lv.theme.glowCount
   base.breakables = lv.theme.breakables
+  base.mine = lv.theme.mine
+  base.stalactites = lv.theme.stalactites
   base.gasPools = lv.theme.gasPools
   base.waterPools = lv.theme.waterPools
   base.monsters = lv.theme.monsters
@@ -369,6 +378,9 @@ function catacombs.spawnProps()
           props.spawn(group.name, s[1], s[2] - def.height / 2 - 0.5, 0, lv.theme.glow).body:setAwake(false)
         end
       end
+      for _, cart in ipairs(info.mine and info.mine.carts or {}) do
+        props.spawn("minecart", cart.x, cart.y - 7).body:setAwake(false)
+      end
       for j, room in ipairs(info.shops) do
         shop.populate(room, world, lv.row, childOf(i, j))
         enemies.spawn("dummy", shop.dummySpot(room))
@@ -492,6 +504,18 @@ function catacombs.openGates(lv)
   hud.showBanner("The Queen Has Fallen", "The gates are open. Two shops lie below, left and right: choose one")
 end
 
+-- Is the point inside a shop room?
+function catacombs.inShop(x, y)
+  for _, lv in ipairs(levels) do
+    for _, s in ipairs(lv.info and lv.info.shops or {}) do
+      if x >= s.x and x <= s.x + s.w and y >= s.y and y <= s.y + s.h then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 function catacombs.shopReached()
   return levels[1] ~= nil and levels[1].shopReached == true
 end
@@ -528,6 +552,9 @@ function catacombs.addLights(lighting, view)
         if visible(view, c[1], c[2], 120) then
           lighting.add(c[1], c[2] - c[3] - 2, 120, 1, 0.68, 0.36, 1.0 + flicker(i) * 0.07)
         end
+      end
+      if info.mine then
+        minedecor.addLights(lighting, info.mine, view)
       end
       local g, r = lv.theme.glow, lv.theme.glowRadius
       local strong = lv.index > 1 and 0.75 or 0.6
@@ -572,6 +599,9 @@ function catacombs.drawDecor(view)
         if visible(view, g[1], g[2], 8) then
           drawGlow(g[1], g[2], i, lv.theme.stalk)
         end
+      end
+      if info.mine then
+        minedecor.draw(info.mine, view)
       end
       for _, s in ipairs(info.shops) do
         if visible(view, s.x + s.w / 2, s.y + s.h / 2, 400) then
@@ -638,6 +668,9 @@ function catacombs.drawEmissive(view)
     local info = lv.info
     if info then
       local g = lv.theme.glow
+      if info.mine then
+        minedecor.drawEmissive(info.mine, view)
+      end
       for i, spot in ipairs(info.glows) do
         if visible(view, spot[1], spot[2], 8) then
           for j = 0, 2 do

@@ -26,6 +26,8 @@ local GAS_COLOR = { 0.72, 0.86, 0.26 }
 local TICK = 0.5 -- seconds between damage ticks while in gas or fire
 local GAS_DAMAGE = 3
 local FIRE_DAMAGE = 5
+local DROWN_DAMAGE = 4 -- per tick (every half second) once the breath has run out
+local BREATH_BUBBLES = 3 -- bubbles over his head; one pops each second he is under
 
 local world
 local gas, water, fire, smoke = {}, {}, {}, {}
@@ -35,6 +37,8 @@ local columns = {} -- vertical columns of dense gas: { x0, x1, top, bottom, age,
 local COLUMN_DAMAGE = 9 -- per tick inside a column (a thin cloud of gas does about 3-5)
 local accWater, accSlow, accPurge = 0, 0, 0
 local gasTimer, fireTimer = TICK, TICK
+local drownTimer = TICK
+local breathPlayer -- the hunter, for drawing his bubbles
 local clock = 0
 
 -- 0..1: how deep in gas the hunter has been lately (tints the screen)
@@ -42,7 +46,8 @@ fluids.exposure = 0
 
 function fluids.clear()
   gas, water, fire, smoke, vents, braziers, columns = {}, {}, {}, {}, {}, {}, {}
-  gasTimer, fireTimer = TICK, TICK
+  gasTimer, fireTimer, drownTimer = TICK, TICK, TICK
+  breathPlayer = nil
   fluids.exposure = 0
   world = nil
 end
@@ -556,6 +561,42 @@ function fluids.update(dt, player, enemies)
   local wasIn = player.inWater
   player.inWater = water[midK] == true
   player.submerged = water[headK] == true
+
+  -- Breath: with his head under, the bubbles above him pop one a second; with
+  -- none left he drowns, a tick of damage every half second. Out of the water
+  -- they come back in about a second.
+  breathPlayer = player
+  if not player.dead then
+    local breath = player.breath or BREATH_BUBBLES
+    local before = math.ceil(breath - 0.0001)
+    if player.submerged then
+      breath = math.max(0, breath - dt)
+      if breath <= 0 then
+        drownTimer = drownTimer - dt
+        if drownTimer <= 0 then
+          drownTimer = TICK
+          player:hurtOverTime(DROWN_DAMAGE, { 0.5, 0.8, 1 })
+          audio.play("hurt", 0.35)
+        end
+      else
+        drownTimer = TICK
+      end
+    else
+      breath = math.min(BREATH_BUBBLES, breath + dt * BREATH_BUBBLES)
+      drownTimer = TICK
+    end
+    -- A bubble pops each time the breath drops past a whole one
+    local after = math.ceil(breath - 0.0001)
+    if after < before and player.submerged then
+      local bx = player.body.x + player.body.w / 2 - 12 + (before - 1) * 8
+      local by = player.body.y - 14
+      for _ = 1, 7 do
+        effects.particle(bx + 3, by + 3, (love.math.random() - 0.5) * 60, -love.math.random() * 50, 0.4, { 0.75, 0.92, 1 }, 200, true)
+      end
+      audio.play("plop", 0.8, 1.4)
+    end
+    player.breath = breath
+  end
   if player.inWater ~= (wasIn or false) then
     for _ = 1, 10 do
       effects.particle(px + (love.math.random() - 0.5) * 8, py - 4, (love.math.random() - 0.5) * 70, -40 - love.math.random() * 50, 0.5, { 0.55, 0.8, 0.95 }, 400, true)
@@ -631,9 +672,51 @@ local function pieceFilled(tbl, gx, gy, px, py, world)
 end
 
 -- Gas and flames glow, so they are drawn after the lighting
+-- The hunter's breath: three bubbles over his head while he is under (and as
+-- they come back); they flash red once he is drowning
+local function drawBreath(t)
+  local p = breathPlayer
+  if not p or p.dead then
+    return
+  end
+  local breath = p.breath or BREATH_BUBBLES
+  if breath >= BREATH_BUBBLES - 0.001 and not p.submerged then
+    return
+  end
+  local cx = math.floor(p.body.x + p.body.w / 2)
+  local top = math.floor(p.body.y) - 14
+  local drowning = breath <= 0
+  for i = 1, BREATH_BUBBLES do
+    local x = cx - 12 + (i - 1) * 8
+    local y = top + math.floor(math.sin(t * 3 + i * 1.7) * 1.2 + 0.5)
+    local full = breath > i - 1
+    if full then
+      -- A ring with a pale glint; the one about to pop shakes
+      local shake = (breath <= i and breath > i - 1 and p.submerged) and (math.floor(t * 30) % 2) or 0
+      love.graphics.setColor(0.35, 0.60, 0.85, 0.55)
+      love.graphics.rectangle("fill", x + 1 + shake, y + 1, 5, 5)
+      love.graphics.setColor(0.78, 0.93, 1, 0.95)
+      love.graphics.rectangle("fill", x + 2 + shake, y, 3, 1)
+      love.graphics.rectangle("fill", x + 2 + shake, y + 6, 3, 1)
+      love.graphics.rectangle("fill", x + shake, y + 2, 1, 3)
+      love.graphics.rectangle("fill", x + 6 + shake, y + 2, 1, 3)
+      love.graphics.setColor(1, 1, 1)
+      love.graphics.rectangle("fill", x + 2 + shake, y + 2, 1, 1)
+    elseif drowning and math.floor(t * 5) % 2 == 0 then
+      -- No air left: empty rings flashing red
+      love.graphics.setColor(1, 0.25, 0.25, 0.9)
+      love.graphics.rectangle("fill", x + 2, y, 3, 1)
+      love.graphics.rectangle("fill", x + 2, y + 6, 3, 1)
+      love.graphics.rectangle("fill", x, y + 2, 1, 3)
+      love.graphics.rectangle("fill", x + 6, y + 2, 1, 3)
+    end
+  end
+end
+
 function fluids.drawEmissive(view)
   local gx0, gy0, gx1, gy1 = visibleRange(view)
   local t = love.timer.getTime()
+  drawBreath(t)
   local noise = love.math.noise
   for gy = gy0, gy1 do
     for gx = gx0, gx1 do
@@ -684,6 +767,23 @@ function fluids.drawEmissive(view)
   end
 end
 
+-- The water's colours: deep in the middle, lighter toward the edges, in fine
+-- steps so it reads as a smooth gradient
+local WATER_DEEP = { 0.13, 0.31, 0.42 }
+local WATER_EDGE = { 0.27, 0.54, 0.56 }
+local WATER_BANDS = {} -- { width from each edge in px, colour }, widest first
+for k, width in ipairs({ 16, 13, 10, 8, 6, 5, 4, 3, 2, 1 }) do
+  local t = k / 10
+  WATER_BANDS[k] = {
+    width,
+    {
+      WATER_DEEP[1] + (WATER_EDGE[1] - WATER_DEEP[1]) * t,
+      WATER_DEEP[2] + (WATER_EDGE[2] - WATER_DEEP[2]) * t,
+      WATER_DEEP[3] + (WATER_EDGE[3] - WATER_DEEP[3]) * t,
+    },
+  }
+end
+
 -- Water and smoke are drawn in front of the hunter, but lit
 function fluids.drawFront(view)
   local gx0, gy0, gx1, gy1 = visibleRange(view)
@@ -710,15 +810,39 @@ function fluids.drawFront(view)
           runStart = px
         elseif not on and runStart then
           local w = px - runStart
-          love.graphics.setColor(0.14, 0.30, 0.50, 0.62)
+          -- A teal body, nearly opaque: deep blue-green in the middle, lighter
+          -- toward the edges (stacked bands from each side)
+          love.graphics.setColor(WATER_DEEP[1], WATER_DEEP[2], WATER_DEEP[3], 0.92)
           love.graphics.rectangle("fill", runStart, py, w, 2)
-          -- The surface: pieces with open air above get a lighter, rippling line
+          for _, band in ipairs(WATER_BANDS) do
+            local bw = math.min(band[1], floor(w / 2))
+            if bw > 0 then
+              love.graphics.setColor(band[2][1], band[2][2], band[2][3], 0.92)
+              love.graphics.rectangle("fill", runStart, py, bw, 2)
+              love.graphics.rectangle("fill", px - bw, py, bw, 2)
+            end
+          end
+          -- The surface: pieces with open air above get a pale, rippling line;
+          -- and now and then a glint catches the eye
           for x = runStart, px - 1, 2 do
             local above = world:isSolid(x, py - 1) or pieceFilled(water, floor(x / C), floor((py - 2) / C), x, py - 2, world)
             if not above then
               local off = math.sin(x * 0.35 + t * 2.2) > 0.5 and 1 or 0
-              love.graphics.setColor(0.45, 0.72, 0.90, 0.85)
+              love.graphics.setColor(0.74, 0.84, 0.76, 0.95)
               love.graphics.rectangle("fill", x, py + off, 2, 1)
+            else
+              local h = (x * 73856093 + py * 19349663) % 1000
+              if h < 70 then
+                love.graphics.setColor(0.32, 0.56, 0.58, 0.22) -- a faint grain in the body
+                love.graphics.rectangle("fill", x, py, 2, 2)
+              elseif h > 985 then
+                love.graphics.setColor(0.05, 0.14, 0.2, 0.2)
+                love.graphics.rectangle("fill", x, py, 2, 2)
+              end
+              if (x * 73856093 + py * 19349663 + floor(t * 2) * 83492791) % 1000 < 3 then
+                love.graphics.setColor(0.80, 0.92, 0.95, 0.8) -- a glint
+                love.graphics.rectangle("fill", x, py, 1, 1)
+              end
             end
           end
           runStart = nil

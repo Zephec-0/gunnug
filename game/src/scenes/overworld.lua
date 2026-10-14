@@ -15,6 +15,7 @@ local config = require("src.config")
 local enemies = require("src.enemies")
 local fluids = require("src.fluids")
 local materials = require("src.materials")
+local parallax = require("src.parallax")
 local props = require("src.props")
 local shop = require("src.shop")
 local targets = require("src.targets")
@@ -408,6 +409,13 @@ local function underground(x, y)
 end
 
 -- The same, for the game's sound mixer
+-- For the sound: which area the hunter is in (nil on the surface), and
+-- whether he is in a shop room
+function overworld.audioInfo(x, y)
+  local area = underground(x, y) > 0.3 and catacombs.levelAt(y, x) or nil
+  return area, catacombs.inShop(x, y)
+end
+
 function overworld.undergroundFactor(x, y)
   return underground(x, y)
 end
@@ -864,35 +872,12 @@ local function backdrop(y, x)
   return catacombs.backdrop(y, x)
 end
 
--- Far rock in the caves: two layers of pillars that slide past more slowly
--- than the near terrain, so the open caverns have depth. Coloured for the
--- area in view.
-local function drawCaveDepth(camX, vx0, vx1, vy0, vy1)
-  local colors = catacombs.theme(catacombs.levelAt((vy0 + vy1) / 2, (vx0 + vx1) / 2) or 1).pillars
-  for layer = 1, 2 do
-    local p = layer == 1 and 0.55 or 0.78
-    local spacing = layer == 1 and 74 or 48
-    local alpha = layer == 1 and 0.5 or 0.38
-    local off = camX * (1 - p)
-    for i = math.floor((vx0 - off) / spacing) - 1, math.floor((vx1 - off) / spacing) + 1 do
-      local h = hash(i, layer)
-      local w = (layer == 1 and 10 or 6) + math.floor(h * 14)
-      local x = math.floor(i * spacing + off + hash(i, layer + 7) * spacing * 0.6)
-      local c = colors[1]
-      love.graphics.setColor(c[1], c[2], c[3], alpha)
-      love.graphics.rectangle("fill", x, vy0, w, vy1 - vy0)
-      -- A rim light down one edge, and cracks across the face
-      c = colors[2]
-      love.graphics.setColor(c[1], c[2], c[3], alpha * 0.8)
-      love.graphics.rectangle("fill", x, vy0, 1, vy1 - vy0)
-      c = colors[3]
-      for k = 1, 3 do
-        local cy = math.floor(vy0 / 40) * 40 + k * 40 + math.floor(hash(i, k) * 30)
-        love.graphics.setColor(c[1], c[2], c[3], alpha * 0.7)
-        love.graphics.rectangle("fill", x + 1 + math.floor(hash(k, i) * (w - 3)), cy, 2, 5)
-      end
-    end
-  end
+-- The far scenery of the caves: two layers per area that slide past more
+-- slowly than the near terrain, so the open caverns have depth, in the style of
+-- the area in view (see src.parallax)
+local function drawCaveDepth(camX, camY, vx0, vx1, vy0, vy1)
+  local index = catacombs.levelAt((vy0 + vy1) / 2, (vx0 + vx1) / 2) or 1
+  parallax.draw(index, camX, camY, vx0, vy0, vx1, vy1, catacombs.theme(index).pillars)
 end
 
 -- Decorations drawn behind the player (they receive lighting)
@@ -916,7 +901,7 @@ function overworld.drawDecor(camX, camY)
     love.graphics.rectangle("fill", vx0, y, vx1 - vx0, 8)
   end
   if vy1 > CAVE_TOP then
-    drawCaveDepth(camX, vx0, vx1, math.max(vy0, CAVE_TOP), vy1)
+    drawCaveDepth(camX, camY, vx0, vx1, math.max(vy0, CAVE_TOP), vy1)
   end
   catacombs.drawDecor(view(camX, camY))
   if vy0 > CAVE_TOP then

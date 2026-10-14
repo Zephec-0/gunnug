@@ -240,6 +240,70 @@ local function emitEmberPot(p, t)
   rects(x, y, { { 2, 5, 1, 2 }, { 5, 6, 1, 1 } }, { 1, 0.45, 0.12, 0.8 })
 end
 
+
+-- Old TNT: a barrel of black powder, stencilled in red; it goes off on a short
+-- fuse once it takes enough damage
+local TNT_GLYPHS = {
+  T = { "###", ".#.", ".#.", ".#.", ".#." },
+  N = { "#.#", "###", "###", "#.#", "#.#" },
+}
+
+local function drawTntBarrel(p)
+  local x, y = topLeft(p)
+  rects(x, y, { { 2, 0, 9, 1 }, { 1, 1, 11, 14 }, { 2, 15, 9, 1 } }, { 0.50, 0.31, 0.17 })
+  rects(x, y, { { 1, 1, 2, 14 }, { 3, 0, 3, 1 } }, { 0.66, 0.42, 0.22 })
+  rects(x, y, { { 10, 1, 2, 14 }, { 8, 15, 3, 1 } }, { 0.34, 0.20, 0.11 })
+  -- Iron hoops
+  rects(x, y, { { 0, 2, 13, 1 }, { 0, 13, 13, 1 } }, { 0.24, 0.25, 0.29 })
+  rects(x, y, { { 0, 2, 13, 1 } }, { 0.36, 0.37, 0.42 })
+  -- The label: red capitals on a faded cream plate
+  rects(x, y, { { 1, 4, 11, 7 } }, { 0.86, 0.78, 0.60 })
+  rects(x, y, { { 1, 4, 11, 1 }, { 1, 10, 11, 1 } }, { 0.70, 0.60, 0.44 })
+  for i, ch in ipairs({ "T", "N", "T" }) do
+    for gy, row in ipairs(TNT_GLYPHS[ch]) do
+      for gx = 1, 3 do
+        if row:sub(gx, gx) == "#" then
+          rects(x, y, { { 1 + (i - 1) * 4 + gx - 1, 4 + gy, 1, 1 } }, { 0.72, 0.12, 0.10 })
+        end
+      end
+    end
+  end
+  if p.lit then
+    rects(x, y, { { 6, -2, 1, 2 } }, { 0.14, 0.10, 0.08 }) -- the fuse
+  end
+end
+
+local function emitTntBarrel(p, t)
+  if not p.lit then
+    return
+  end
+  local x, y = topLeft(p)
+  local f = math.floor(t * 30) % 2
+  rects(x, y, { { 6, -3 - f, 1, 1 + f } }, { 1, 0.7 + f * 0.2, 0.25 })
+end
+
+-- An ore cart: a riveted iron box on two small wheels, heaped with rock and ore
+local function drawMinecart(p)
+  local x, y = topLeft(p)
+  -- Heap of ore over the rim
+  rects(x, y, { { 3, 0, 16, 2 }, { 5, -1, 6, 1 }, { 12, -1, 4, 1 } }, { 0.36, 0.34, 0.33 })
+  rects(x, y, { { 4, 0, 3, 1 }, { 13, -1, 2, 1 } }, { 0.50, 0.48, 0.46 })
+  rects(x, y, { { 8, 0, 1, 1 }, { 15, 0, 1, 1 }, { 6, 1, 1, 1 }, { 11, -1, 1, 1 } }, { 0.95, 0.75, 0.25 })
+  -- The box: a rolled rim, rust-brown plating, bands and rivets
+  rects(x, y, { { 0, 2, 22, 2 } }, { 0.40, 0.41, 0.46 })
+  rects(x, y, { { 0, 2, 22, 1 } }, { 0.58, 0.59, 0.64 })
+  rects(x, y, { { 1, 4, 20, 6 } }, { 0.40, 0.29, 0.22 })
+  rects(x, y, { { 1, 4, 20, 1 } }, { 0.50, 0.37, 0.28 })
+  rects(x, y, { { 1, 9, 20, 1 } }, { 0.28, 0.20, 0.16 })
+  rects(x, y, { { 5, 4, 1, 6 }, { 11, 4, 1, 6 }, { 17, 4, 1, 6 } }, { 0.30, 0.31, 0.35 })
+  rects(x, y, { { 3, 5, 1, 1 }, { 8, 5, 1, 1 }, { 14, 5, 1, 1 }, { 19, 5, 1, 1 } }, { 0.62, 0.52, 0.40 })
+  -- Wheels
+  for _, wx in ipairs({ 3, 15 }) do
+    rects(x, y, { { wx, 10, 4, 3 }, { wx + 1, 9, 2, 1 } }, { 0.20, 0.20, 0.24 })
+    rects(x, y, { { wx + 1, 11, 2, 1 } }, { 0.55, 0.56, 0.60 })
+  end
+end
+
 -- Terrain debris carries an image of the pixels it was cut from
 local function drawDebris(p)
   love.graphics.setColor(1, 1, 1)
@@ -325,6 +389,20 @@ props.defs = {
     ignites = true, -- the coals spill out in flames when it breaks
     gravityScale = 0.45, friction = 0.6, restitution = 0.1, linearDamping = 0.3, angularDamping = 0.5,
     showDamage = true, draw = drawEmberPot, emit = emitEmberPot,
+  },
+  -- The old mine (area 1): a barrel of TNT that goes up on a short fuse, and an ore cart
+  tntBarrel = {
+    width = 13, height = 16, mass = 1.8, hp = 12, itemChance = 0,
+    shard = { 0.50, 0.31, 0.17 },
+    explosive = { count = 3, scale = 2.0, dig = 13, digPower = 3 }, -- a big blast and a real crater
+    gravityScale = 0.5, friction = 0.6, restitution = 0.15, linearDamping = 0.3, angularDamping = 0.5,
+    showDamage = true, draw = drawTntBarrel, emit = emitTntBarrel,
+  },
+  minecart = {
+    width = 22, height = 13, mass = 5, hp = 80, gold = { 8, 18 }, itemChance = 0.25,
+    shard = { 0.40, 0.29, 0.22 },
+    gravityScale = 0.6, friction = 0.25, restitution = 0.1, linearDamping = 0.15, angularDamping = 0.4,
+    showDamage = true, draw = drawMinecart,
   },
   -- Mass comes from the materials it is made of (materials.lua density)
   debris = {
@@ -455,6 +533,14 @@ end
 -- itself is removed on the next props.update, so callers that are looping
 -- over the list aren't disturbed.
 local function breakProp(p)
+  if p.def.explosive then
+    -- Powder: it doesn't break, it fizzes for a moment and then goes off
+    if not p.lit then
+      p.lit = true
+      p.fuse = 0.15 + love.math.random() * 0.15
+    end
+    return
+  end
   p.broken = true
   local x, y = p.body:getPosition()
   local c = p.color or p.def.shard or (p.def == props.defs.ironCrate and { 0.34, 0.35, 0.40 } or { 0.5, 0.36, 0.23 })
@@ -620,10 +706,33 @@ function props.impactDamage(p, vx, vy)
   return math.floor((momentum - MIN_MOMENTUM) / MOMENTUM_PER_DAMAGE), momentum
 end
 
+-- A lit barrel of powder goes off: the blast hurts the hunter, monsters and
+-- other props (setting off any more barrels nearby) and carves a crater
+local function detonate(p)
+  p.broken = true
+  local x, y = p.body:getPosition()
+  local ex = p.def.explosive
+  for _ = 1, 14 do
+    local a = love.math.random() * math.pi * 2
+    local s = 40 + love.math.random() * 120
+    effects.particle(x, y, math.cos(a) * s, math.sin(a) * s - 50, 0.7, { 0.50, 0.31, 0.17 }, 520)
+  end
+  require("src.bullets").blast(x, y, ex.count, ex.scale, ex.dig, ex.digPower)
+end
+
 function props.update(dt)
   for i = #list, 1, -1 do
     local p = list[i]
     p.flash = math.max(0, p.flash - dt)
+    if p.lit and not p.broken then
+      p.fuse = p.fuse - dt
+      if math.floor(p.fuse * 24) % 2 == 0 then
+        p.flash = 0.05 -- blinks white as the fuse burns down
+      end
+      if p.fuse <= 0 then
+        detonate(p)
+      end
+    end
     if p.broken then
       remove(p)
     end

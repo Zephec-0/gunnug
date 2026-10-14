@@ -174,7 +174,14 @@ function game.update(dt)
   end
 
   render.layout()
-  audio.update(dt, (scene.undergroundFactor and not menu.isOpen() and not itembar.isOpen()) and scene.undergroundFactor(player:center()) or 0, menu.isOpen())
+  local underground, area, inShop = 0, nil, false
+  if scene.undergroundFactor and not menu.isOpen() and not itembar.isOpen() then
+    underground = scene.undergroundFactor(player:center())
+    if scene.audioInfo then
+      area, inShop = scene.audioInfo(player:center())
+    end
+  end
+  audio.update(dt, underground, menu.isOpen(), area, inShop)
   -- The weapon panel and the menus pause the game, like Noita's inventory
   love.mouse.setVisible(itembar.isOpen() or menu.isOpen() or compare.isOpen())
   menu.update()

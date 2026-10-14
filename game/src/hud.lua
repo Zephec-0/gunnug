@@ -390,13 +390,25 @@ function hud.drawGunStatus(gun, ww, margin, top, u, f)
   love.graphics.setColor(1, 1, 1)
   shadowText(gun.name, x0 - f:getWidth(gun.name) - 4 * u, cy - f:getHeight() / 2, f)
 
-  -- Reload bar
+  -- Reloading: the word waves, filling from red to gold as the reload goes
   if gun:isReloading() then
+    local word = "RELOADING"
+    local progress = gun:reloadProgress()
     local ry = yb + 3 * u
-    love.graphics.setColor(0.1, 0.05, 0.08, 0.8)
-    love.graphics.rectangle("fill", x0, ry, rowW, u * 1.5)
-    love.graphics.setColor(0.4, 0.85, 1)
-    love.graphics.rectangle("fill", x0, ry, rowW * gun:reloadProgress(), u * 1.5)
+    local right = ww - margin
+    local left = right - f:getWidth(word)
+    local lx = left
+    for i = 1, #word do
+      local ch = word:sub(i, i)
+      local wave = math.floor(math.sin(now * 11 - i * 0.7) * 1.2 * u * 0.5 + 0.5)
+      if (i - 0.5) / #word < progress then
+        love.graphics.setColor(1.0, 0.82, 0.25)
+      else
+        love.graphics.setColor(0.85, 0.16, 0.14)
+      end
+      shadowText(ch, math.floor(lx), ry + wave, f)
+      lx = lx + f:getWidth(ch)
+    end
   end
 end
 

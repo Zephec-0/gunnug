@@ -426,7 +426,7 @@ The arena's two shops sit at the left and right bottom (a fifth in from each edg
 | **Mire hopper** | 14 | A squat marsh toad. Idles with small hops; on sight (250 px) it crouches for 0.3 s (a tell), then leaps in an arc at the hunter every 1 s. A few in the Catacombs, everywhere in the Sunken Hollows. | 9 on contact |
 | **Bloater** | 26 | A veined sac of gas with a glowing core. Floats from the ceiling toward the hunter (24 px/s), leaking a little gas every ~2 s; **bursts into a poison cloud** when killed, and a lit one if it dies in or near fire. Hollows (a few) and Vents. | 6 on contact |
 | **Cinder wisp** | 10 | A fiery spark that flits at the hunter (58 px/s) in a wobbling line, **leaving a flame every 0.2 s** that burns him and ignites any gas; bursts into flame when killed; immune to fire. Vents only. | 7 on contact |
-| **Tunnel worm** | 28 | A long, thin burrower (17 thin segments, a 4-px head). Coiled out of sight in solid rock until the hunter is within 300 px (no line of sight needed), then **swims through anything but bedrock and masonry at 108 px/s (20% slower since 2026-10-14)** (never slowed by the rock), swinging its head toward him (and where he is heading) and bursting to 172 px/s as it nears the surface close to him, so it **leaps out of the ground at him**. **The moment its head breaks into open air it has no control at all**: it flies on the speed it had, with gravity and a little drag (the only place it loses speed), its body dragging behind, until its head touches the ground or a wall again and it dives back in at full speed. Can be hit anywhere along its length; the body hurts too (60%). Its sounds are only heard as it gets close. | 5 head, 3 body (halved on 2026-10-14) |
+| **Tunnel worm** | 14 (halved again 2026-10-15) | A long, thin burrower (17 thin segments, a 4-px head). Coiled out of sight in solid rock until the hunter is within 300 px (no line of sight needed), then **swims through anything but bedrock and masonry at 108 px/s (20% slower since 2026-10-14)** (never slowed by the rock), swinging its head toward him (and where he is heading) and bursting to 172 px/s as it nears the surface close to him, so it **leaps out of the ground at him**. **The moment its head breaks into open air it has no control at all**: it flies on the speed it had, with gravity and a little drag (the only place it loses speed), its body dragging behind, until its head touches the ground or a wall again and it dives back in at full speed. Can be hit anywhere along its length; the body hurts too (60%). Its sounds are only heard as it gets close. | 5 head, 3 body (halved on 2026-10-14) |
 | **Skeleton miner** | 22 | Shambles after the hunter and keeps its distance (backs off inside 80 px, closes beyond 150), then lights a **stick of dynamite** (0.55 s tell with the fuse sparking over its head) and lobs it in an arc every 3.2 s. The stick bounces and goes off 1.6 s later (a blast of 1.2x a basic explosive round, which also hurts monsters); **shoot it out of the air to set it off early**. Its hat lamp lights it. | 9 contact, blast 12+ |
 | **Cave roller** | 30 | An armoured grey pillbug. Crawls (30 px/s); within 190 px with a clear line it **curls into a ball** (0.55 s tell, shaking) and **rolls at 165 px/s for up to 2.8 s**, bouncing off walls (usually back toward the hunter), smashing crates, hurting 1.3x as much. Curled or rolling it takes **30% of all damage** (sparks); spent, it uncurls **dizzy for 1.5 s** (stars over its head) and takes **150%**, then rests before rolling again. | 12 (x0.4 crawling) |
 | **Piranha** | 8 | A small toothy fish (silver, dark back, red belly, an underbite of white teeth), in schools in the cave pools (one per ~80 pool cells, up to six a pool). Swims freely; once any part of the hunter (head, middle or feet) is in the water within 190 px it closes in (62 px/s), aiming at his feet when those are the wet part, and **darts** at him from 64 px (240 px/s for 0.22 s, every ~0.9 s). Before its first bite it never swims out; **after its first dash or bite it is set on him for good** (follows up to 480 px), leaping out of the surface after him when he is on land, and **out of the water it flops along in short hops** toward him. | 4 on contact, in or out of water |
@@ -451,7 +451,7 @@ The arena's two shops sit at the left and right bottom (a fifth in from each edg
 - **[Later]** more types, respawning.
 
 ## 9. Economy & Shop **[Roadmap steps 1 and 6]**
-- **Gold** (implemented, step 1) spills out as small coins that bounce on the terrain, glint (they're drawn emissive so they can be spotted in the dark) and are pulled toward the hunter within ~36 px, then collected on touch (a short delay after spilling). **A coin that has landed and isn't picked up vanishes 7 seconds later** (blinking for the last 1.5 s); its gold is lost, and being pulled toward the hunter restarts the timer. Coins are pixel-simulated like particles rather than Box2D bodies, so hundreds can lie around (cap 400; the oldest give way and their value carries on to the next coin). The run's total shows next to a coin icon under the gun status. **It resets every run** (no meta-progression for now).
+- **Gold** (implemented, step 1) spills out as small coins that bounce on the terrain, glint (they're drawn emissive so they can be spotted in the dark) and are pulled toward the hunter within ~36 px, then collected on touch (a short delay after spilling). **A coin that has landed and isn't picked up vanishes 7 seconds later** (blinking for the last 1.5 s); its gold is lost, and being pulled toward the hunter restarts the timer. Coins are pixel-simulated like particles rather than Box2D bodies, so hundreds can lie around (cap 400; the oldest give way and their value carries on to the next coin). The run's total shows next to a coin icon under the gun status. **It resets every run**; what carries over is **marks** (§11a-viii).
 - **Sources:** enemy drops (ghoul 3–6, bat 1–3, spitter 4–8, × the monster's toughness), **crates, which now break** from damage (wooden: 25 total, 0–4 gold; iron: 90, 5–12 gold) and splinter, and the dungeon itself: **gold ore** (rock veined with gold flecks, scattered through the cave walls — about 190 veins per area) spills a speck or two from a tenth of the pixels you dig out. Rare hidden chests in caverns come with the weapon chests (step 5).
 - **Shop** (implemented, roadmap step 6): each shop room has, left to right: an **ivory healing pedestal** with a glowing heart, **one generated weapon** (30% chance per slot of a fitted item), and **4 different ammo types/attachments**, on stone pedestals with prices floating over them (gold, or red when you cannot afford them). Standing next to one shows "[E] Buy Name"; E buys it. Weapon price 45g + 25g per fitted item + 0-20g, items 20-35g. A weapon bought with all three slots full opens the **compare prompt** and is paid for only once you pick which gun to replace. **Healing:** each E on the pedestal heals 10% of max health, priced by how much is missing, **and by how deep the shop is**: (8g when nearly full up to 40g when nearly dead) x (1 + 0.8 per area below the first), so 8-40g in the first shop, 14-72g in the second and 21-104g in the third ("Already at full health" costs nothing). **The hatch:** an iron plate set into the floor at the right end of the room (indestructible terrain), held shut by a **chain hanging from the ceiling** - shoot the chain (or blow it up) and a moment later the plate drops away, opening a shaft down into the next area. **Leaving the shop locks it** (stepping out of the room after having been in it): nothing can be bought afterwards (the items dim and the prompt says the shop is closed). The stock is generated with the area, not restocked; selling is not possible yet.
 
@@ -512,5 +512,341 @@ Order of work, by what unlocks what (items/pickups → loot → shop; ammo/attac
 7. **Audio** - *done:* generated placeholder sounds.
 8. **Healing** - *done:* the shop pedestal. **Area 2** - *done:* the Sunken Hollows. **Area 3** - *done:* the Sulfur Vents with poison gas; areas widened, the funnel to the shop; the reworked overworld; the DPS dummy. **Then:** more enemy types (to give each area its own character), a boss, healing pickups, a run summary on death.
 
+## 11a. Direction after Milestone 1: runs, the camp and the compendium
+
+*Agreed 2026-10-14. A plan, not yet built. Everything here is **[Later]** until a step below is started.*
+
+### 11a-i. What a run is
+
+- **Length:** a normal finish takes about **30 minutes**: a minute at camp, then roughly 4-5 minutes of main path per area, a couple of minutes for the Queen, and the rest in optional detours (vaults, events, elites) for players who want them.
+- **Short runs still count.** Dying early must never feel wasted: compendium discoveries, quest progress, rescued NPCs and marks (below) are banked as they happen, not at the end.
+- **Everything permanent is mostly sideways.** Permanent upgrades add *options and convenience* (more choices, new tools, a map, starting loadouts, new recipes) with only small stat bumps, so a first run and a fiftieth run still feel like roguelite runs.
+
+### 11a-ii. World expansion (step 0: do this before anything else)
+
+**Status (2026-10-14): the foundation is built.** Layout table, a world three times as wide (8640 px, extending *east* so the camp and the mine keep their places at the west end instead of moving to the middle), and the first side branch, **The Old Quarry**. What exists now:
+
+- **Layout table** (`LAYOUT` in `scenes/catacombs.lua`): each area is `{ x, y, w, h, tier }` (plus `parent`/`side` for shop hatches, `entry` for a surface crevice, `rank` for the "deepest reached" record). `levelAt` is a rectangle lookup (the nearest area for points in gaps), `catacombs.layoutSize()` gives the extent and `catacombs.entries()` the surface crevices. Areas can be any size.
+- **The world is 8640 px wide.** The main road is still the first 2880 px (`catacombs.SPINE_W`); everything east of it is open desert on the surface (mesas, boulders, ruined pillars, trees, a chest atop each far mesa, pots and crates) over unexplored rock for the branches to be carved from, with bedrock at the far east and bottom edges. The east is painted lazily (`World.lazyX`: a tile there is painted from the cells when it is first drawn or touched), so building the world costs about the same as before, and `World:fillFast` fills big plain regions row by row.
+- **The Old Quarry** (area 6, `THEMES[6]`): a side branch 2880 px wide and only 2300 px tall at x 2880-5759, entered by a **crevice in the east desert at x 4300** (stone lip, lamp posts, plank-lined shaft) that drops into its entrance chamber. Pale cut sandstone and spoil, amber crystals and lamps, miners, rollers, worms and a lot of TNT; it counts as tier 2 for difficulty and rank 2 for the record, and borrows the Catacombs' music, far scenery and sounds (`theme.track`, `theme.parallax`). It is generated in the background after the main road, or at once when the hunter comes within 1500 px of the crevice (`catacombs.ensure(py, px)`). Its shop is a dead end for now.
+- **Still to do for this step:** more branches (a west-side entrance is not possible with the camp at the west edge; branches go east, and a second column can be added by widening further), cross-cuts joining the branches to the main road, a vault or reward at the end of each branch, and varied depths for the main areas.
+
+The world is 2880 px wide with every area the same size, stacked in rows (§3, §7). That is too small a stage for a hub that grows, side branches and quests. The plan:
+
+- **Wider world.** Three times as wide (about **8640 px**, three columns of the current 2880), with the overworld a real, explorable desert across all of it. The main mine stays in the middle and the camp near it. The two flanks get their own **entrances**: a dry well or crypt in the west badlands, a canyon crevice or rail depot in the east.
+- **A spine and branches, not a grid.** The main spine keeps its run: Catacombs → Sunken Hollows → Sulfur Vents → the Queen → Cinder Warrens or Drowned Halls. The side columns hold **branch areas** with their own themes, monsters and rewards, entered from their own surface entrances or from cross-cuts off the spine. (Names and themes for the branches are open, see §12.)
+- **Depth does not have to match.** An area is a rectangle with its own width and height, not a cell in a row. Branches can be shorter (about 1800-2400 px) or longer than the spine's 3100 px, so the bottoms of the world are ragged: a quarry branch ends at a dead end with a vault, a flooded crypt keeps going. Areas can also be taller or wider than today's where it helps (a cavern-heavy area, a long narrow mine).
+- **Cross-cuts.** Horizontal tunnels, collapsed passages and diggable seams join the spine to the branches at set depths, so a hunter can wander sideways and find a branch from below, and the world feels one piece. Some are hidden (dig or blast in).
+- **Technical work this needs** (no design questions in it):
+  - `catacombs.lua` finds an area by row from the top (`levelAt`, `levelHeight`) and builds each area's rectangle from the one above. Replace that with a **layout table**: each area has an `x0, y0, x1, y1`, a theme, and links (which shop hatch or cross-cut leads where). `levelAt(y, x)` becomes a rectangle lookup.
+  - `overworld.lua` has `WIDTH` and `HEIGHT` as constants (`HEIGHT = CAVE_TOP + AREAS * CAVE_HEIGHT`); both come from the layout instead. The camp, headframe, ruins and so on keep their positions relative to the middle column.
+  - Generation stays background-driven and in order, but now follows the layout's links (a branch is generated when the hunter nears a link to it, as the next area is today).
+  - Memory: cells are one byte each in an FFI array (the unified world is ~38 MB now, ~115 MB at three times the width) and tiles allocate lazily, so this is affordable; fluids, lighting and enemies already work in a region around the hunter.
+  - Save "deepest reached" and the compendium's area names key off area ids, not rows.
+- **Pacing check:** a wider world must not lengthen the main path; the spine's path is unchanged and branches are optional. The 30-minute target is measured on the spine.
+
+**Built so far from the revised layout (2026-10-14):**
+
+- **The world is 11520 px wide, x -2880 to 8639.** `World.new(width, height, left, top)` takes an origin, so x and y may be negative (the sky dungeon will use negative y). Cells are stored per 256x256 tile, allocated when something is written in it; a tile filled whole (unexplored rock) is one id with no storage. `World:fillFast`, `markLazy` and `claim` paint unexplored regions on demand and let an area claim its own rectangle when it generates. Memory after generating every area is about 135 MB of Lua, and the world no longer needs bytes for ground nobody has seen.
+- **Fixed:** the fluid grid's key stride (2048 cells) overflowed above x 4096 and could not hold negative x; it is now 16384 with an offset (`K`, `KOFF` in `src/fluids.lua`). Physics terrain chunks work at negative coordinates, and `World:get` floors fractional coordinates.
+- **The west desert** (x -2880 to -1): mesas, boulders, ruined pillars, trees, chests and pots, and a shaft at x -700 (stone lip, lamp posts, plank lining) down to the flooded works.
+- **The Flooded Caverns** (area 8, x -2800 to -401, 2400 x 2600): caverns under a **lake** in the west desert (a bowl about 760 px wide at x -900 that narrows to a neck dropping into the top of the cave, all of it water; no pit or shaft). `area.flood = { level }` floods every open cell below that depth (runs of 2-px cells made by `cavegen`, filled by `fluids` a slice per frame; shop rooms stay dry, `dry` in `fluids.lua`); piranhas through the water. Without the **Diving Helm** (`perks.defs.diving_helm`, `fx.diving`) the hunter drowns, which is the lock.
+- **The Deep** (area 9, x -2800 to -401, 2400 x 1800): a flooded boss chamber under the galleries (arena 1730 x 1000), with the Matron as a placeholder boss. No braziers in a flooded arena.
+- **The Foreman's Hall** (area 7, under the Quarry, 2880 x 800): a standalone boss arena the Queen's size (`arenaFrac`, `arenaH`, `arenaWidth` in the area spec), with the Warden as a placeholder boss. **It always drops the Diving Helm** (`bossReward`).
+- **Water drawing** is now a shader that cuts rock out of whole runs of cells using the terrain mask, with the runs cached per grid row, so a flooded screen costs about the same as a dry one (it was 14 ms a frame, now well under 1). The old pixel-exact path is the fallback.
+- **Generation dependencies:** `catacombs.generate(i)` completes an area and only the areas whose hatches lead to it; side branches entered from the surface need nothing, and are generated when the hunter comes within 1500 px of their shaft.
+- **The Needle** (area 10, x 5800-8599, y -2900 to 1099): the vertical mountain at the east end. The desert ground rises on a long ramp (x 5350-5870, 120 px up) to a doorway in the mountain's face, with a lamp post. Inside is a deep cave whose routes **climb**: vertical shafts of 200-420 px with **ladders of one-way platforms** (a platform every 28 px, alternating sides; `info.platforms`, registered in `world.platforms` like the arena's), joined by level corridors. `area.climb`, `area.profile` (the silhouette: rows outside it stay sky) and `area.arenaCx` in `src/cavegen.lua`; it is dark inside although it stands above ground (`catacombs.indoors`). A summit arena (the Queen's size) holds a placeholder Dreadbat; killing it opens a gate in the roof and an exit shaft with a ladder up through the summit cap.
+- **The Cloud Reaches** (area 11, x 0-8599, y -4300 to -2901): the sky dungeon above the mountain, entered by a hole through its floor where the exit shaft arrives. `area.open`: no caves, floating islands (flat-topped, tapering below) and spires over a 200 px floor, a shop at the far west end, the dusk sky behind. **Low gravity** (`theme.gravity = 0.35`; `config.gravity` is live, scaled by `catacombs.update`, and physics gravity follows).
+- The world's top is now y -4400, with the sky and the mountain above the surface.
+- **Still to build:** a real aquatic boss, the Quarry's real boss, a real mountain-top boss, the hub's buildings, clouds and scenery for the sky, and individuality for each dungeon. (The vertical mountain and the sky dungeon are built, with placeholders.)
+
+#### Revised world layout (from the map sketch, 2026-10-14)
+
+The sketch replaces the "everything extends east" stopgap above. The Barrens, the camp and the mine keep their coordinates (x 0-2879, shaft at x 1660, surface at y ~510); everything else is arranged round them:
+
+```
+                         SKY DUNGEON  (very open, low gravity)
+                  ┌────────────────────────────────────────────┐
+                  │                                            │
+                  └─────────────────────────────────┬──────────┤
+                                                    │ VERTICAL │
+                                                    │ MOUNTAIN │
+ ═════════════ the Barrens (overworld, the surface) ═══╪══════════╪═══════
+   WATER    ┌─ hub / camp ─┐  ┌ main road ┐          │          │
+  DUNGEON   │  (NPCs)      │  │  area 1   │      ┌───┴────┐
+  (flooded) └──────────────┘  │  area 2   │      │ OLD    │
+ ┌────────┐                   │  area 3   │      │ QUARRY │
+ │        │                   │ main boss │      ├────────┴──────┐
+ ├────────┤                   │ 4 left/right     │ QUARRY BOSS   │
+ │ WATER  │                   └───────────       └───────────────┘
+ │ BOSS   │
+ └────────┘
+```
+
+Rough placement (px, y measured as today, so the sky and mountain are at negative y; sizes are starting points to tune):
+
+| Region | x | y | Size | How it is entered |
+|---|---|---|---|---|
+| Main road (areas 1-4) | 0-2879 | 760 down | as now | the mine shaft |
+| Hub / camp | about -400 to 1500 | the surface | the plain either side of the camp | (it is the overworld) |
+| **Water dungeon** | -2800 to -401 | 760-3359 | 2400 x 2600 | a sealed shaft on the surface at about x -700 |
+| **Water boss** | -2800 to -401 | 3360-5159 | 2400 x 1800 | down from the water dungeon's shop |
+| Old Quarry | 2880-5759 | 760-3059 | 2880 x 2300 | the crevice at x 4300 (built) |
+| **Quarry boss arena** | 2880-6500 | 3060-4559 | 3600 x 1500 | down from the Quarry's shop |
+| **Vertical mountain** | about 7000-8639 | about -2900 to 510 | 1640 x 3400 | climbs from the east end of the desert |
+| **Sky dungeon** | about -200 to 8639 | about -4300 to -2900 | 8800 x 1400 | the top of the mountain |
+
+**Biases, for now, as in the other dungeons** (individuality comes later): each is generated by `cavegen` from its own rectangle, with a shop and a boss where it has one, tiers by depth (water 3, quarry boss 3, mountain 3-4, sky 5). What is different about each is only what the sketch asks for:
+
+- **Water dungeon.** Most of its open space is **flooded** (a flood level near the top; every open cell below it is water), so it plays as a swim. The water is mostly still: only cells touching air or open space are awake. A boss area below it is bigger, for an aquatic boss. **Locked by gear, not a door:** without a *breathing item* the hunter drowns (the breath meter is already in `fluids.lua`), so the lock is the water itself. The item (working name *Diving Helm*) is the reward for the **Quarry boss**, which gives the Quarry's boss a point beyond loot: it opens the west.
+- **Vertical mountain.** Generated like the main areas but **routes climb**: the entrance is at the bottom, the goal at the top, and each route is a chain of ledges spaced within a jump (or a recoil jump), with level corridors between climbs. Everything else (monsters, loot, a shop, a boss) is as in other areas. Its top opens into the sky dungeon.
+- **Sky dungeon.** *Very open*: floating islands and cloud shelves in a wide chamber, few tunnels, long sight-lines. **Low gravity** (a per-area gravity scale, roughly a third, applied to the hunter, monsters and objects), so recoil jumps carry far. Enclosed below by a cloud floor so falling out does not drop into the desert.
+
+**Decisions (2026-10-14):**
+
+- The **Quarry boss always drops the Diving Helm** for now (no random loot roll for it).
+- The **Quarry boss arena** is sized for its boss, based on the Queen's chamber (a flat-floored boxy room about 1500 x 400 px with platforms, §7d) with a little rock round it; it is a standalone area under the Quarry and will change as the boss is designed.
+- The **mountain's entrance is a walk up**, the mirror of the first area's shaft: a path or ramp climbing the mountain's flank from the desert into a deep cave that opens out and eventually climbs.
+- The **sky dungeon is reached from the top of the mountain dungeon**, past a **boss** that waits there.
+
+**What has to change in the engine first** (an invisible step; see §11a-vii):
+
+1. **The world has to allow negative coordinates and stay cheap.** `World` takes an origin (`left`, `top`) so x and y may be negative, and stores cells **per tile, allocated when first written** (unexplored rock is one id per tile, not 11 million bytes), so a world twice as big costs only what is actually generated. The painted-on-demand tiles (`World.lazyX`) become a list of regions that areas claim when they generate.
+2. **Fluids key their cells with a stride of 2048 cells** (`K`), which breaks at x 4096 and above and cannot hold negative x. That is already a bug in the east desert and the Quarry's east half (water, gas and fire could alias into the wrong row). The key packing is widened and given an offset so any x or y in the world is valid.
+3. **Physics terrain chunks** skip negative chunk coordinates when terrain is dug (`cx >= 0 and cy >= 0`): fixed for the negative region.
+4. **Flood fill, climbing routes and a gravity scale** are new generator and physics features, added one per branch.
+
+### 11a-iii. Elites
+
+Monsters can spawn **elite**: bigger health bar, a visible mark and one or two **affixes**. Elites are the targets of bounties and the source of *trophies*.
+
+| Affix | What it does |
+|---|---|
+| **Armoured** | takes a fraction of damage from the front; weak to explosions and to being shot from behind |
+| **Burning** | trails fire; sets gas alight; immune to fire |
+| **Splitting** | breaks into two smaller copies of itself when killed |
+| **Vampiric** | heals when it hurts the hunter |
+| **Frenzied** | faster, with short rage windows |
+| **Hexed** | casts a curse on the hunter (slower reload, dimmer light) until it dies |
+
+- Each area spawns a few, more with depth, never in shop rooms or boss arenas. Affixes combine from the second area on.
+- **Built (2026-10-15), see §11a-ix:** Armoured, Burning and Splitting. Vampiric, Frenzied and Hexed are still to do.
+- An elite drops a **trophy**: marks (below) and one item from the **locked** pool (§11a-v), and can be mounted at the camp.
+- Elites share the monster's own animation and behaviour; the affix is mostly data, a tint and an icon, plus a few hooks (`enemies.damage`, `die`).
+
+### 11a-iv. The camp (the hub) and its people
+
+The Barrens' camp (tent, campfire, lanterns, the DPS dummy) is where permanent upgrades live. It **grows by the people the hunter finds below** and the **marks** he brings back.
+
+- **Marks** are the permanent currency: earned from elites, bosses, quests and first-time compendium discoveries. Gold stays run-only (spent in shops and lost on death).
+- **NPCs are found, then they move to camp.** Each is freed or helped in the dungeon (§11a-vi); once they live at camp they offer upgrades and quests for marks.
+
+| Person | Found | At camp |
+|---|---|---|
+| **Gunsmith** | a prisoner in a collapsed mine room (area 1) | weapon grades, bigger slots, new fuser recipes; unlocks guns for the pool |
+| **Prospector** | trapped under a cave-in (area 1; built, §11a-xii) | banks some gold between runs; sells digging tools (pickaxe, dynamite) |
+| **Bounty clerk** | a wounded hunter (area 2) | the board: bounties and quests |
+| **Apothecary** | caged in the Sulfur Vents (built, §11a-xiv) | a vigor tonic and starting flasks (no chapel or preacher: the desolate tone) |
+| **Cartographer** | a lost surveyor, caged in the Old Quarry (built, §11a-xiv) | the survey map |
+| **Bartender** | after the first boss (built, §11a-xiv) | house rules: harder runs that pay more marks |
+| **Taxidermist** | after the first elite trophy is carried back (built, §11a-xiii) | mounts trophies; each gives a small passive |
+
+- Camp upgrades each have a few tiers, bought with marks. Tiers are mostly new options (a fourth weapon slot is the exception we'd allow).
+- The camp is visibly different as it grows: a lit window in the gunsmith's shack, a bar at night, trophies on the wall.
+
+### 11a-v. Compendium gating
+
+The compendium (§9c) tracks two things per item, perk, monster and gun:
+
+- **Seen:** the hunter has met it (it shows as a silhouette). Goals, not rewards.
+- **Unlocked:** it can now drop, appear in shops and be fused.
+
+Unlocking comes from the Gunsmith's tier, a quest reward, or killing a particular elite. The starting pool is deliberately small and legible; most of the 53 items and the perks begin locked, with the common ones unlocked by simply playing. Discoveries are banked immediately, even if the run ends in death.
+
+### 11a-vi. Events and NPCs in the dungeon
+
+Each area rolls a few **events** alongside the crates, chests and the new story scenes (§7b, `src/story.lua`):
+
+- **Caged prisoner:** free them (kill the keeper, break the lock) and they move to camp. The main way to unlock a camp NPC.
+- **Wounded hunter:** gives a quest ("bring me three silver rounds", "kill the thing in the Hollows").
+- **Altar:** a curse for a boon, in the spirit of the perks.
+- **Sealed vault:** needs a key, dynamite or digging; holds a weapon or a locked item.
+- **Ghost merchant:** appears now and then, with odd prices.
+- **Quest items:** an object to carry back to camp alive.
+
+Quests can run across several runs ("find the three relics of the old preacher"); their progress is saved with the profile. Quests are given by the bounty clerk and by hunters met below.
+
+### 11a-vii. Build order
+
+*Status (2026-10-15): steps 1-5 are built at a first level (§11a-viii to §11a-xiv): marks and unlocks, the Gunsmith, elites, the bounty board, the Prospector, Taxidermist, Apothecary, Cartographer and Bartender, the dungeon events (altar, sealed vault, ghost merchant, wounded hunter and the questline of the silver bells) and two new areas. What remains is depth (more affixes, more quests and events, real areas with their own bosses).*
+
+0. **World expansion** (§11a-ii): layout table, the wider overworld, the first side branch (*done*); then the **revised layout**: (a) world origin and sparse cells, fluid key fix, physics guard; (b) the west column: flooded water dungeon and water boss; (c) the Quarry's boss arena and the Diving Helm reward; (d) the vertical mountain; (e) the sky dungeon.
+1. **Save fields and the compendium states:** marks, camp upgrades, quest progress, *seen* and *unlocked* per entry. Compendium gating wired into drops and shops.
+2. **Elites:** three affixes first (armoured, burning, splitting), trophies and marks.
+3. **First camp NPC:** one freeable prisoner in area 1 who appears at camp, with one purchasable upgrade.
+4. **Bounty board:** a single quest type (kill a named elite), pays marks.
+5. **More NPCs, events, branches and quests,** one at a time, then the rest of the camp's growth.
+
+Work on audio (real recordings), a map, accessibility settings and a daily seed can happen alongside any of these.
+
+### 11a-viii. Built so far: marks, unlocks and the Gunsmith (2026-10-14; `src/meta.lua`, `src/npcs.lua`)
+
+**Save files (version 2).** A profile now also keeps `marks`, `camp` (who lives there), `upgrades` (tier bought per upgrade), `unlocked` and `seen` (per category, id = true) and `stats.marksEarned`. **Older files keep everything they had found: it counts as unlocked**, so nothing a player already had disappears from the pool. With no profile in use (the world built behind the title screen, the test room) the whole pool is open; choosing a save file rolls the shops' goods and the starting revolver again from its pool (`shop.restock`, `inventory.starterGun`).
+
+**Marks** are banked the moment they are earned and shown on the HUD left of the gold bag (a small silver-violet sigil and the count, once a profile has any), and in the side notes: a discovery's note shows its "+1"; other earnings get a note of their own ("Marks earned: The Gunsmith freed +5").
+
+| Earned for | Marks |
+|---|---|
+| anything new in the compendium | 0 (was 1; turned off 2026-10-15) |
+| reaching an area for the first time | 3 |
+| freeing a prisoner | 5 |
+| every boss slain | 5 |
+| every elite slain | 2 |
+
+**The pool.** Weapons, ammo types and attachments are gated (perks and monsters are not, yet). **Unlocked from the start: the revolver, the double-barrel and the Broomhandle, and every common item** (fused items, made in the fuser, and levelled ones follow their base). The machine gun, the gatling and every rare and cursed item start locked: they never drop, sit in shops or come out of chests at random (`items.isAvailable`, `guns.isAvailable`, set by `meta.install`).
+
+**Seeing locked things.** A locked thing becomes **seen** when it lies within ~110 px of the hunter or he collects it. They turn up from: **bosses** (one of their four items is always a locked one while any are left, and their weapon is a locked kind 40% of the time); **chests** (a weapon from a chest is a locked kind 30% of the time); and the Gunsmith's thank-you gift (below). They work normally for the rest of that run.
+
+**The compendium** shows a small brass **padlock** on every locked weapon, ammo and attachment cell. A seen-but-not-collected entry is a silhouette with a faint rim, its name and "Seen". A locked entry's detail says what to do ("Locked. Teach the Gunsmith at camp to make it: 4 marks.", or, before he is freed, "...until someone who knows guns learns to make it").
+
+**The caged Gunsmith.** Area 2, the Sunken Hollows (moved from area 1 on 2026-10-15; `theme.prisoner`, placed by `cavegen` last so the layout doesn't change) has an **iron cage** on the flattest, roomiest stretch of floor found nearest the middle of its depth, levelled and cleared so it always fits, with a candle stub beside it and **two ghouls** standing guard. Inside, the Gunsmith (stocky, grey beard, flat cap with goggles, leather apron) sits slumped; when the hunter comes within ~120 px he gets up at the bars, faces him and calls out in speech bubbles ("Hunter! Over here!", "Shoot the lock off, quick!"). **Shooting the brass padlock** (or any blast reaching it) breaks it: the door swings open, he thanks the hunter ("Bless you, hunter!", "I'll make for your camp.", "Find me by the fire. Take this."), walks out and is gone in a puff of dust after ~5 s, leaving a **gift gun** on the cage floor (a kind he doesn't make yet, if there is one). The profile records him at camp and pays 5 marks. In later runs his cage stands open and empty.
+
+**At camp** the Gunsmith's **stall** stands east of the fire (x 1134): an awning on two posts, a workbench with a vise, a rifle being mended and a box of cartridges, long guns leaning on a post, an anvil on a stump where he hammers (sparks fly) and a hanging lantern. He turns to face the hunter and greets him with a random line when he comes near. **[E] Talk to the Gunsmith** opens his page (Esc or E closes it; the game is paused):
+
+- **Upgrades** (cards with tier pips and a price in marks; Enter or click buys the next tier):
+
+| Upgrade | Tiers (marks) | Effect |
+|---|---|---|
+| **Filed and Oiled** | 6, 12 | generated weapons' bonuses roll 15% better per tier (and their one worse stat less badly), so better grades turn up more often |
+| **Bored-Out Frames** | 8, 16 | generated weapons have a 15% chance per tier of one more slot |
+| **Loaded Holster** | 5 | the starting revolver always comes with a (non-cursed) ammo type or attachment fitted |
+
+- **Teach him:** a grid of everything still locked, silhouettes until seen. Choosing a seen one asks to confirm and **unlocks it for good** for weapon 6, rare 4 or cursed 3 marks. The focused entry's name, price and description show under the grid.
+
+**Elites** (§11a-ix) pay 2 marks, record a trophy and drop a locked item too.
+
+**Adding the next person** needs an entry in `meta.PEOPLE`, their upgrades in `meta.UPGRADES` (with `npc = id`), a `prisoner = id` on the area theme they are caged in, their camp spot (`npcs.setCamp` in `overworld.populate`) and their drawing in `src/npcs.lua`.
+
+### 11a-ix. Elites, as built (2026-10-15; `src/enemies.lua`)
+
+- **Which and how many:** when an area's monsters are spawned (`catacombs.spawnProps`), `enemies.rollElites` makes a few of them elite: 3 in a tier-1 area, then 4, 5, 6, 7 by depth tier. Only ghouls, bats, spitters, hoppers, bloaters, skeleton miners and cave rollers can be elite (not worms, piranhas, swarm members, wisps, bosses or the dummy). Each gets one affix; from tier 2 on, 35% get a second.
+- **Stronger:** 3x health, 1.25x damage, 2.5x gold.
+- **How they look:** the sprite pulses with the affix's colour (taking turns with two affixes, through the same tint shader as frost and fire; a status tint takes over while one applies), a crest of small glowing diamonds over the head (one per affix, bobbing), a light in the affix's colour (a bigger, warmer one for Burning), and once they are fighting a **health bar edged in gold with the name over it** ("Splitting Armoured Ghoul"), thinner than a boss's.
+
+| Affix | Colour | What it does |
+|---|---|---|
+| **Armoured** | steel blue | takes 35% of the damage from the front (from shots travelling into its face; sparks and a clank), full damage from behind, **150% from blasts** |
+| **Burning** | orange | leaves a small flame every 0.3 s while it moves (flyers only light gas), sheds embers, sets gas alight; immune to fire and burning (`e.fireproof`) |
+| **Splitting** | green | when it dies, two ordinary monsters of its kind (half the health) are flung out of it, already hunting the hunter (not for spitters) |
+
+- **When one dies:** extra gold, an item from the **locked pool** (any item if none are left), "ELITE SLAIN", and through `enemies.onEliteKilled` (src.game) **2 marks** ("Splitting Armoured Ghoul slain +2") and a **trophy**: the profile counts elites slain per kind (`profile.trophies`, for the Taxidermist later).
+
+### 11a-xi. The bounty board, as built (2026-10-15; `src/bounties.lua`)
+
+- **At camp,** west of the practice range (x 762), a plank board under a little shingled roof with up to three small posters nailed to it (a taken one has a red mark). It is there from the first run (the bounty clerk, when built, can take it over). **[E] Read the bounty board** opens its page (E or Esc closes it).
+- **The page:** three **wanted posters** side by side, the same parchment poster as the death recap with the monster printed in ink and the bounty's **name** ("Grey Rumble", "Old Gnasher": a title and a name per kind), and under each: what it is ("Splitting Armoured Cave Roller"), where it was last seen ("the middle Sunken Hollows": the upper, middle or lower third of an area), the reward in marks, and **Take it** / **Give it up** (asks first; nothing is paid back). **Up to two** can be taken at once ("Hands full"); a taken poster is stamped **TAKEN** in red.
+- **What gets posted:** a floor-walking kind (ghoul, hopper, skeleton miner or cave roller; a kind already on the board is avoided) in an area the profile has reached (or the first two), that has that kind and isn't flooded. One affix in a rank-1 area, two deeper. Reward: 6 + 3 x the area's rank, +2 for a second affix (9-23).
+- **Across runs:** the posters and which are taken are saved with the profile (`profile.bounties`). The board fills back up to three when a run starts.
+- **In a run:** once a taken bounty's area exists, the monster of its kind nearest to the third it was seen in (or a fresh one on a floor spot there) becomes the **named elite**: the bounty's affixes, an elite's 3x health and half as much again, and its name in gold over its health bar (shown at once, not only once it fights). Walking into its area brings up a note ("Bounty: Grey Rumble / Somewhere in the middle part of this area"), and while it is within 700 px but off screen a **gold triangle** on the screen's edge points to it.
+- **Claimed:** killing it pays the reward at once ("Bounty claimed: Grey Rumble +14", on top of the elite's own 2 marks and loot), and the poster comes down.
+
+### 11a-xii. The Prospector and the cave-in, as built (2026-10-15)
+
+- **The cave-in (area 1, the Catacombs):** where the Gunsmith's cage used to be placed, `cavegen` heaps a **mound of loose earth** (about 37 px wide and 21 tall, the area's dirt with one lump in eight of rock) over the levelled spot. The Prospector is buried in it: only his battered hat, whiskered face and a **waving arm** show at its top, with broken shoring sticking out and his lantern on its side beside it. Two ghouls stand guard as at the cage. Within ~120 px he calls out ("Down here! Under the rock!", "Shoot the dirt off me!"). **Shooting the dirt away** (any gun digs dirt) or blasting it frees him once three quarters of the earth over his body is gone (checked five times a second): he stands, thanks the hunter ("Air! Sweet air!", "I'll be under the arch, west of your fire."), walks off and is gone, leaving **60 gold** and **two sticks of dynamite** for the run. 5 marks, and he lives at camp from then on (later runs: just the heap).
+- **His camp, under the natural arch** west of the bounty board (x 650): a bedroll, his iron-bound **strongbox**, a pick against a rock, a sack of samples and a lantern on a stake. He swirls a gold pan, and turns to the hunter with a line when he comes near. **[E] Talk to the Prospector**.
+- **The strongbox** (on his page, right of the upgrades): how much gold is in it against what it holds, with a bar, what the hunter carries, **Put it in** (as much as fits) and **Take it all out**. What is in it survives death; the hunter walks back up to camp with gold to put it away and takes it out at the start of a run to spend below (`profile.bank`; deposits don't count as gold earned again).
+- **Upgrades:**
+
+| Upgrade | Tiers (marks) | Effect |
+|---|---|---|
+| **Bigger Strongbox** | 5, 10 | holds 100, then 250, then 600 |
+| **Miner's Tithe** | 6, 12 | on death, 15% per tier of the gold carried goes into the strongbox (up to what it holds) |
+| **Blasting Kit** | 5, 10 | every run starts with 2 sticks of dynamite per tier |
+
+- **Dynamite** (a new action, **Throw dynamite, Q** by default, rebindable): throws a stick toward the mouse (faster the farther the aim, with a little lift). It arcs, bounces and goes off after 1.4 s in a blast 1.6x a miner's that **digs an 11-px crater in any rock** (not bedrock or masonry), hurting monsters and the hunter alike; shooting it in the air sets it off early. The count shows on the HUD under the gold (a red stick and "x2"); with none left, Q says "No dynamite".
+
+### 11a-xiii. The Taxidermist (2026-10-15; `src/meta.lua` MOUNTS, `src/npcs.lua`)
+
+- **The natural arch is gone** (the rock arch west of the board fenced in the Prospector's camp); that ground is open.
+- **He needs no rescuing:** he turns up at camp (x 1196, east of the Gunsmith) once the profile has slain any elite (the trophy count, §11a-ix). His stall: planks with a row of nails for seven trophy plaques (a plaque appears on its nail once mounted), a work table with a half-stuffed shape, jars on a shelf; he stitches away until the hunter comes near. **[E] Talk to the Taxidermist**.
+- **His page:** a row per kind of elite (ghoul, cave bat, spitter, mire hopper, bloater, skeleton miner, cave roller): elites of that kind slain, the bonus, and **Mount** for 3 marks (needs one slain). A mount is permanent for the profile. Bonuses (`perks.extraFx`, summed with the run's perks):
+
+| Mounted | Bonus |
+|---|---|
+| Ghoul | +10 max health |
+| Cave bat | +4% movement speed |
+| Spitter | reloads 5% faster |
+| Mire hopper | +5% jump height |
+| Bloater | take 4% less damage |
+| Skeleton miner | +6% gold from everything |
+| Cave roller | kicks hit 20% harder |
+
+### 11a-xiv. The rest of the roster, the dungeon events and the new areas (2026-10-15)
+
+**Camp people** (`src/people.lua` draws them, `src/meta.lua` holds their data):
+
+| Person | Found | Stall (x) | What they do |
+|---|---|---|---|
+| **Apothecary** | caged in area 3 (the Sulfur Vents), gives a flask | west end, 520 | **Vigor Tonic** (5, 10 marks): +12 max health per tier. **Pocket Flask** (6, 12): start each run with a flask per tier; **H** drinks one for 35% of max health (HUD: a green bottle and a count) |
+| **Cartographer** | caged in area 6 (the Old Quarry) | 706, between the Prospector and the board | **Survey Map** (6, 10): **M** opens a map of everywhere walked this run (zoomed to the charted ground, cells of 16 px charted within ~96 px of the hunter); tier 2 marks shops (cyan), chests (gold) and bounty quarries (red) on charted ground |
+| **Bartender** | arrives once the profile has slain a boss | a bar between the tent and the fire, 984 | **House rules**, chosen for the next run (switches; they apply at a run's start, and no boss is affected): **Rotgut** monsters +40% health, marks +35%; **Powder Keg** monsters hit +30% harder, marks +30%; **Lean Times** shops and healing cost +30%, marks +20%. Marks earned in a run are multiplied by all that are on |
+
+**Events** (`src/events.lua`; `cavegen` places them last, in every area with monsters except arenas and the sky):
+
+- **Altar** (1 in areas of rank 1-2, 2 deeper): a stone plinth with a violet flame. **[E] Make an offering** once: a **rare perk and a cursed perk** you don't have (a curse for a boon).
+- **Sealed vault** (one an area): a stone-brick room carved in solid rock with a narrow corridor out to the nearest cave, closed by an **iron door** (the iron can't be broken; its keyhole glints). Open it with a **key** (the room is wrapped in iron: it can't be dug or blasted into). The key is carried by **the area's first elite** (it drops when it dies and is picked up by walking over it; the HUD counts keys), or lies on a ledge if there is none. Inside, a **reliquary chest**: a weapon (likely a locked kind, well fitted), a locked item and 60-110 gold (x depth).
+- **Ghost merchant:** once a run (60%), between 40 and 110 s in, a pale hooded ghost with a lantern appears near the hunter for ~110 s. **[E]** opens his page: three items (any, locked ones too) at **odd prices** paid in gold (9-217 and never round), **health** (7-24) or **marks** (2-6).
+- **Wounded hunter** (area 2, until the quest is done): lying bandaged against the wall. **[E]** starts the questline of **the old preacher's three silver bells**, saved with the profile. A bell then lies hidden in each of the first three areas; walking over one carries it (HUD), and dying loses it. **[E] at the bounty board** delivers what is carried: 4 marks each; all three: 15 marks and a locked item. (Delivered bells are not placed again.)
+
+**New areas:** the two post-Queen paths each go on: **The Ember Foundry** (under the Cinder Warrens: more lava, wisps, miners and rollers, hotter light) and **The Silt Vaults** (under the Drowned Halls: even more water, hoppers and bloaters). Their paths' last shops now have hatches (area 5, tier 5; `LAYOUT` indices 12 and 13, themes derived from the areas above).
+
+### 11a-xv. The town (2026-10-15; `src/town.lua`)
+
+The hub grows from the hunter's camp into a western town as people move in. **Everyone always stands in the same place**: the street has eight fixed **lots**, each with a raised wooden **porch** (8 px up, 56 wide) and **three steps** on its left end, real terrain built with the world (`town.build`), so the ground plan never changes and the steps are always walkable (no step is taller than the player's 5 px limit, even where the ground dips). The person stands on their porch at the lot's centre.
+
+| Lot (x) | Who |
+|---|---|
+| 520, 586, 652, 718 | Apothecary, Cartographer, Prospector, Taxidermist |
+| 784 | the bounty board |
+| (the hunter's tent, the practice dummy and the campfire stay in the middle, around x 830-1040) | |
+| 1100, 1166 | Gunsmith, Bartender |
+| 1232 | the **town hall**, a spare lot for the next building (bounty clerk, sheriff...) |
+
+**Three stages**, from how many of the six people are at camp (`town.stage`):
+
+1. **Camp (0-3 people):** the stalls as they were (awnings, tables, bars) on their porches.
+2. **Settlement (4-5, more than half):** every occupied lot gets a **plank shack**: board walls in the person's colour, a three-course shingle roof, a porch roof on two posts, two small windows, hanging lanterns and a lettered sign standing on the ridge. The stall's own awning is dropped (`s.bare`). Windows and lanterns glow and light the street.
+3. **Town (all six):** every lot becomes a **false-front building**: a two-storey painted facade (clapboard, cream trim, two lit windows), a cornice, a raised parapet with the name in letters (APOTHECARY, SURVEYS, ASSAY, TAXIDERMY, GUNS, SALOON), a striped scalloped awning on posts, a shaded side wall. The **town hall** is finished (a tower with a clock and a red flag, double doors, shuttered windows; closed for now). A **GUNNUG** welcome sign stands at the west end and **telegraph poles** carry a wire, sagging, across the whole street.
+
+**Nothing marks an empty lot** (revised the same day: the first version had survey stakes, FOR SALE boards and timber frames, which gave the plan away). A lot is bare desert until its person arrives: then the porch and steps rise out of the ground under them (a puff of dust and a thump; `town.sync`, checked every frame, and run while the world is built so a returning save file's town is already there) and the stall or building appears. Switching to a save file with fewer people takes porches away again. The town hall lot is built only when all six are in. The bounty board's lot is there from the start.
+
+Each building's colour is the lot's `accent`, its lettering `sign`, so a new lot is one entry in `town.LOTS` and, for a person, one stall drawer. Things moved to make room: the natural arch and two trees (earlier), the bones east of the pond (x 1396), a crate, an urn. The porches are wood, so they can be shot to pieces like any wood; the next run rebuilds them.
+
+### 11a-xvi. Controls and fixes after playtesting (2026-10-15)
+
+- **Restart is a hold:** hold **R** (rebindable) for 2 s: after 0.5 s the screen fades to black over the remaining 1.5 s and the run restarts; letting go brings the picture back. The key must be released after a restart before it counts again.
+- **Survey map:** **+ and - buttons** in the top-right of the map's border, the **mouse wheel** (about the cursor), **+/-** keys and **0** (back to the fitted view) zoom; a **right-button drag**, the arrows or WASD move it. **Left-click** puts a **teal X** (with its distance from the hunter in metres, 8 px each) anywhere on the map; **right-click an X** takes it down. Marks last for the run.
+- **Vaults are sealed in iron:** the room is wrapped in a 3-px iron shell (like the door), so it cannot be dug or blasted into: the only way in is the key. The corridor out to the cave stays ordinary rock.
+- **Water glints off** along with the reflections (the streaks of lamplight under a water surface read as reflections).
+- **Controls page** rows shrink to fit above the buttons however many actions there are.
+- **Speech bubbles** never overlap (a later one goes above) and the camp's people greet one at a time. The HUD's right-hand column stacks gold, marks, then a row per carried item (dynamite, flasks, keys, bells), centred under the sack.
+
+### 11a-x. Performance notes (2026-10-15)
+
+Measured with a scripted profiler (8 ghouls, a burst of three shots every 5 frames): plain hits cost under 0.1 ms a frame; the lag around fights came from what hits set off.
+
+- **Bullets tested every monster in the world** at every pixel they moved (~1000 monsters once all areas exist). `enemies.hitTest` now uses a list of the monsters within 1000 px of the hunter, rebuilt every frame (new spawns join it at once).
+- **Blasts re-traced the terrain's physics outlines on every dig** (each explosive round digs several times and a volley digs the same chunks over and over: 20-40 ms frames). `physics.rebuildRegion` now queues the chunks, and `physics.flush` re-traces each once just before the next physics step.
+- **Smoke** made a fresh table for every smoke pixel drawn every frame; the tables are now reused.
+- **Water reflections are off** (`fluids.reflector` is no longer set): they drew every creature a second time near water.
+- **Hub and first-area lag (2026-10-15):** the areas below the surface are generated in the background, and that took a 10 ms slice of every 16.7 ms frame for the first ~minute of play (hub frames ~15.7 ms, ~7 ms once everything was built; it faded as the hunter went deeper because generation had finished). In play the budget is now 2.5 ms (6 ms until the first area exists, which is ready after ~8 s, about when the hunter reaches the shaft); with a menu, the weapon panel or the compare prompt open, or on the title screen, it is still 10 ms. Hub frames: ~7 ms. Still to do: when an area finishes, placing its props costs one 30-50 ms hitch (`fluids.add`, the physics outlines).
+- **Tumbleweeds** are twig balls: a ragged outline with crossing sprigs over a dark inside, three variants per size, rolling and turning (before, a spoked wheel).
+- Explosive volleys went from ~33 ms to ~24 ms a frame on average and the worst frames from 131 ms to about 50-75 ms. Left: the game makes several hundred KB of garbage a frame, blasts still repaint and flood-fill terrain (~1-2 ms each), and fire and smoke drawing grows with the fire.
+
 ## 12. Open Questions
 - Overworld size and contents for the long-term version.
+- **World layout (§11a-ii):** names, themes and monsters for the side-branch areas; how many branches; how long the spine and branches should be; where the cross-cuts sit.
+- **Camp (§11a-iv):** whether the camp stays on the surface or also gets an underground annex; how many tiers each upgrade has; what the first Taxidermist passives are.
+- **Quests (§11a-vi):** how many quests can be active at once; whether failed quests (a dead NPC, a lost item) can be retried.
+- **Elites (§11a-iii):** whether affixes should be visible on the compendium before the first kill.
+- **Revised layout (§11a-ii):** the Quarry boss and the aquatic boss (kinds, arenas, what they drop); whether the Diving Helm is the only way into the water or a second route (a drain, a pump) should exist; how the mountain and the sky dungeon join (a hatch, an updraft); what stops a fall out of the sky.

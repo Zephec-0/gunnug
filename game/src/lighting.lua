@@ -30,32 +30,50 @@ local W, H = config.VIRTUAL_W, config.VIRTUAL_H
 local canvas, hazeCanvas, maskCanvas
 local glow -- radial falloff sprite (fallback path)
 local white -- 1x1 sprite the shader quads are drawn with
-local lightShader, maskShader
+local lightShader, maskShader, terrainShader, softShader
 local fogGather, fogBlur, fogApply -- fog shaders (nil if unavailable)
 local fogA, fogB -- quarter-size fog canvases, ping-ponged by the blur
 local FOG_DIV = 4
 local lights = {}
 local ambient = { 1, 1, 1 }
 
+local LIGHT_GAIN = 1.125 -- every light a little brighter than its colour says
 local HAZE = 0.2 -- strength of the haze pass relative to the light itself
 local HAZE_MAX_RADIUS = 200 -- bigger lights (the sun) make no haze
 local FOG = 0.45 -- strength of the fog lit by the lights around it
 local FOG_CEILING = 0.12 -- the most the fog can add anywhere (soft limit)
 local MIST = 0.017 -- peak strength of the mist hanging in open cave air
 
+-- Every light of a pass is one quad of a single mesh, its position, radius
+-- and colour carried by the vertices (a draw and seven uniforms per light
+-- added up to most of a millisecond with a gunfight's hundred-odd lights)
 local LIGHT_SOURCE = [[
+varying vec3 vLight; // the light's x, y and radius, in canvas pixels
+varying vec3 vTint;
+varying vec2 vPos;
+
+#ifdef VERTEX
+attribute vec4 LightA;
+attribute vec4 LightB;
+vec4 position(mat4 transform_projection, vec4 vertex_position) {
+  vLight = LightA.xyz;
+  vTint = LightB.rgb;
+  vPos = vertex_position.xy;
+  return transform_projection * vertex_position;
+}
+#endif
+
+#ifdef PIXEL
 uniform Image mask;
-uniform vec2 origin;
-uniform vec2 span;
-uniform vec2 lightPos;
 uniform vec2 canvasSize;
-uniform float radius;
 uniform float power;
 uniform float leak;
-uniform vec3 tint;
+uniform float gain;
 
 vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
-  vec2 p = origin + uv * span;
+  vec2 p = vPos;
+  vec2 lightPos = vLight.xy;
+  float radius = vLight.z;
   float dist = length(p - lightPos);
   if (dist >= radius) {
     return vec4(0.0, 0.0, 0.0, 0.0);
@@ -77,10 +95,11 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
       }
     }
     occ = occ * dist / 24.0;
-    vis = mix(leak, 1.0, exp(-occ * 0.35));
+    vis = mix(leak, 1.0, exp(-occ * 0.55));
   }
-  return vec4(tint * a * vis, 1.0);
+  return vec4(vTint * gain * a * vis, 1.0);
 }
+#endif
 ]]
 
 -- Fog, step 1: the light map (less the ambient) in open air, shrunk to the
@@ -135,6 +154,7 @@ uniform float strength;
 uniform float ceiling;
 uniform vec3 mistTint;
 uniform float mist;
+uniform float drift;
 
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -153,8 +173,8 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
     return vec4(0.0, 0.0, 0.0, 1.0);
   }
   vec2 w = uv * canvasSize + cam;
-  float n = vnoise(w * 0.018 + vec2(time * 0.04, time * 0.015)) * 0.65
-    + vnoise(w * 0.047 - vec2(time * 0.035, 0.0)) * 0.35;
+  float n = vnoise(w * 0.018 + vec2(time * 0.04 - drift * 0.012, time * 0.015)) * 0.65
+    + vnoise(w * 0.047 - vec2(time * 0.035 + drift * 0.02, 0.0)) * 0.35;
   float drift = 0.3 + 1.2 * smoothstep(0.2, 0.85, n);
   vec3 here = max(Texel(light, uv).rgb - ambient, 0.0);
   float lum = dot(here, vec3(0.3, 0.59, 0.11));
@@ -166,10 +186,83 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
 }
 ]]
 
+-- Softens the light map and haze as they are laid over the scene: five taps
+-- a little under a pixel apart. The shadow rays start at a random offset per
+-- pixel (so edges come out as fine grain, not bands); this takes the sparkle
+-- out of that grain and keeps the edges.
+local SOFT_SOURCE = [[
+uniform vec2 texel;
+vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
+  vec2 o = texel * 0.8;
+  vec4 c = Texel(tex, uv) * 0.36;
+  c += (Texel(tex, uv + vec2(o.x, o.y)) + Texel(tex, uv + vec2(-o.x, o.y)) + Texel(tex, uv + vec2(o.x, -o.y)) + Texel(tex, uv + vec2(-o.x, -o.y))) * 0.16;
+  return c;
+}
+]]
+
 local MASK_SOURCE = [[
 vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
-  float a = Texel(tex, uv).a;
+  float a = Texel(tex, uv).a * color.a;
   return vec4(a, a, a, 1.0);
+}
+]]
+
+-- Normal-mapped terrain. The rock's own shading is read as a height map; the
+-- direction the light map brightens toward is the direction of the light. Faces
+-- tilted toward it brighten, faces tilted away darken, and the shiny crests
+-- pick up a glint. The light map itself is multiplied over afterwards, so this
+-- only adds relief: it does nothing where the light is flat or dim.
+local TERRAIN_SOURCE = [[
+uniform Image light;
+uniform vec2 canvasSize;
+uniform vec2 texel;
+uniform vec3 ambient;
+uniform float strength;
+
+float lum(vec3 c) {
+  return dot(c, vec3(0.3, 0.59, 0.11));
+}
+
+// The rock's brightness smoothed over a few pixels (3 taps), so the relief
+// follows its broad shading and ridges instead of every pixel's speckle
+float height(Image t, vec2 uv, vec2 along, float own) {
+  vec4 a = Texel(t, uv);
+  vec4 b = Texel(t, uv + along);
+  vec4 c = Texel(t, uv - along);
+  float h = (a.a > 0.5 ? lum(a.rgb) : own) + (b.a > 0.5 ? lum(b.rgb) : own) + (c.a > 0.5 ? lum(c.rgb) : own);
+  return h / 3.0;
+}
+
+vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
+  vec4 c = Texel(tex, uv);
+  if (c.a < 0.5) {
+    return c * color;
+  }
+  float own = lum(c.rgb);
+  vec2 ox = vec2(texel.x * 3.0, 0.0);
+  vec2 oy = vec2(0.0, texel.y * 3.0);
+  float hl = height(tex, uv - ox, oy, own);
+  float hr = height(tex, uv + ox, oy, own);
+  float hu = height(tex, uv - oy, ox, own);
+  float hd = height(tex, uv + oy, ox, own);
+  vec3 n = normalize(vec3((hl - hr) * 2.2, (hu - hd) * 2.2, 1.0));
+
+  vec2 p = sc / canvasSize;
+  vec2 d = vec2(5.0) / canvasSize;
+  vec2 j = vec2(0.0, 1.5) / canvasSize;
+  vec2 i = vec2(1.5, 0.0) / canvasSize;
+  float ll = lum(Texel(light, p - vec2(d.x, 0.0)).rgb) + lum(Texel(light, p - vec2(d.x, 0.0) + j).rgb) + lum(Texel(light, p - vec2(d.x, 0.0) - j).rgb);
+  float lr = lum(Texel(light, p + vec2(d.x, 0.0)).rgb) + lum(Texel(light, p + vec2(d.x, 0.0) + j).rgb) + lum(Texel(light, p + vec2(d.x, 0.0) - j).rgb);
+  float lu = lum(Texel(light, p - vec2(0.0, d.y)).rgb) + lum(Texel(light, p - vec2(0.0, d.y) + i).rgb) + lum(Texel(light, p - vec2(0.0, d.y) - i).rgb);
+  float ld = lum(Texel(light, p + vec2(0.0, d.y)).rgb) + lum(Texel(light, p + vec2(0.0, d.y) + i).rgb) + lum(Texel(light, p + vec2(0.0, d.y) - i).rgb);
+  vec2 g = vec2(lr - ll, ld - lu) / 3.0;
+  float lv = max(lum(Texel(light, p).rgb) - lum(ambient), 0.0);
+  float reach = smoothstep(0.0, 0.06, length(g)) * smoothstep(0.03, 0.4, lv);
+  vec3 L = normalize(vec3(g * 4.0, 0.5));
+  float lit = dot(n, L) - L.z;
+  float glint = pow(max(dot(n, normalize(L + vec3(0.0, 0.0, 1.0))), 0.0), 36.0) * smoothstep(0.4, 0.85, own);
+  vec3 rgb = c.rgb * (1.0 + clamp(lit, -0.5, 0.5) * 1.1 * strength * reach) + vec3(1.0, 0.93, 0.8) * glint * 0.2 * strength * reach;
+  return vec4(rgb, 1.0) * color;
 }
 ]]
 
@@ -185,6 +278,18 @@ function lighting.load()
   local ok2, b = pcall(love.graphics.newShader, MASK_SOURCE)
   if ok and ok2 then
     lightShader, maskShader = a, b
+    local okS, sf = pcall(love.graphics.newShader, SOFT_SOURCE)
+    if okS then
+      softShader = sf
+      canvas:setFilter("linear", "linear")
+      hazeCanvas:setFilter("linear", "linear")
+    end
+    local okT, t = pcall(love.graphics.newShader, TERRAIN_SOURCE)
+    if okT then
+      terrainShader = t
+    else
+      print("lighting: terrain shader unavailable", t)
+    end
     local okG, g = pcall(love.graphics.newShader, FOG_GATHER)
     local okB, bl = pcall(love.graphics.newShader, FOG_BLUR)
     local okA, ap = pcall(love.graphics.newShader, FOG_APPLY)
@@ -218,40 +323,86 @@ function lighting.load()
   glow:setFilter("linear", "linear")
 end
 
+-- The light records are kept and reused frame to frame (hundreds a frame in
+-- a gunfight were a steady stream of garbage)
+local lightPool = {}
+
 -- Starts a new frame of lights with the given ambient colour
 function lighting.begin(ambientColor)
-  lights = {}
+  for i = #lights, 1, -1 do
+    lights[i] = nil
+  end
   ambient = ambientColor or { 1, 1, 1 }
 end
 
 -- Adds a light in world coordinates. intensity scales the colour.
 function lighting.add(x, y, radius, r, g, b, intensity)
   intensity = intensity or 1
-  lights[#lights + 1] = { x = x, y = y, radius = radius, r = r * intensity, g = g * intensity, b = b * intensity }
+  local n = #lights + 1
+  local l = lightPool[n]
+  if not l then
+    l = {}
+    lightPool[n] = l
+  end
+  l.x, l.y, l.radius = x, y, radius
+  l.r, l.g, l.b = r * intensity, g * intensity, b * intensity
+  lights[n] = l
 end
 
--- One light drawn by the shader onto the current canvas
-local function drawLight(l, camX, camY, radius, power, leak, scale)
-  local lx, ly = l.x - camX, l.y - camY
-  local x0, y0 = math.max(0, math.floor(lx - radius)), math.max(0, math.floor(ly - radius))
-  local x1, y1 = math.min(W, math.ceil(lx + radius)), math.min(H, math.ceil(ly + radius))
-  if x1 <= x0 or y1 <= y0 then
+local LIGHT_FORMAT = { { "VertexPosition", "float", 2 }, { "LightA", "float", 4 }, { "LightB", "float", 4 } }
+local lightVerts = { {}, {} } -- (per pass: kept and refilled, like the light records)
+local lightMeshes = {}
+
+local function lightVert(verts, k, x, y, lx, ly, radius, l)
+  local v = verts[k]
+  if not v then
+    v = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+    verts[k] = v
+  end
+  v[1], v[2], v[3], v[4], v[5] = x, y, lx, ly, radius
+  v[7], v[8], v[9] = l.r, l.g, l.b
+end
+
+-- Draws a pass of lights (the shader set, its power, leak and gain sent) onto
+-- the current canvas: all of them at once, each a quad over its reach.
+-- hazeOnly: just the small lights (the sun makes no haze).
+local function drawLights(pass, camX, camY, radiusMul, hazeOnly)
+  local verts = lightVerts[pass]
+  local n = 0
+  for _, l in ipairs(lights) do
+    if not hazeOnly or l.radius <= HAZE_MAX_RADIUS then
+      local radius = l.radius * radiusMul
+      local lx, ly = l.x - camX, l.y - camY
+      local x0, y0 = math.max(0, math.floor(lx - radius)), math.max(0, math.floor(ly - radius))
+      local x1, y1 = math.min(W, math.ceil(lx + radius)), math.min(H, math.ceil(ly + radius))
+      if x1 > x0 and y1 > y0 then
+        lightVert(verts, n + 1, x0, y0, lx, ly, radius, l)
+        lightVert(verts, n + 2, x1, y0, lx, ly, radius, l)
+        lightVert(verts, n + 3, x1, y1, lx, ly, radius, l)
+        lightVert(verts, n + 4, x0, y0, lx, ly, radius, l)
+        lightVert(verts, n + 5, x1, y1, lx, ly, radius, l)
+        lightVert(verts, n + 6, x0, y1, lx, ly, radius, l)
+        n = n + 6
+      end
+    end
+  end
+  if n == 0 then
     return
   end
-  lightShader:send("origin", { x0, y0 })
-  lightShader:send("span", { x1 - x0, y1 - y0 })
-  lightShader:send("lightPos", { lx, ly })
-  lightShader:send("radius", radius)
-  lightShader:send("power", power)
-  lightShader:send("leak", leak)
-  lightShader:send("tint", { l.r * scale, l.g * scale, l.b * scale })
-  love.graphics.draw(white, x0, y0, 0, x1 - x0, y1 - y0)
+  local mesh = lightMeshes[pass]
+  if not mesh or mesh:getVertexCount() < n then
+    mesh = love.graphics.newMesh(LIGHT_FORMAT, math.max(n, 1200), "triangles", "dynamic")
+    lightMeshes[pass] = mesh
+  end
+  mesh:setVertices(verts, 1, n)
+  mesh:setDrawRange(1, n)
+  love.graphics.draw(mesh)
 end
 
 -- Renders the light map (and haze) for the current camera. Call before
 -- drawing the scene (it switches canvases). drawTerrain: a function that
 -- draws the terrain in world coordinates (it is drawn into the mask).
-function lighting.render(camX, camY, drawTerrain)
+function lighting.render(camX, camY, drawTerrain, drawOccluders)
   love.graphics.push("all")
   love.graphics.origin()
   if lightShader and drawTerrain then
@@ -261,6 +412,12 @@ function lighting.render(camX, camY, drawTerrain)
     love.graphics.translate(-camX, -camY)
     love.graphics.setShader(maskShader)
     drawTerrain()
+    if drawOccluders then
+      -- Creatures cast soft shadows too: partial blockers, never darker than rock
+      love.graphics.setBlendMode("lighten", "premultiplied")
+      drawOccluders()
+      love.graphics.setBlendMode("alpha")
+    end
     love.graphics.pop()
     love.graphics.setShader()
 
@@ -271,16 +428,16 @@ function lighting.render(camX, camY, drawTerrain)
     love.graphics.setShader(lightShader)
     love.graphics.setCanvas(canvas)
     love.graphics.clear(ambient[1], ambient[2], ambient[3], 1)
-    for _, l in ipairs(lights) do
-      drawLight(l, camX, camY, l.radius, 1.7, 0.3, 1)
-    end
+    lightShader:send("power", 1.7)
+    lightShader:send("leak", 0.08)
+    lightShader:send("gain", LIGHT_GAIN)
+    drawLights(1, camX, camY, 1, false)
     love.graphics.setCanvas(hazeCanvas)
     love.graphics.clear(0, 0, 0, 1)
-    for _, l in ipairs(lights) do
-      if l.radius <= HAZE_MAX_RADIUS then
-        drawLight(l, camX, camY, l.radius * 1.3, 2.4, 0.04, HAZE)
-      end
-    end
+    lightShader:send("power", 2.4)
+    lightShader:send("leak", 0.03)
+    lightShader:send("gain", HAZE)
+    drawLights(2, camX, camY, 1.3, true)
     -- Fog and mist belong to the caves: none on the surface, fading in as the
     -- ambient light darkens on the way down
     local dark = math.max(0, 1 - (ambient[1] + ambient[2] + ambient[3]) / 3 / 0.6)
@@ -318,6 +475,7 @@ function lighting.render(camX, camY, drawTerrain)
       fogApply:send("ceiling", FOG_CEILING)
       fogApply:send("mistTint", { ambient[1] / peak, ambient[2] / peak, ambient[3] / peak })
       fogApply:send("mist", MIST * dark)
+      fogApply:send("drift", lighting.drift)
       love.graphics.draw(white, 0, 0, 0, W, H)
     end
     love.graphics.setShader()
@@ -336,6 +494,79 @@ function lighting.render(camX, camY, drawTerrain)
   love.graphics.pop()
 end
 
+-- The terrain mask of this frame (solid = white), at the size of the frame; nil if the lighting shaders are unavailable
+function lighting.mask()
+  return lightShader and maskCanvas or nil
+end
+
+-- This frame's lights (read-only; for things that reflect them)
+function lighting.list()
+  return lights
+end
+
+-- How strong the terrain's relief is (0 turns it off)
+lighting.reliefStrength = 1
+
+-- How far the wind has blown the air (px), set by src.weather: it carries the
+-- fog and the dust motes along
+lighting.drift = 0
+
+-- The terrain shader for this frame's lit pass (nil if unavailable), with the
+-- light map and ambient set. Pass it to World:draw.
+function lighting.terrainShader()
+  if not terrainShader or not lightShader or (lighting.reliefStrength or 0) <= 0 then
+    return nil
+  end
+  terrainShader:send("light", canvas)
+  terrainShader:send("canvasSize", { W, H })
+  terrainShader:send("ambient", ambient)
+  terrainShader:send("strength", lighting.reliefStrength)
+  return terrainShader
+end
+
+-- The n strongest small lights in view (not the sun): where light shafts
+-- stream from in the cave's air. Each { x, y (0..1 of the screen), r, g, b, s (0..1) }
+function lighting.lamps(camX, camY, n)
+  local dark = 1 - (ambient[1] + ambient[2] + ambient[3]) / 3 / 0.6
+  local out = {}
+  if dark <= 0 then
+    return out
+  end
+  -- Kept sorted, strongest first, never more than n long (only the winners
+  -- get a record)
+  for _, l in ipairs(lights) do
+    if l.radius <= HAZE_MAX_RADIUS then
+      local sx, sy = l.x - camX, l.y - camY
+      if sx > -40 and sx < W + 40 and sy > -40 and sy < H + 40 then
+        local strength = (l.r + l.g + l.b) / 3 * l.radius
+        local m = #out
+        if m < n or strength > out[m].s then
+          local rec
+          if m < n then
+            rec = {}
+            m = m + 1
+          else
+            rec = out[m] -- (the weakest drops out; its record is reused)
+          end
+          local j = m
+          while j > 1 and out[j - 1].s < strength do
+            out[j] = out[j - 1]
+            j = j - 1
+          end
+          out[j] = rec
+          local peak = math.max(l.r, l.g, l.b, 0.001)
+          rec.x, rec.y, rec.s = sx / W, sy / H, strength
+          rec.r, rec.g, rec.b = l.r / peak, l.g / peak, l.b / peak
+        end
+      end
+    end
+  end
+  for _, l in ipairs(out) do
+    l.s = math.min(1, l.s / 45) * math.min(1, dark * 2)
+  end
+  return out
+end
+
 -- Dust motes drifting through the air of caves. Drawn in screen space just
 -- before lighting.apply, so the light map dims the ones in the dark and the
 -- ones in a lantern glow catch it.
@@ -351,7 +582,7 @@ function lighting.drawMotes(camX, camY)
   for i = 1, MOTES do
     local seed = i * 12.9898
     local depth = 0.55 + (i * 0.6180339) % 1 * 0.45 -- parallax: nearer motes follow the camera more
-    local bx = (seed * 7.13 + t * (1.5 + i % 5 * 0.8)) - camX * depth
+    local bx = (seed * 7.13 + t * (1.5 + i % 5 * 0.8) + lighting.drift * 0.7 * depth) - camX * depth
     local by = (seed * 3.71 + math.sin(t * 0.3 + i) * 10) - camY * depth - t * (0.8 + i % 3 * 0.5)
     local x = math.floor(bx % (W + 20) - 10)
     local y = math.floor(by % (H + 20) - 10)
@@ -369,11 +600,16 @@ function lighting.apply()
   love.graphics.origin()
   love.graphics.setBlendMode("multiply", "premultiplied")
   love.graphics.setColor(1, 1, 1)
+  if softShader then
+    softShader:send("texel", { 1 / W, 1 / H })
+    love.graphics.setShader(softShader)
+  end
   love.graphics.draw(canvas, 0, 0)
   if lightShader then
     love.graphics.setBlendMode("add", "premultiplied")
     love.graphics.draw(hazeCanvas, 0, 0)
   end
+  love.graphics.setShader()
   love.graphics.pop()
 end
 

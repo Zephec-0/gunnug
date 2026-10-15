@@ -5,6 +5,7 @@ local bullets = require("src.bullets")
 local config = require("src.config")
 local controls = require("src.input")
 local effects = require("src.effects")
+local juice = require("src.juice")
 local enemies = require("src.enemies")
 local perks = require("src.perks")
 local physics = require("src.physics")
@@ -266,6 +267,7 @@ function Player:shoot()
     audio.play("reload", 0.8)
   end
   self:applyRecoil(self.aimAngle)
+  juice.shot(self.aimAngle, st.recoil, quiet)
   playeranim.onShoot(self)
 end
 
@@ -324,6 +326,7 @@ function Player:hurt(amount, fromX, fromY, source)
   local cx, cy = self:center()
   amount = self:loseHealth(amount)
   audio.play(self.hp <= 0 and "death" or "hurt")
+  juice.hurt(amount)
   self.invuln = cfg.hurtInvulnerability
   self.hurtFlash = 1
   effects.popup(cx, b.y - 4, "-" .. amount, { 1, 0.3, 0.3 })
@@ -500,7 +503,7 @@ end
 
 function Player:update(dt, aimX, aimY)
   local b = self.body
-  self.ignoreProps = props.overlapping(b.x, b.y, b.w, b.h)
+  self.ignoreProps = props.overlapping(b.x, b.y, b.w, b.h, self.ignoreProps)
 
   -- Aim
   local sx, sy = self:shoulder()
@@ -759,7 +762,7 @@ end
 -- Light carried with the hunter, plus the faint glow of his eyes
 function Player:addLights(lighting)
   local cx, cy = self:center()
-  lighting.add(cx, cy, 150, 1, 0.86, 0.66, 0.75)
+  lighting.add(cx, cy, 180, 1, 0.86, 0.66, 1.0)
   local lamp = self.gun and self.gun:stats().lamp or 0
   if lamp > 0 then
     lighting.add(cx, cy, 150 + lamp, 1, 0.82, 0.55, 0.6) -- Muzzle Lantern

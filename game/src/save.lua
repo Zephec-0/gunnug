@@ -15,7 +15,7 @@
 local save = {}
 
 save.SLOTS = 3
-save.VERSION = 1
+save.VERSION = 2 -- 2: marks, the camp's people, upgrades and unlocks (src.meta)
 
 local FLUSH_INTERVAL = 5 -- seconds between writes while something changed
 
@@ -119,17 +119,30 @@ local function fresh()
     created = os.time(),
     lastPlayed = os.time(),
     playtime = 0, -- seconds in a run (menus and pauses don't count)
-    stats = { runs = 0, deaths = 0, gold = 0, kills = 0, bosses = 0, deepest = 0 },
+    stats = { runs = 0, deaths = 0, gold = 0, kills = 0, bosses = 0, deepest = 0, marksEarned = 0 },
     found = {},
+    -- What carries over between runs (design doc §11a-iv, -v; src.meta):
+    marks = 0, -- the permanent currency, spent at camp
+    camp = {}, -- id -> true for each person living at camp (freed below)
+    upgrades = {}, -- upgrade id -> tier bought
+    unlocked = {}, -- category -> { id = true }: taught beyond the starting pool
+    seen = {}, -- category -> { id = true }: met, but not necessarily collected
+    trophies = {}, -- monster kind -> elites of it slain
+    bank = 0, -- gold in the Prospector's strongbox
+    rules = {}, -- the Bartender's house rules switched on: id -> true
+    mounted = {}, -- monster kind -> true once the Taxidermist has mounted its trophy
   }
   for _, c in ipairs(save.CATEGORIES) do
     p.found[c] = {}
+    p.unlocked[c] = {}
+    p.seen[c] = {}
   end
   return p
 end
 
 -- Fills in anything an older or hand-edited file is missing
 local function repair(p)
+  local old = tonumber(p.version) or 1
   local base = fresh()
   for k, v in pairs(base) do
     if type(p[k]) ~= type(v) then
@@ -142,8 +155,20 @@ local function repair(p)
     end
   end
   for _, c in ipairs(save.CATEGORIES) do
-    if type(p.found[c]) ~= "table" then
-      p.found[c] = {}
+    for _, key in ipairs({ "found", "unlocked", "seen" }) do
+      if type(p[key][c]) ~= "table" then
+        p[key][c] = {}
+      end
+    end
+  end
+  -- A file from before the unlocks keeps everything it had already found
+  if old < 2 then
+    for _, c in ipairs(save.CATEGORIES) do
+      for id, n in pairs(p.found[c]) do
+        if type(n) == "number" and n > 0 then
+          p.unlocked[c][id] = true
+        end
+      end
     end
   end
   p.version = save.VERSION
@@ -301,6 +326,11 @@ function save.statMax(key, v)
     p.stats[key] = v
     dirty = true
   end
+end
+
+-- Marks the active profile as changed (for src.meta, which edits it directly)
+function save.touch()
+  dirty = true
 end
 
 -- "3h 05m" / "12m" for a number of seconds

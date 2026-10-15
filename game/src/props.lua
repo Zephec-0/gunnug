@@ -26,16 +26,36 @@ local function cellKey(cx, cy)
   return cy * 65536 + cx
 end
 
+-- The index is kept up to date as props move rather than rebuilt every
+-- frame (hundreds of props, most of them at rest, made a new grid and its
+-- buckets each frame: a steady stream of garbage)
+local function unindex(p)
+  local bucket = p.cellK and grid[p.cellK]
+  if bucket then
+    for i = #bucket, 1, -1 do
+      if bucket[i] == p then
+        table.remove(bucket, i)
+        break
+      end
+    end
+  end
+  p.cellK = nil
+end
+
 local function indexProp(p)
   local x, y = p.body:getPosition()
   p.ix, p.iy = x, y -- (also used for cheap on-screen tests)
   local k = cellKey(math.floor(x / CELL), math.floor(y / CELL))
-  local bucket = grid[k]
-  if not bucket then
-    bucket = {}
-    grid[k] = bucket
+  if k ~= p.cellK then
+    unindex(p)
+    local bucket = grid[k]
+    if not bucket then
+      bucket = {}
+      grid[k] = bucket
+    end
+    bucket[#bucket + 1] = p
+    p.cellK = k
   end
-  bucket[#bucket + 1] = p
   local r = (p.width + p.height) * 0.75 + 24
   if r > reach then
     reach = r
@@ -46,6 +66,7 @@ local function rebuildIndex()
   grid = {}
   reach = 16
 end
+local refreshAt = 0 -- (round robin: a few resting props are looked at again every frame too)
 
 -- Calls fn(p) for every prop that might touch the rectangle; stops early if
 -- fn returns true, and returns what it returned
@@ -360,6 +381,7 @@ props.defs = {
     light = { radius = 80, color = { 1, 0.68, 0.34 }, intensity = 0.9 },
     gravityScale = 0.4, friction = 0.5, restitution = 0.15, linearDamping = 0.3, angularDamping = 0.5,
     showDamage = true, draw = drawLantern, emit = emitLantern,
+    oil = 24, -- cells of lamp oil inside: spilt as it is shot, the rest when it breaks (src.fluids)
   },
   skullCandle = {
     width = 8, height = 10, mass = 0.5, hp = 12, gold = { 1, 5 }, itemChance = 0.06,
@@ -465,7 +487,8 @@ function props.spawn(name, x, y, angle, glow)
 end
 
 local function remove(p)
-  p.removed = true -- (skipped by the index until it is rebuilt)
+  p.removed = true
+  unindex(p)
   for i, q in ipairs(list) do
     if q == p then
       table.remove(list, i)
@@ -559,6 +582,14 @@ local function breakProp(p)
   if p.def.ignites then
     require("src.fluids").ignite(x, y, 1)
   end
+  if p.def.oil then
+    -- A lantern breaking: the rest of its oil, and a puff of fire that lights it
+    local fluids = require("src.fluids")
+    fluids.addOil(x, y + 2, p.oil or p.def.oil)
+    fluids.fireBurst(x, y, 7)
+    effects.explosion(x, y, 5)
+    require("src.audio").play("explosion", 0.35, 1.6)
+  end
   local gold = p.def.gold
   if gold then
     pickups.dropGold(x, y, love.math.random(gold[1], gold[2]))
@@ -571,6 +602,15 @@ end
 function props.damage(p, amount)
   p.flash = 0.08
   p.total = p.total + amount
+  -- A lantern spills its oil a little at every hit
+  if p.def.oil and not p.broken then
+    p.oil = p.oil or p.def.oil
+    local spill = math.min(p.oil, 3 + math.floor(amount / 3))
+    if spill > 0 then
+      local x, y = p.body:getPosition()
+      p.oil = p.oil - require("src.fluids").addOil(x, y + 2, spill)
+    end
+  end
   local hp = p.hp or p.def.hp
   if hp and p.total >= hp and not p.broken then
     breakProp(p)
@@ -593,8 +633,19 @@ end
 local EPS = 0.05
 
 -- Separating-axis test: is the pixel rectangle overlapping a convex polygon?
-local function polygonOverlapsRect(pts, x, y, w, h)
-  local n = #pts
+-- (The polygon's points go in one table kept for the purpose: asked about
+-- every prop near every creature each frame, a new table each time added up.)
+local polyPts = {}
+local function fillPts(...)
+  local n = select("#", ...)
+  for i = 1, n do
+    polyPts[i] = (select(i, ...))
+  end
+  return n
+end
+
+local function polygonOverlapsRect(n, x, y, w, h)
+  local pts = polyPts
   local minX, maxX, minY, maxY = math.huge, -math.huge, math.huge, -math.huge
   for i = 1, n, 2 do
     minX, maxX = math.min(minX, pts[i]), math.max(maxX, pts[i])
@@ -603,7 +654,6 @@ local function polygonOverlapsRect(pts, x, y, w, h)
   if minX >= x + w - EPS or maxX <= x + EPS or minY >= y + h - EPS or maxY <= y + EPS then
     return false
   end
-  local corners = { x, y, x + w, y, x, y + h, x + w, y + h }
   for i = 1, n, 2 do
     local j = i + 2 > n and 1 or i + 2
     local nx, ny = pts[j + 1] - pts[i + 1], pts[i] - pts[j]
@@ -614,11 +664,10 @@ local function polygonOverlapsRect(pts, x, y, w, h)
       local d = pts[k] * nx + pts[k + 1] * ny
       pMin, pMax = math.min(pMin, d), math.max(pMax, d)
     end
-    local rMin, rMax = math.huge, -math.huge
-    for k = 1, 8, 2 do
-      local d = corners[k] * nx + corners[k + 1] * ny
-      rMin, rMax = math.min(rMin, d), math.max(rMax, d)
-    end
+    -- the rectangle's four corners, projected
+    local ax, bx, ay, by = x * nx, (x + w) * nx, y * ny, (y + h) * ny
+    local rMin = math.min(ax + ay, bx + ay, ax + by, bx + by)
+    local rMax = math.max(ax + ay, bx + ay, ax + by, bx + by)
     if pMin >= rMax - EPS or pMax <= rMin + EPS then
       return false
     end
@@ -634,7 +683,7 @@ local function overlapsRect(p, x, y, w, h)
     return false
   end
   for _, f in ipairs(p.fixtures) do
-    if polygonOverlapsRect({ p.body:getWorldPoints(f:getShape():getPoints()) }, x, y, w, h) then
+    if polygonOverlapsRect(fillPts(p.body:getWorldPoints(f:getShape():getPoints())), x, y, w, h) then
       return true
     end
   end
@@ -642,22 +691,52 @@ local function overlapsRect(p, x, y, w, h)
 end
 
 -- First prop overlapping the rectangle, skipping any in the `ignore` set
+-- (These two are asked many times a frame, by every creature and the
+-- hunter, so they walk the grid themselves rather than make a closure for
+-- nearby() each time: the garbage added up)
 function props.overlapsRect(x, y, w, h, ignore)
-  return nearby(x, y, w, h, function(p)
-    if not (ignore and ignore[p]) and overlapsRect(p, x, y, w, h) then
-      return p
+  local cx0, cy0 = math.floor((x - reach) / CELL), math.floor((y - reach) / CELL)
+  local cx1, cy1 = math.floor((x + w + reach) / CELL), math.floor((y + h + reach) / CELL)
+  for cy = cy0, cy1 do
+    for cx = cx0, cx1 do
+      local bucket = grid[cellKey(cx, cy)]
+      if bucket then
+        for _, p in ipairs(bucket) do
+          if not p.removed and not (ignore and ignore[p]) and overlapsRect(p, x, y, w, h) then
+            return p
+          end
+        end
+      end
     end
-  end)
+  end
+  return nil
 end
 
--- All props overlapping the rectangle, as a set
-function props.overlapping(x, y, w, h)
-  local set = {}
-  nearby(x, y, w, h, function(p)
-    if overlapsRect(p, x, y, w, h) then
-      set[p] = true
+-- All props overlapping the rectangle, as a set. Given `into`, that table is
+-- emptied and filled instead of a new one being made.
+function props.overlapping(x, y, w, h, into)
+  local set = into
+  if set then
+    for k in pairs(set) do
+      set[k] = nil
     end
-  end)
+  else
+    set = {}
+  end
+  local cx0, cy0 = math.floor((x - reach) / CELL), math.floor((y - reach) / CELL)
+  local cx1, cy1 = math.floor((x + w + reach) / CELL), math.floor((y + h + reach) / CELL)
+  for cy = cy0, cy1 do
+    for cx = cx0, cx1 do
+      local bucket = grid[cellKey(cx, cy)]
+      if bucket then
+        for _, p in ipairs(bucket) do
+          if not p.removed and overlapsRect(p, x, y, w, h) then
+            set[p] = true
+          end
+        end
+      end
+    end
+  end
   return set
 end
 
@@ -684,7 +763,12 @@ end
 -- have to be judged by the speed the object arrived with.
 function props.snapshotVelocities()
   for _, p in ipairs(list) do
-    p.prevVx, p.prevVy = p.body:getLinearVelocity()
+    local b = p.body
+    if b:isAwake() and b:isActive() then
+      p.prevVx, p.prevVy = b:getLinearVelocity()
+    else
+      p.prevVx, p.prevVy = 0, 0 -- (at rest, or frozen far away)
+    end
   end
 end
 
@@ -737,9 +821,19 @@ function props.update(dt)
       remove(p)
     end
   end
-  rebuildIndex()
+  -- Only what moves needs its place in the index updated (a resting or
+  -- frozen body can't have moved), plus a few others in turn, in case
+  -- something put one somewhere
   for _, p in ipairs(list) do
-    indexProp(p)
+    local b = p.body
+    if b:isAwake() and b:isActive() then
+      indexProp(p)
+    end
+  end
+  local n = #list
+  for _ = 1, math.min(n, 16) do
+    refreshAt = refreshAt % n + 1
+    indexProp(list[refreshAt])
   end
 end
 

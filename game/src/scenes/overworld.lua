@@ -17,29 +17,39 @@ local fluids = require("src.fluids")
 local materials = require("src.materials")
 local parallax = require("src.parallax")
 local props = require("src.props")
+local render = require("src.render")
+local weather = require("src.weather")
 local shop = require("src.shop")
+local npcs = require("src.npcs")
+local town = require("src.town")
 local targets = require("src.targets")
 local World = require("src.world")
 
-local SAND, SANDSTONE, WOOD, STONE, AIR, TAILINGS =
-  materials.SAND, materials.SANDSTONE, materials.WOOD, materials.STONEBRICK, materials.AIR, materials.TAILINGS
+local SAND, SANDSTONE, WOOD, STONE, AIR, TAILINGS, ROCK, BEDROCK =
+  materials.SAND, materials.SANDSTONE, materials.WOOD, materials.STONEBRICK, materials.AIR, materials.TAILINGS, materials.ROCK, materials.BEDROCK
 
 local overworld = {
   title = "The Barrens",
   subtitle = "Find the old mine",
   ambient = { 0.88, 0.76, 0.74 }, -- updated every frame: blends to the cave's as the hunter descends
+  fx = {}, -- the look of the post-process pass, blended the same way
 }
+
+local SURFACE_FX = { shadow = { 0.95, 0.96, 1.06 }, light = { 1.1, 1.0, 0.88 }, sat = 1.08, aberr = 0.5, shaft = 1.0, vig = 0.34 }
 
 local SURFACE_AMBIENT = { 0.88, 0.76, 0.74 } -- warm evening light
 
 -- The surface's sandstone runs down to CAVE_TOP, where the first area begins;
--- the generated areas are stacked below it, each CAVE_HEIGHT tall
-local WIDTH = 2880
+-- the generated areas are stacked below it, (see scenes/catacombs.lua for their layout)
+local LEFT, RIGHT = -2880, 8640 -- the desert runs on both sides of the camp and the mine, over the side branches
+local WIDTH = RIGHT - LEFT
 local CAVE_TOP = 760
-local CAVE_HEIGHT = 3100
-local AREAS = 4 -- rows of areas: three in a column, then the two side by side
+local TIERS = 5 -- how deep the catacombs go (their layout is in scenes/catacombs.lua)
 local POND_X0, POND_X1 = 1318, 1378 -- an oasis pond between the bones and the ramp
-local HEIGHT = CAVE_TOP + AREAS * CAVE_HEIGHT
+local SPINE_W = catacombs.SPINE_W
+local _, _, LAYOUT_TOP, LAYOUT_H = catacombs.layoutBounds()
+local HEIGHT = CAVE_TOP + LAYOUT_H -- (the world's bottom edge)
+local TOP = CAVE_TOP + LAYOUT_TOP - 100 -- and its top: above the sky dungeon
 
 -- The old mine: a ramp down into a pit, the shaft in the pit floor, and two
 -- timber-shored steps back up on the far side
@@ -54,13 +64,17 @@ local ENTRANCE_Y = CAVE_TOP + 96
 local SHAFT_CX = math.floor((SHAFT_X0 + SHAFT_X1) / 2)
 local FRAME_TOP = PIT_Y - 150 -- the headframe's crossbeam, high enough to be seen from afar
 
--- Cave generation time per frame (seconds), spent even while paused, so the
--- title screen gets a head start on the first area
+-- Cave generation time per frame (seconds) while nobody is playing (the
+-- title screen, a menu), so the title screen gets a head start on the first
+-- area. While the hunter plays, generation gets what the frame has to spare
+-- (see catacombs.step): a fixed share of every frame was the lag in the hub,
+-- the first area and every fight (it vanished once everything was built).
 local GEN_BUDGET = 0.010
 
 local SPAWN_X = 990
 local CAMPFIRE_X = 1032
 local TENT_X = 930
+-- (the camp's people and the bounty board live on the lots of the town, src.town)
 local WINCH_X = 1758 -- left edge of the winch house
 local SUN_X, SUN_Y = 440, 196 -- on screen, low over the horizon
 
@@ -69,7 +83,12 @@ local trees = {}
 
 -- Gently rolling ground of the open plain
 local function plain(x)
-  return 509 + math.sin(x * 0.0058) * 8 + math.sin(x * 0.017 + 1) * 4 + math.sin(x * 0.043 + 2) * 1.5
+  local lift = 0
+  if x > 5350 then
+    local t = math.min(1, (x - 5350) / 520)
+    lift = 120 * t * t * (3 - 2 * t) -- the long ramp up to the mountain's door
+  end
+  return 509 - lift + math.sin(x * 0.0058) * 8 + math.sin(x * 0.017 + 1) * 4 + math.sin(x * 0.043 + 2) * 1.5
 end
 
 -- The ground's top surface (before anything is built on it or dug out)
@@ -277,16 +296,18 @@ local function buildBackground()
 end
 
 local seed
+local lakes = {} -- { x0, x1, top } of the lakes over side branches (filled in populate)
 
 -- opts.seed: cave seed (default random). opts.atCave: start in the
 -- catacombs' entrance chamber instead of on the surface (generates at once).
 function overworld.build(opts)
-  local world = World.new(WIDTH, HEIGHT)
+  lakes = {}
+  local world = World.new(WIDTH, HEIGHT - TOP, LEFT, TOP)
   seed = (opts and opts.seed) or math.floor(love.math.random() * 1000000)
 
   -- Sand over sandstone (the cave generator replaces what lies below
   -- CAVE_TOP); the pit floor is trodden spoil
-  for x = 0, WIDTH - 1 do
+  for x = LEFT, RIGHT - 1 do
     local top = surface(x)
     local depth = 16 + math.floor(love.math.noise(x * 0.031, 3) * 10)
     local inPit = x >= PIT_X0 - 20 and x <= PIT_X1
@@ -294,18 +315,21 @@ function overworld.build(opts)
     world:fillRect(x, top + depth + 1, x, CAVE_TOP + 40, SANDSTONE)
   end
 
-  canyonWall(world, 0, 120, true)
-  canyonWall(world, WIDTH - 121, WIDTH - 1, false)
+  -- Under the desert east of the first areas: unexplored rock (and bedrock at
+  -- the world's edges), for the side branches to be carved from
+  world:fillFast(SPINE_W, CAVE_TOP + 41, RIGHT - 1, HEIGHT - 1, ROCK)
+  world:fillFast(LEFT, CAVE_TOP + 41, -1, HEIGHT - 1, ROCK)
+  world:fillFast(RIGHT - 40, CAVE_TOP + 41, RIGHT - 1, HEIGHT - 1, BEDROCK)
+  world:fillFast(LEFT, CAVE_TOP + 41, LEFT + 39, HEIGHT - 1, BEDROCK)
+  world:fillFast(LEFT, HEIGHT - 40, RIGHT - 1, HEIGHT - 1, BEDROCK)
+
+  canyonWall(world, LEFT, LEFT + 120, true)
+  canyonWall(world, RIGHT - 121, RIGHT - 1, false)
   -- West: badlands
   boulder(world, 168, 9)
   mesa(world, 250, 460, 352, 9)
-  -- Natural arch
-  mesa(world, 560, 592, 404, 3)
-  mesa(world, 708, 740, 404, 3)
-  for x = 560, 740 do
-    local arch = math.floor(math.sin((x - 560) / 180 * math.pi) * 16)
-    world:fillRect(x, 404, x, 429 - arch, SANDSTONE)
-  end
+  -- (the natural arch that stood here fenced in the Prospector's camp and
+  -- was taken out: the ground is open)
   -- The pond: a shallow hollow in the sand (filled with water in populate)
   for x = POND_X0, POND_X1 do
     local t = (x - (POND_X0 + POND_X1) / 2) / ((POND_X1 - POND_X0) / 2)
@@ -322,29 +346,83 @@ function overworld.build(opts)
   buildRuins(world)
   boulder(world, 2470, 7)
   mesa(world, 2520, 2660, 404, 8)
-  -- Only the surface is painted now; the cave paints itself as it generates
-  world:repaintRect(0, 0, WIDTH - 1, CAVE_TOP + 40)
+  -- West of the badlands: more open desert, mesas and boulders, and the
+  -- sealed-off shaft down to the flooded works (built with the crevices below)
+  for _, m in ipairs({ { -2560, -2380, 372, 9 }, { -1960, -1800, 404, 8 }, { -1600, -1460, 360, 9 }, { -210, -90, 404, 8 } }) do
+    mesa(world, m[1], m[2], m[3], m[4])
+  end
+  for _, bx in ipairs({ -2780, -2300, -2100, -1700, -440, -300 }) do
+    boulder(world, bx, 6 + bx % 4)
+  end
+  for _, px in ipairs({ -1720, -1760, -400, -358 }) do
+    pillar(world, px, 8, 30 + px % 31)
+  end
+  -- Farther east: open desert, mesas and boulders, with ruined pillars here and there
+  for _, m in ipairs({ { 3280, 3460, 380, 9 }, { 4080, 4230, 404, 8 }, { 5000, 5150, 360, 10 } }) do
+    mesa(world, m[1], m[2], m[3], m[4])
+  end
+  for _, bx in ipairs({ 3010, 3650, 4520, 4900, 5260, 5560 }) do
+    boulder(world, bx, 6 + bx % 4)
+  end
+  for _, px in ipairs({ 4700, 4742, 5400, 5440 }) do
+    pillar(world, px, 8, 30 + px % 31)
+  end
+  -- The crevices that lead down to the side branches: a ragged slot through
+  -- the sandstone, a stone lip, and a plank lining below
+  for _, e in ipairs(catacombs.entries()) do
+    if e.walk then
+      goto nextEntry -- (a doorway in a mountain: the cave generator cuts it)
+    end
+    local x0, x1 = e.x - e.half, e.x + e.half
+    if e.lake then
+      -- A lake: a wide bowl in the ground, narrowing to a neck that drops into the top of the cave below
+      local rim = math.min(surface(x0), surface(x1))
+      lakes[#lakes + 1] = { x0 = x0 + 6, x1 = x1 - 6, top = rim + 8 }
+      for x = x0, x1 do
+        local t = (x - e.x) / e.half
+        local depth = math.floor(230 * (1 - t * t) ^ 0.7)
+        local g = surface(x)
+        world:fillRect(x, g - 8, x, g + depth, AIR)
+      end
+      world:fillRect(e.x - e.neck, surface(e.x), e.x + e.neck, SHAFT_BOTTOM, AIR)
+      goto nextEntry
+    end
+    world:fillRect(x0 - 6, surface(e.x) - 14, x0 - 1, surface(e.x) + 2, STONE)
+    world:fillRect(x1 + 1, surface(e.x) - 14, x1 + 6, surface(e.x) + 2, STONE)
+    world:fillRect(x0, surface(e.x) - 30, x1, SHAFT_BOTTOM, AIR)
+    world:fillRect(x0 - 3, surface(e.x) + 3, x0 - 1, SHAFT_BOTTOM, WOOD)
+    world:fillRect(x1 + 1, surface(e.x) + 3, x1 + 3, SHAFT_BOTTOM, WOOD)
+    ::nextEntry::
+  end
+  -- The town's lots (src.town): fixed every run, but a porch only goes up
+  -- once its person has moved in
+  town.build(world, surface, WOOD, SAND, AIR)
+
+  -- Only the first stretch is painted now (the cave paints itself as it
+  -- generates, and the far desert as it comes into view)
+  world:markLazy(SPINE_W, world.top, world.right - 1, world.bottom - 1)
+  world:markLazy(LEFT, world.top, -1, world.bottom - 1)
+  world:repaintRect(0, 0, SPINE_W - 1, CAVE_TOP + 40)
 
   background = background or buildBackground()
   trees = {}
-  for _, t in ipairs({ { 200, 1 }, { 520, -1 }, { 790, 1 }, { 1340, -1 }, { 2000, 1 }, { 2460, -1 }, { 2706, 1 } }) do
+  for _, t in ipairs({ { 200, 1 }, { 1340, -1 }, { 2000, 1 }, { 2460, -1 }, { 2706, 1 }, { 3100, -1 }, { 3800, 1 }, { -2700, 1 }, { -2200, -1 }, { -1900, 1 }, { -1380, -1 }, { -460, -1 }, { -150, 1 }, { 4400, -1 }, { 5100, 1 }, { 5600, -1 } }) do
     trees[#trees + 1] = { x = t[1], y = world:findGround(t[1], 160), lean = t[2], height = 46 + (t[1] % 17) }
   end
 
   -- Shooting a shop hatch's chain makes sure the area below it exists first
   shop.onHatchBreak = function(child)
-    catacombs.finish(child)
+    catacombs.generate(child)
   end
   catacombs.start(world, {
     x0 = 0,
     y0 = CAVE_TOP,
-    x1 = WIDTH - 1,
-    y1 = CAVE_TOP + CAVE_HEIGHT - 1,
+    x1 = RIGHT - 1,
     entranceX = SHAFT_CX,
     entranceY = ENTRANCE_Y,
     shaftX0 = SHAFT_X0,
     shaftX1 = SHAFT_X1,
-  }, seed, AREAS)
+  }, seed, TIERS)
   if opts and opts.atCave then
     catacombs.finish(1)
     local info = catacombs.info()
@@ -371,6 +449,9 @@ function overworld.populate(world)
   props.clear()
   catacombs.spawnProps()
   fluids.fillWater(world, POND_X0 + 1, POND_X1 - 1, math.floor(plain(POND_X0 - 4)) + 2)
+  for _, l in ipairs(lakes) do
+    fluids.floodBox(world, l.x0, l.top, l.x1, CAVE_TOP - 1)
+  end
   local function ground(x)
     return world:findGround(x, 160)
   end
@@ -383,16 +464,25 @@ function overworld.populate(world)
       props.spawn("crate", x + 7, ground(x) - 20)
     end
   end
-  props.spawn("crate", 1064, ground(1064) - 7)
+  props.spawn("crate", 1046, ground(1046) - 7)
+  -- Where the camp's people set up once they are freed (src.npcs; only
+  -- drawn for a profile that has them)
+  for _, lot in ipairs(town.LOTS) do
+    if lot.id == "board" then
+      npcs.setBoard(lot.x, lot.top)
+    elseif lot.id ~= "hall" then
+      npcs.setCamp(lot.id, lot.x, lot.top)
+    end
+  end
   props.spawn("crate", 1700, ground(1700) - 7)
   props.spawn("ironCrate", 2335, ground(2335) - 8.5)
   -- Pots, pouches and lamps along the plain, by the camp and the ruins
   for _, o in ipairs({
-    { "urn", 640 }, { "urn", 1180 }, { "urn", 2040 }, { "urn", 2480 },
-    { "pouch", 780 }, { "pouch", 972 }, { "pouch", 1560 - 120 }, { "pouch", 2210 },
+    { "urn", 1288 }, { "urn", 2040 }, { "urn", 2480 },
+    { "pouch", 826 }, { "pouch", 972 }, { "pouch", 1560 - 120 }, { "pouch", 2210 },
     { "lantern", 888 }, { "lantern", 1250 }, { "lantern", 2370 },
     { "skullCandle", 420 }, { "skullCandle", 2150 },
-    { "emberPot", 1010 }, { "emberPot", 1880 }, { "emberPot", 2600 },
+    { "emberPot", 1024 }, { "emberPot", 1880 }, { "emberPot", 2600 },
   }) do
     local def = props.defs[o[1]]
     props.spawn(o[1], o[2], ground(o[2]) - def.height / 2 - 0.5)
@@ -401,11 +491,25 @@ function overworld.populate(world)
   -- under the ruins' gateway
   chests.spawn(356, ground(356), 0.25)
   chests.spawn(2390, world:findGround(2390, surface(2390) - 30), 0.25)
+  -- Farther out, a chest atop each of the far mesas, and pots in the open
+  for _, cx in ipairs({ -2470, -1530, 3370, 5075 }) do
+    chests.spawn(cx, ground(cx), 0.35)
+  end
+  for _, o in ipairs({
+    { "urn", 3120 }, { "pouch", 3900 }, { "urn", 4640 }, { "emberPot", 5500 }, { "urn", 5700 },
+    { "urn", -2600 }, { "pouch", -2100 }, { "urn", -1700 }, { "emberPot", -1340 }, { "urn", -480 },
+  }) do
+    local def = props.defs[o[1]]
+    props.spawn(o[1], o[2], ground(o[2]) - def.height / 2 - 0.5)
+  end
+  for _, x in ipairs({ -2250, -1500, -1360, 3480, 4900, 5650 }) do
+    props.spawn("crate", x, ground(x) - 7)
+  end
 end
 
 -- How far underground a point is: 0 on the surface, 1 well inside the rock
 local function underground(x, y)
-  return math.max(0, math.min(1, (y - surface(x) - 24) / 220))
+  return math.max(0, math.min(1, (y - surface(x) - 24) / 220), catacombs.indoors(x, y))
 end
 
 -- The same, for the game's sound mixer
@@ -423,6 +527,66 @@ end
 -- Tumbleweeds roll across the plain on the wind, near the hunter
 local weeds = {}
 
+-- A tumbleweed's picture: a ball of grey-brown twigs, a ragged ring with
+-- crossing sprigs through it, made once per size and variant and turned as it rolls
+local weedImages = {}
+
+local function weedImage(r, variant)
+  local key = r * 10 + variant
+  if weedImages[key] then
+    return weedImages[key]
+  end
+  local size = 2 * r + 3
+  local c = r + 1
+  local data = love.image.newImageData(size, size)
+  local rng = love.math.newRandomGenerator(r * 131 + variant * 17)
+  local tones = { { 0.34, 0.26, 0.16 }, { 0.50, 0.39, 0.24 }, { 0.66, 0.54, 0.34 }, { 0.78, 0.66, 0.42 } }
+  local function dot(x, y, t)
+    x, y = math.floor(x + 0.5), math.floor(y + 0.5)
+    if x >= 0 and y >= 0 and x < size and y < size then
+      local col = tones[t]
+      data:setPixel(x, y, col[1], col[2], col[3], 1)
+    end
+  end
+  -- (the dark inside first, then lighter twigs over it)
+  for y = 0, size - 1 do
+    for x = 0, size - 1 do
+      local d = math.sqrt((x - c) ^ 2 + (y - c) ^ 2)
+      if d < r - 0.5 and rng:random() < 0.3 then
+        dot(x, y, 1)
+      end
+    end
+  end
+  for _ = 1, r * 2 + 3 do
+    -- a twig: a chord across the ball, wobbling a little
+    local a = rng:random() * math.pi * 2
+    local off = (rng:random() - 0.5) * r * 1.2
+    local len = math.sqrt(math.max(1, r * r - off * off))
+    local nx, ny = -math.sin(a), math.cos(a)
+    local tone = rng:random() < 0.5 and 2 or 3
+    for s = -len, len, 0.5 do
+      local wob = math.sin(s * 1.3 + a) * 0.5
+      dot(c + math.cos(a) * s + nx * (off + wob), c + math.sin(a) * s + ny * (off + wob), tone)
+    end
+  end
+  -- a ragged outline with gaps, and a few sprigs poking out
+  for i = 0, 40 do
+    local a = i / 40 * math.pi * 2
+    if rng:random() < 0.75 then
+      local rr = r - 0.3 + (rng:random() - 0.5) * 1.1
+      dot(c + math.cos(a) * rr, c + math.sin(a) * rr, rng:random() < 0.35 and 4 or 2)
+    end
+  end
+  for _ = 1, 3 do
+    local a = rng:random() * math.pi * 2
+    dot(c + math.cos(a) * (r + 0.8), c + math.sin(a) * (r + 0.8), 2)
+  end
+  local img = love.graphics.newImage(data)
+  img:setFilter("nearest", "nearest")
+  weedImages[key] = img
+  return img
+end
+
 local function updateWeeds(dt, world, px, py)
   if py > 620 then
     weeds = {}
@@ -436,6 +600,7 @@ local function updateWeeds(dt, world, px, py)
       speed = 26 + love.math.random() * 24,
       spin = 0,
       r = 3 + love.math.random(0, 2),
+      variant = love.math.random(1, 3),
     }
   end
   for i = #weeds, 1, -1 do
@@ -450,7 +615,7 @@ local function updateWeeds(dt, world, px, py)
       -- A little hop every so often as it catches the ground
       w.vy = love.math.random() < 0.3 and -60 - love.math.random() * 50 or 0
     end
-    if w.x < px - 420 or w.x < 130 or w.y > 640 then
+    if w.x < px - 420 or w.x < LEFT + 130 or w.y > 640 then
       table.remove(weeds, i)
     end
   end
@@ -458,15 +623,21 @@ end
 
 local smokeTimer, dustTimer, moteTimer = 0, 0, 0
 
--- Generates the areas below a slice at a time, every frame (see GEN_BUDGET)
-function overworld.background()
-  catacombs.step(GEN_BUDGET)
+-- Generates the areas below a slice at a time, every frame (see GEN_BUDGET).
+-- `spare` is what the frame has left once its own work is done.
+function overworld.background(idle, px, py, spare)
+  if idle or not px then
+    catacombs.step(GEN_BUDGET) -- (nobody playing: build everything, in order)
+  else
+    catacombs.step(0, px, py, spare)
+  end
 end
 
 -- Campfire smoke, blowing dust, tumbleweeds, and the light and banners
 -- changing as the hunter goes underground
 function overworld.update(dt, player, game, effects)
   local px, py = player:center()
+  town.sync() -- (a person has moved in, or the save file changed)
   smokeTimer = smokeTimer - dt
   if smokeTimer <= 0 then
     smokeTimer = 0.2
@@ -493,7 +664,7 @@ function overworld.update(dt, player, game, effects)
   if not catacombs.ready() and py > surface(px) + 12 then
     catacombs.finish(1)
   end
-  catacombs.ensure(py)
+  catacombs.ensure(py, px)
   catacombs.update(player, dt)
 
   -- The light blends from the surface to the ambient of the area the hunter is in
@@ -502,6 +673,8 @@ function overworld.update(dt, player, game, effects)
   for i = 1, 3 do
     overworld.ambient[i] = SURFACE_AMBIENT[i] + (cave[i] - SURFACE_AMBIENT[i]) * t
   end
+  render.mixFx(overworld.fx, SURFACE_FX, catacombs.theme(catacombs.levelAt(py, px) or 1).fx, t)
+  weather.apply(overworld.fx, overworld.ambient, 1 - t)
 end
 
 local function flicker(seed)
@@ -512,12 +685,21 @@ end
 -- Lanterns: { x, y } of each flame (the headframe's, two posts by the ramp,
 -- and the one by the tent)
 local function lanterns()
-  return {
+  local list = {
     { SHAFT_CX - 12, FRAME_TOP + 20 },
     { RAMP_X0 - 4, surface(RAMP_X0 - 4) - 22 },
     { PIT_X0 - 8, surface(PIT_X0 - 8) - 22 },
     { TENT_X - 26, surface(TENT_X - 26) - 22 },
   }
+  for _, e in ipairs(catacombs.entries()) do
+    if e.walk then
+      list[#list + 1] = { e.x - 215, surface(e.x - 215) - 24 }
+    elseif not e.lake then
+      list[#list + 1] = { e.x - e.half - 8, surface(e.x) - 24 }
+      list[#list + 1] = { e.x + e.half + 8, surface(e.x) - 24 }
+    end
+  end
+  return list
 end
 
 local function view(camX, camY)
@@ -531,6 +713,7 @@ function overworld.addLights(lighting, camX, camY)
     lighting.add(camX + SUN_X, camY + SUN_Y, 420, 1, 0.62, 0.38, 0.3 * sunlight)
   end
   catacombs.addLights(lighting, view(camX, camY))
+  town.addLights(lighting, view(camX, camY))
   for i, l in ipairs(lanterns()) do
     lighting.add(l[1], l[2] + 4, 80, 1, 0.7, 0.35, 0.7 + flicker(i) * 0.08)
   end
@@ -567,7 +750,7 @@ function overworld.drawBackground(camX, camY)
   for i, l in ipairs(background.layers) do
     local oy = -math.floor(camY * l.parallax * 0.5)
     love.graphics.setColor(1, 1, 1)
-    love.graphics.draw(l.image, -math.floor(camX * l.parallax), oy)
+    love.graphics.draw(l.image, -math.floor((camX - LEFT) * l.parallax), oy)
     -- When the camera is high the layer scrolls up; keep its base filled
     local bottom = oy + l.image:getHeight()
     if bottom < config.VIRTUAL_H then
@@ -786,7 +969,7 @@ end
 -- smaller skull out west
 local BONE, BONE_DARK = { 0.76, 0.70, 0.58 }, { 0.52, 0.47, 0.39 }
 local function drawBones()
-  local x0 = 1228
+  local x0 = 1396 -- (moved east of the pond, out of the town's lots)
   -- Spine along the ground
   for x = x0, x0 + 58, 3 do
     love.graphics.setColor(BONE_DARK)
@@ -817,7 +1000,7 @@ local function drawBones()
     rect(sx + 9 + math.floor(k * 0.5), sg - 7 - k, 1, 1)
   end
   -- A small horned skull out west
-  local tx, tg = 478, surface(478)
+  local tx, tg = 468, surface(468)
   rect(tx, tg - 4, 6, 4)
   rect(tx - 2, tg - 6, 2, 1)
   rect(tx + 6, tg - 6, 2, 1)
@@ -830,7 +1013,7 @@ end
 local function drawGroundClutter(vx0, vx1)
   for i = math.floor(vx0 / 9), math.floor(vx1 / 9) do
     local x = i * 9 + math.floor(hash(i, 3) * 6)
-    if x > 125 and x < WIDTH - 125 and (x < PIT_X0 - 20 or x > PIT_X1 + STEP_W + 4) then
+    if x > LEFT + 125 and x < RIGHT - 125 and (x < PIT_X0 - 20 or x > PIT_X1 + STEP_W + 4) then
       local h = hash(i, 1)
       local g = surface(x)
       if h > 0.62 then
@@ -849,14 +1032,11 @@ local function drawGroundClutter(vx0, vx1)
 end
 
 local function drawWeeds()
-  love.graphics.setColor(0.56, 0.45, 0.30)
+  love.graphics.setColor(1, 1, 1)
   for _, w in ipairs(weeds) do
-    local x, y = math.floor(w.x), math.floor(w.y)
-    love.graphics.circle("line", x + 0.5, y + 0.5, w.r)
-    for k = 0, 1 do
-      local a = w.spin + k * math.pi / 2
-      love.graphics.line(x + 0.5 - math.cos(a) * w.r, y + 0.5 - math.sin(a) * w.r, x + 0.5 + math.cos(a) * w.r, y + 0.5 + math.sin(a) * w.r)
-    end
+    local img = weedImage(w.r, w.variant or 1)
+    local half = img:getWidth() / 2
+    love.graphics.draw(img, math.floor(w.x) + 0.5, math.floor(w.y) + 0.5, w.spin, 1, 1, half, half)
   end
 end
 
@@ -877,7 +1057,7 @@ end
 -- the area in view (see src.parallax)
 local function drawCaveDepth(camX, camY, vx0, vx1, vy0, vy1)
   local index = catacombs.levelAt((vy0 + vy1) / 2, (vx0 + vx1) / 2) or 1
-  parallax.draw(index, camX, camY, vx0, vy0, vx1, vy1, catacombs.theme(index).pillars)
+  parallax.draw(catacombs.theme(index).parallax or index, camX, camY, vx0, vy0, vx1, vy1, catacombs.theme(index).pillars)
 end
 
 -- Decorations drawn behind the player (they receive lighting)
@@ -915,9 +1095,18 @@ function overworld.drawDecor(camX, camY)
   drawGroundClutter(vx0, vx1)
   drawBones()
   drawCamp()
+  town.draw({ x = vx0, y = vy0, w = vx1 - vx0, h = vy1 - vy0 }, surface)
   drawRails(vx0, vx1)
   drawLanternPost(RAMP_X0 - 4)
   drawLanternPost(PIT_X0 - 8)
+  for _, e in ipairs(catacombs.entries()) do
+    if e.walk then
+      drawLanternPost(e.x - 215)
+    elseif not e.lake then
+      drawLanternPost(e.x - e.half - 8)
+      drawLanternPost(e.x + e.half + 8)
+    end
+  end
   drawWinchHouse()
   drawHeadframe()
   drawWeeds()
@@ -951,6 +1140,7 @@ end
 -- Flames glow regardless of the light level
 function overworld.drawEmissive(camX, camY)
   drawShaftLight(camY)
+  town.drawEmissive(view(camX, camY))
   catacombs.drawEmissive(view(camX, camY))
   for _, l in ipairs(lanterns()) do
     local lx, ly = l[1], l[2]

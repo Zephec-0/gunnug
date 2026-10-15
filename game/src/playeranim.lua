@@ -7,6 +7,7 @@
 local audio = require("src.audio")
 local config = require("src.config")
 local effects = require("src.effects")
+local materials = require("src.materials")
 
 local cfg = config.player
 
@@ -54,6 +55,16 @@ end
 --          grip, b = down from it) or "belt" (a = in front of the hips, b = below them)
 --   carry  the hand is holding a fresh round / magazine
 -- Events fire once per reload as progress passes them.
+-- Each gun answers the reload's moments with its own sounds (see src.audio)
+local RELOAD_SOUND = {
+  revolver = { eject = "rev_eject", click = "rev_load", snap = "rev_close" }, -- shells dispensed, all rounds in, a click
+  shotgun = { eject = "sg_eject", click = "sg_shell", snap = "sg_close" },
+  automatic = { eject = "mg_eject", drum = "mg_eject", click = "mg_load", snap = "mg_click" }, -- clip out, loaded, click
+  gatling = { eject = "gat_rattle", drum = "gat_rattle", click = "gat_spin", snap = "gat_click" }, -- chain rattle, barrels spin, click
+  pistol = { eject = "pi_magdrop", click = "pi_magin", snap = "pi_click" }, -- mag drop, mag in, click
+  semiauto = { eject = "pi_magdrop", click = "pi_magin", snap = "pi_click" },
+}
+
 local RELOAD = {
   -- Tip the muzzle up, tap out the shells, fetch rounds from the belt, thumb
   -- them in and snap the cylinder shut
@@ -98,7 +109,7 @@ local RELOAD = {
       { p = 0.93, tilt = 0.0, reach = 0.3, kind = "gun", a = 1.0, b = 0 },
       { p = 1.00, tilt = 0.0, reach = 0.0, kind = "gun", a = -1.3, b = 0 },
     },
-    events = { { 0.74, "click" }, { 0.93, "snap" } },
+    events = { { 0.18, "eject" }, { 0.74, "click" }, { 0.93, "snap" } },
   },
   -- Drop the drum, a new one from the belt, slap it on, haul back the
   -- charging handle
@@ -383,17 +394,47 @@ function anim.updateReload(player)
           )
         end
         gun.spent = 0
-        audio.play("reload_click", 0.8, 0.8)
+        audio.play(RELOAD_SOUND[model] and RELOAD_SOUND[model].eject or "reload_click", 0.8, RELOAD_SOUND[model] and 1 or 0.8)
       elseif what == "drum" then
         effects.casing(neckX + f * 4, neckY + 6, f * 12 + player.body.vx * 0.3, 10, 4, { 0.22, 0.22, 0.27 })
-        audio.play("reload_click", 0.9, 0.6)
+        audio.play(RELOAD_SOUND[model] and RELOAD_SOUND[model].drum or "reload_click", 0.9, RELOAD_SOUND[model] and 1 or 0.6)
       elseif what == "click" then
-        audio.play("reload_click")
+        audio.play(RELOAD_SOUND[model] and RELOAD_SOUND[model].click or "reload_click")
       elseif what == "snap" then
-        audio.play("reload_snap")
+        audio.play(RELOAD_SOUND[model] and RELOAD_SOUND[model].snap or "reload_snap")
         a.recoil = math.max(a.recoil, 0.25) -- a little jolt as it closes
       end
     end
+  end
+end
+
+local STEP_SOUND = {
+  [materials.DIRT] = "step_dirt", [materials.SAND] = "step_sand", [materials.SANDSTONE] = "step_rock", [materials.ROCK] = "step_rock",
+  [materials.BEDROCK] = "step_rock", [materials.WOOD] = "step_wood", [materials.BRICK] = "step_rock", [materials.STONEBRICK] = "step_rock",
+  [materials.GOLDORE] = "step_rock", [materials.IRON] = "step_metal", [materials.SLATE] = "step_rock", [materials.BLUECLAY] = "step_dirt",
+  [materials.SULFUR] = "step_dirt", [materials.BILECLAY] = "step_dirt", [materials.TAILINGS] = "step_dirt", [materials.BASALT] = "step_rock",
+  [materials.ASH] = "step_ash",
+}
+
+-- One footstep: the sound of what is underfoot, and a little puff of it
+function anim.footstep(player)
+  local b = player.body
+  local x, y = math.floor(b.x + b.w / 2), math.floor(b.y + b.h + 1)
+  local id = player.world:get(x, y)
+  local sound = STEP_SOUND[id]
+  if player.inWater then
+    sound = "step_water"
+  end
+  if not sound then
+    return
+  end
+  local k = player.crouched and 0.5 or 1
+  audio.play(sound, k * (0.8 + math.min(0.5, math.abs(b.vx) / 300)))
+  if not player.inWater and love.math.random() < 0.6 then
+    local def = materials.defs[id]
+    local c = def and def.color or { 0.4, 0.4, 0.4 }
+    local g = 0.7 + love.math.random() * 0.4
+    effects.particle(x + (love.math.random() - 0.5) * 4, y - 1, -player.facing * (6 + love.math.random() * 10), -8 - love.math.random() * 10, 0.3, { c[1] * g + 0.1, c[2] * g + 0.1, c[3] * g + 0.1 }, 120)
   end
 end
 
@@ -405,6 +446,12 @@ function anim.update(player, dt)
   end
   a.lastX = b.x
   a.walking = player.grounded and not player.sliding and math.abs(b.vx) > 13
+  -- A footfall each time a foot passes under the body
+  local stepNow = math.floor(a.phase / math.pi)
+  if a.walking and stepNow ~= a.lastStep then
+    anim.footstep(player)
+  end
+  a.lastStep = stepNow
 
   -- Ease the legs back together when standing still
   if not a.walking and player.grounded then

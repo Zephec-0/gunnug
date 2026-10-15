@@ -744,20 +744,31 @@ end
 
 -- A random item: common ones turn up most, cursed ones rarely. `rng` is an
 -- optional function(m, n) like love.math.random.
+--
+-- Only items in the profile's pool are rolled (items.isAvailable, set by
+-- src.meta: locked ones never drop or sit in shops)
+items.isAvailable = nil
+
 function items.random(random)
   random = random or love.math.random
-  local total = 0
+  local pool, total = {}, 0
   for _, id in ipairs(items.order) do
-    total = total + items.rarities[items.defs[id].rarity].weight
+    if not items.isAvailable or items.isAvailable(id) then
+      pool[#pool + 1] = id
+      total = total + items.rarities[items.defs[id].rarity].weight
+    end
+  end
+  if #pool == 0 then
+    pool, total = { items.order[1] }, 1
   end
   local roll = random() * total
-  for _, id in ipairs(items.order) do
+  for _, id in ipairs(pool) do
     roll = roll - items.rarities[items.defs[id].rarity].weight
     if roll <= 0 then
       return items.new(id)
     end
   end
-  return items.new(items.order[#items.order])
+  return items.new(pool[#pool])
 end
 
 return items

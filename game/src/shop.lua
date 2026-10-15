@@ -65,6 +65,54 @@ local function priceOf(entry)
   return math.max(5, roundTo5(entry.price * perks.prod("shopPrice")))
 end
 
+-- Fills a weapon stock entry with a freshly generated gun and its price
+local function rollWeapon(entry)
+  local gun = guns.generate(nil, nil, 0.3)
+  local fitted = 0
+  for slot = 1, gun.slotCount do
+    if gun.slots[slot] then
+      fitted = fitted + 1
+    end
+  end
+  entry.gun, entry.name = gun, gun.name
+  entry.price = roundTo5(45 + 25 * fitted + 8 * math.max(0, gun.slotCount - gun.def.slots) + 12 * (gunInfo.gradeIndex(gun) - 1) + love.math.random(0, 20))
+  return entry
+end
+
+-- Fills an item stock entry with a random item not already in `used`
+local function rollItem(entry, used)
+  local item
+  for _ = 1, 200 do
+    item = items.random()
+    if not used[item.id] then
+      break
+    end
+  end
+  used[item.id] = true
+  local range = items.rarities[item.rarity].price
+  entry.item, entry.name = item, item.name
+  entry.price = roundTo5(love.math.random(range[1], range[2]))
+  return entry
+end
+
+-- Rolls the goods again in every shop not yet visited. The world is built
+-- behind the title screen before a save file is chosen, so the stock is
+-- rolled again once one is, from that profile's unlocked pool.
+function shop.restock()
+  for _, s in ipairs(shops) do
+    if not s.entered then
+      local used = {}
+      for _, e in ipairs(s.stock) do
+        if not e.sold and e.kind == "weapon" then
+          rollWeapon(e)
+        elseif not e.sold and e.kind == "item" then
+          rollItem(e, used)
+        end
+      end
+    end
+  end
+end
+
 -- Creates the shop for the room rectangle { x, y, w, h, hatch? } of an area
 -- `level` deep (the heal price rises with it); child: the index of the area
 -- its hatch drops into
@@ -96,24 +144,11 @@ function shop.populate(room, world, level, child)
 
   -- Two weapons, then the ammo types and attachments to their right
   for w = 1, 2 do
-    local gun = guns.generate(nil, nil, 0.3)
-    local fitted = 0
-    for slot = 1, gun.slotCount do
-      if gun.slots[slot] then
-        fitted = fitted + 1
-      end
-    end
-    add({ kind = "weapon", gun = gun, name = gun.name, price = roundTo5(45 + 25 * fitted + 8 * math.max(0, gun.slotCount - gun.def.slots) + 12 * (gunInfo.gradeIndex(gun) - 1) + love.math.random(0, 20)) }, room.x + RANGE + 155 + (w - 1) * 30)
+    add(rollWeapon({ kind = "weapon" }), room.x + RANGE + 155 + (w - 1) * 30)
   end
   local used = {}
   for i = 1, ITEMS do
-    local item
-    repeat
-      item = items.random()
-    until not used[item.id]
-    used[item.id] = true
-    local range = items.rarities[item.rarity].price
-    add({ kind = "item", item = item, name = item.name, price = roundTo5(love.math.random(range[1], range[2])) }, room.x + RANGE + 235 + (i - 1) * SPACING)
+    add(rollItem({ kind = "item" }, used), room.x + RANGE + 235 + (i - 1) * SPACING)
   end
 
   local h = room.hatch

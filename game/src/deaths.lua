@@ -37,6 +37,8 @@ local OTHER = {
   gas = { "Gas", { "Poisonous", "Choking", "Sulfurous" } },
   fire = { "Flames", { "Roaring", "Hungry", "Licking" } },
   water = { "Black Water", { "Cold", "Deep", "Unforgiving" } },
+  lava = { "Molten Rock", { "Glowing", "Merciless", "Bubbling" } },
+  acid = { "Acid", { "Hissing", "Biting", "Green" } },
   dark = { "Dark", { "Unforgiving", "Endless", "Silent" } },
 }
 

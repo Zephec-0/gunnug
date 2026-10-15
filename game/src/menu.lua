@@ -16,6 +16,7 @@ local audio = require("src.audio")
 local compendium = require("src.compendium")
 local fonts = require("src.fonts")
 local input = require("src.input")
+local meta = require("src.meta")
 local render = require("src.render")
 local save = require("src.save")
 local settings = require("src.settings")
@@ -149,9 +150,15 @@ end
 local recapData -- what the death recap tells: { name, killer, quip, discoveries }
 
 -- data: for "recap", the death to tell (see game.update)
+local campNpc -- whose page is open at camp (src.npcs)
+local mapDrag -- a right-button drag on the survey map: { x, y, moved }
+
 function menu.open(which, data)
   root = which
   recapData = data
+  if which == "camp" then
+    campNpc = data
+  end
   stack = {}
   setPage()
   love.keyboard.setKeyRepeat(false)
@@ -440,7 +447,7 @@ end
 local PAGES = {}
 local WASH_STEPS = 24
 local washMesh
-local DEFAULT_FOCUS = { compendium = "comp:cell:", slots = "slots:", settings = "set:tab", recap = "recap:new", name = "name:confirm" }
+local DEFAULT_FOCUS = { compendium = "comp:cell:", slots = "slots:", settings = "set:tab", recap = "recap:new", name = "name:confirm", camp = "camp:up:", board = "board:", ghost = "ghost:" }
 
 PAGES.title = function()
   local ww, wh = love.graphics.getDimensions()
@@ -553,7 +560,7 @@ PAGES.slots = function()
       love.graphics.rectangle("fill", px, by, bw * pct, math.max(2, u * 1.2))
       local s = p.stats
       local l1 = string.format("Playtime %s    Runs %d    Deaths %d", save.formatTime(p.playtime), s.runs, s.deaths)
-      local l2 = string.format("Monsters slain %d    Bosses %d    Gold earned %d", s.kills, s.bosses, s.gold)
+      local l2 = string.format("Monsters slain %d    Bosses %d    Gold earned %d    Marks %d", s.kills, s.bosses, s.gold, p.marks or 0)
       local l3 = "Deepest: " .. deepestName(p) .. "    Last played " .. os.date("%Y-%m-%d", p.lastPlayed)
       shadowPrint(l1, px, by + 3.5 * u, F.small, DIM)
       shadowPrint(l2, px, by + 3.5 * u + F.small:getHeight() * 1.3, F.small, DIM)
@@ -655,6 +662,31 @@ local function setCompTab(i)
   end
 end
 
+-- A small brass padlock, s window pixels per pixel, top-left at (x, y): 5 x 6
+local function padlock(x, y, s, alpha)
+  local a = alpha or 1
+  love.graphics.setColor(0.05, 0.04, 0.06, 0.8 * a)
+  love.graphics.rectangle("fill", x - s, y - s, 7 * s, 8 * s)
+  love.graphics.setColor(0.62, 0.63, 0.68, a)
+  love.graphics.rectangle("fill", x + s, y, 3 * s, s)
+  love.graphics.rectangle("fill", x + s, y, s, 2 * s)
+  love.graphics.rectangle("fill", x + 3 * s, y, s, 2 * s)
+  love.graphics.setColor(0.86, 0.66, 0.28, a)
+  love.graphics.rectangle("fill", x, y + 2 * s, 5 * s, 4 * s)
+  love.graphics.setColor(0.3, 0.2, 0.08, a)
+  love.graphics.rectangle("fill", x + 2 * s, y + 3 * s, s, 2 * s)
+end
+
+local GATED = { weapon = true, ammo = true, attachment = true }
+
+-- Whether an entry is locked for a profile (src.meta), and whether it's been seen
+local function lockState(profile, cat, entry)
+  if not profile or not GATED[cat] or entry.level or entry.recipe then
+    return false, false
+  end
+  return not meta.isUnlocked(cat, entry.id, profile), meta.isSeen(cat, entry.id, profile)
+end
+
 local function drawDetail(entry, profile, cat, x, y, w, h)
   panel(x, y, w, h, 0.92)
   if not entry then
@@ -663,6 +695,7 @@ local function drawDetail(entry, profile, cat, x, y, w, h)
   end
   local count = profile and (profile.found[cat.id] or {})[entry.id] or 0
   local known = count > 0
+  local locked, seen = lockState(profile, cat.id, entry)
   -- The picture: on a dark plate, with a soft glow behind it when known
   local ix, iy, iw, ih = x + 4 * u, y + 4 * u, w - 8 * u, math.floor(52 * u)
   love.graphics.setColor(0.02, 0.015, 0.03, 0.9)
@@ -684,7 +717,7 @@ local function drawDetail(entry, profile, cat, x, y, w, h)
   local ty = iy + ih + 4 * u
   local tx = x + 5 * u
   local tw = w - 10 * u
-  shadowPrint(known and entry.name or "???", tx, ty, F.body, known and TEXT or FAINT)
+  shadowPrint((known or seen) and entry.name or "???", tx, ty, F.body, known and TEXT or (seen and DIM or FAINT))
   ty = ty + F.body:getHeight() + u
   -- Rarity / kind line
   local tag
@@ -696,9 +729,22 @@ local function drawDetail(entry, profile, cat, x, y, w, h)
   if tag then
     shadowPrint(tag, tx, ty, F.small, entry.boss and DANGER or RARITY[entry.rarity] or DIM)
   end
-  local countText = known and (cat.verb .. " x" .. count) or "Not yet discovered"
+  local countText = known and (cat.verb .. " x" .. count) or (seen and "Seen" or "Not yet discovered")
   shadowPrint(countText, x + w - 5 * u - F.small:getWidth(countText), ty, F.small, known and WARM or FAINT)
   ty = ty + F.small:getHeight() * 1.6
+  if locked then
+    -- Locked: it never drops or sits in a shop until the Gunsmith learns it
+    local text
+    if not (profile.camp and profile.camp.gunsmith) then
+      text = "Locked. It won't turn up in shops or chests until someone who knows guns learns to make it."
+    elseif seen then
+      text = "Locked. Teach the Gunsmith at camp to make it: " .. meta.teachCost(cat.id, entry.id) .. " marks."
+    else
+      text = "Locked. Find one, then teach the Gunsmith to make it."
+    end
+    padlock(tx, ty + u, math.max(1, math.floor(u * 0.7)))
+    ty = ty + wrapped(text, tx + 6 * u, ty, tw - 6 * u, F.small, DANGER) + 2 * u
+  end
   if entry.base then
     -- A levelled common item: how it is made
     local text = "Fuse " .. entry.base[3] .. " with itself: +" .. entry.level .. " is as strong as " .. (entry.level + 1) .. " fitted together"
@@ -818,6 +864,7 @@ PAGES.compendium = function()
     local cx = x0 + col * (cellW + gap)
     local cy = math.floor(gy + pad + row * (cellH + gap) - comp.scroll)
     local known = (got[e.id] or 0) > 0
+    local locked, seen = lockState(profile, cat.id, e)
     local focused = widget({ id = "comp:cell:" .. e.id, x = cx, y = cy, w = cellW, h = cellH, clip = clip, activate = function() end })
     love.graphics.setColor(known and { 0.09, 0.07, 0.11, 0.95 } or { 0.035, 0.03, 0.05, 0.95 })
     love.graphics.rectangle("fill", cx, cy, cellW, cellH, u * 0.6, u * 0.6)
@@ -825,7 +872,16 @@ PAGES.compendium = function()
     love.graphics.setLineWidth(math.max(1, u * 0.4))
     love.graphics.setColor(edge[1], edge[2], edge[3], known and 0.8 or 0.6)
     love.graphics.rectangle("line", cx, cy, cellW, cellH, u * 0.6, u * 0.6)
-    compendium.drawIcon(e, cx + 2 * u, cy + 2 * u, cellW - 4 * u, cellH - 4 * u, not known)
+    compendium.drawIcon(e, cx + 2 * u, cy + 2 * u, cellW - 4 * u, cellH - 4 * u, not known, (seen and not known) and 1 or nil)
+    if seen and not known then
+      -- Seen but not collected: the silhouette has a faint rim
+      love.graphics.setColor(0.55, 0.5, 0.65, 0.5)
+      love.graphics.rectangle("line", cx + u, cy + u, cellW - 2 * u, cellH - 2 * u, u * 0.6, u * 0.6)
+    end
+    if locked then
+      local s = math.max(1, math.floor(u * 0.5))
+      padlock(cx + cellW - 6 * s - u, cy + u + s, s, known and 1 or 0.7)
+    end
     if focused then
       focusFrame(cx, cy, cellW, cellH)
     end
@@ -844,6 +900,263 @@ PAGES.compendium = function()
     comp.entry = nil
   end
   drawDetail(comp.entry or entries[1], profile, cat, X(252), Y(44), math.floor(134 * u), math.floor(166 * u))
+end
+
+-- The camp ------------------------------------------------------------------------------
+-- Talking to someone at camp (src.npcs) opens their page: the upgrades they
+-- sell for marks and, for the Gunsmith, the guns and items he can be taught.
+
+-- What the Gunsmith could still learn: every locked weapon, ammo type and attachment
+local function teachList()
+  local out = {}
+  for _, cat in ipairs({ "weapon", "ammo", "attachment" }) do
+    for _, e in ipairs(compendium.entries(cat)) do
+      if not e.level and not e.recipe and not meta.isUnlocked(cat, e.id) then
+        out[#out + 1] = e
+      end
+    end
+  end
+  return out
+end
+
+-- "12" with the mark's sigil before it, right-aligned at rx
+local function markPrice(text, rx, y, f, color)
+  local s = math.max(1, math.floor(u * 0.75 + 0.5))
+  local tx = rx - f:getWidth(text)
+  shadowPrint(text, tx, y, f, color)
+  meta.drawSigil(math.floor(tx - 7 * s - 2 * u), math.floor(y + f:getHeight() / 2 - 3.5 * s), s)
+end
+
+PAGES.camp = function()
+  local ww, wh = love.graphics.getDimensions()
+  love.graphics.setColor(0.015, 0.01, 0.025, 0.93)
+  love.graphics.rectangle("fill", 0, 0, ww, wh)
+  local person = meta.PEOPLE[campNpc] or { name = tostring(campNpc) }
+  local marks = meta.marks()
+  pageTitle(person.name, X(14), Y(9))
+  markPrice(marks .. (marks == 1 and " mark" or " marks"), X(386), Y(11), F.body, meta.SIGIL_COLOR)
+  shadowPrint(person.blurb or "Upgrades last for every run.", X(14), Y(26), F.small, FAINT)
+
+  -- Upgrades, one card each
+  local x, y, w = X(14), Y(36), math.floor(176 * u)
+  local hasUpgrades = false
+  for _, up in ipairs(meta.UPGRADES) do
+    hasUpgrades = hasUpgrades or up.npc == campNpc
+  end
+  if hasUpgrades then
+    shadowPrint("Upgrades", x, y, F.body, WARM)
+  end
+  y = y + F.body:getHeight() + 2 * u
+  for _, up in ipairs(meta.UPGRADES) do
+    if up.npc == campNpc then
+      local h = math.floor(23 * u)
+      local tier, cost = meta.tier(up.id), meta.nextCost(up.id)
+      local focused = widget({ id = "camp:up:" .. up.id, x = x, y = y, w = w, h = h, activate = function()
+        if meta.buy(up.id) then
+          audio.play("buy")
+        else
+          audio.play("deny")
+        end
+      end })
+      panel(x, y, w, h, focused and 0.95 or 0.82)
+      if focused then
+        focusFrame(x, y, w, h)
+      end
+      local tx, ty = x + 5 * u, y + 3 * u
+      shadowPrint(up.name, tx, ty, F.body, focused and TEXT or DIM)
+      -- a pip per tier, lit when bought
+      local px = tx + F.body:getWidth(up.name) + 4 * u
+      for k = 1, #up.costs do
+        local c = k <= tier and WARM or { 0.25, 0.22, 0.3 }
+        love.graphics.setColor(c)
+        love.graphics.rectangle("fill", math.floor(px + (k - 1) * 4 * u), math.floor(ty + F.body:getHeight() / 2 - 1.2 * u), math.ceil(2.6 * u), math.ceil(2.6 * u))
+      end
+      if cost then
+        markPrice(tostring(cost), x + w - 5 * u, ty, F.body, marks >= cost and meta.SIGIL_COLOR or DANGER)
+      else
+        shadowPrint("Done", x + w - 5 * u - F.body:getWidth("Done"), ty, F.body, FAINT)
+      end
+      wrapped(up.desc, tx, ty + F.body:getHeight() + u, w - 10 * u, F.small, FAINT)
+      y = y + h + 3 * u
+    end
+  end
+
+  -- The Bartender's house rules: switches for the next run
+  if campNpc == "bartender" then
+    local x, y, w = X(14), Y(36), math.floor(372 * u)
+    shadowPrint("House rules", x, y, F.body, WARM)
+    y = y + F.body:getHeight() + 2 * u
+    for _, r in ipairs(meta.RULES) do
+      local on = meta.ruleOn(r.id)
+      local h = math.floor(19 * u)
+      local focused = widget({ id = "camp:rule:" .. r.id, x = x, y = y, w = w, h = h, activate = function()
+        meta.toggleRule(r.id)
+        audio.play(on and "back" or "select")
+      end })
+      panel(x, y, w, h, focused and 0.95 or 0.82, on and DANGER or nil)
+      if focused then
+        focusFrame(x, y, w, h, on and DANGER or ACCENT)
+      end
+      local tx, ty = x + 5 * u, y + 3 * u
+      shadowPrint(r.name, tx, ty, F.body, on and { 1, 0.7, 0.6 } or (focused and TEXT or DIM))
+      shadowPrint(r.desc, tx, ty + F.body:getHeight() + u * 0.5, F.small, DIM)
+      local pct = "Marks +" .. math.floor((r.marks - 1) * 100 + 0.5) .. "%"
+      shadowPrint(pct, x + w - 5 * u - F.body:getWidth(pct) - (on and 0 or 0), ty, F.body, meta.SIGIL_COLOR)
+      shadowPrint(on and "ON" or "off", x + w - 5 * u - F.small:getWidth(on and "ON" or "off"), ty + F.body:getHeight() + u * 0.5, F.small, on and DANGER or FAINT)
+      y = y + h + 3 * u
+    end
+    local total = 1
+    for _, r in ipairs(meta.RULES) do
+      if meta.ruleOn(r.id) then
+        total = total * r.marks
+      end
+    end
+    wrapped("Rules apply from your next run (restart or start a new one). Together they pay marks x" .. string.format("%.2f", total) .. " on everything earned.", x, y + u, w, F.small, FAINT)
+    return
+  end
+  -- The Taxidermist's wall: one row per kind of elite (src.meta.MOUNTS)
+  if campNpc == "taxidermist" then
+    local enemies = require("src.enemies")
+    local x, y, w = X(14), Y(36), math.floor(372 * u)
+    shadowPrint("Trophies", x, y, F.body, WARM)
+    y = y + F.body:getHeight() + 2 * u
+    for _, kind in ipairs(meta.MOUNT_ORDER) do
+      local m = meta.MOUNTS[kind]
+      local n, mounted = meta.trophyCount(kind), meta.isMounted(kind)
+      local h = math.floor(17 * u)
+      local focused = widget({ id = "camp:mount:" .. kind, x = x, y = y, w = w, h = h, activate = function()
+        if meta.mount(kind) then
+          audio.play("buy")
+          act("refresh") -- (max health may have changed)
+        else
+          audio.play("deny")
+        end
+      end })
+      panel(x, y, w, h, focused and 0.95 or 0.82)
+      if focused then
+        focusFrame(x, y, w, h)
+      end
+      local tx, ty = x + 5 * u, y + 2.5 * u
+      shadowPrint(m.name, tx, ty, F.body, (n > 0) and (focused and TEXT or DIM) or FAINT)
+      shadowPrint(n > 0 and ("Elites slain: " .. n) or "None slain yet", tx, ty + F.body:getHeight() + u * 0.5, F.small, n > 0 and DIM or FAINT)
+      shadowPrint(m.effect, x + 120 * u, ty + u, F.body, mounted and WARM or ((n > 0) and DIM or FAINT))
+      if mounted then
+        shadowPrint("Mounted", x + w - 5 * u - F.body:getWidth("Mounted"), ty + u, F.body, WARM)
+      elseif n > 0 then
+        markPrice(tostring(m.cost), x + w - 5 * u, ty + u, F.body, marks >= m.cost and meta.SIGIL_COLOR or DANGER)
+      end
+      y = y + h + 3 * u
+    end
+    wrapped("A mount is for good: its bonus applies in every run. Elites slain are counted per kind; slay one of a kind to be able to mount it.", x, y + u, w, F.small, FAINT)
+    return
+  end
+  -- The Prospector's strongbox: gold kept between runs
+  if campNpc == "prospector" then
+    local gx, gy, gw = X(198), Y(36), math.floor(188 * u)
+    shadowPrint("Strongbox", gx, gy, F.body, WARM)
+    local top = gy + F.body:getHeight() + 2 * u
+    local gh = math.floor(62 * u)
+    panel(gx, top, gw, gh, 0.85)
+    local inBox, cap = meta.bank(), meta.bankCap()
+    local carry = menu.runGold and menu.runGold() or 0
+    local cx = gx + gw / 2
+    local ty = top + 6 * u
+    printCentered(inBox .. " / " .. cap .. " gold in the box", cx, ty, F.head, { 1, 0.85, 0.4 })
+    ty = ty + F.head:getHeight() + 3 * u
+    -- how full it is
+    local bw = gw - 24 * u
+    love.graphics.setColor(0.14, 0.12, 0.18)
+    love.graphics.rectangle("fill", gx + 12 * u, ty, bw, math.max(2, u * 1.4))
+    love.graphics.setColor(1, 0.8, 0.35)
+    love.graphics.rectangle("fill", gx + 12 * u, ty, bw * math.min(1, inBox / cap), math.max(2, u * 1.4))
+    ty = ty + 5 * u
+    printCentered("You carry " .. carry .. " gold", cx, ty, F.body, DIM)
+    ty = ty + F.body:getHeight() + 5 * u
+    local bwid, bh = math.floor(70 * u), math.floor(13 * u)
+    button("camp:deposit", "Put it in", math.floor(cx - bwid - 3 * u), ty, bwid, bh, function()
+      act("deposit")
+      audio.play("coin")
+    end, { disabled = carry <= 0 or inBox >= cap })
+    button("camp:withdraw", "Take it all out", math.floor(cx + 3 * u), ty, bwid, bh, function()
+      act("withdraw")
+      audio.play("coin")
+    end, { disabled = inBox <= 0 })
+    wrapped("What's in the box survives death. Walk back up with your gold to put it away, and take it out at the start of a run to spend it below.", gx, top + gh + 4 * u, gw, F.small, FAINT)
+    return
+  end
+  -- Teaching: a grid of everything still locked (silhouettes until seen)
+  if campNpc ~= "gunsmith" then
+    return
+  end
+  local gx, gy, gw = X(198), Y(36), math.floor(188 * u)
+  shadowPrint("Teach him", gx, gy, F.body, WARM)
+  local list = teachList()
+  local top = gy + F.body:getHeight() + 2 * u
+  local cell, gap, pad = math.floor(19 * u), math.floor(3 * u), math.floor(4 * u)
+  local cols = math.max(1, math.floor((gw - pad * 2 + gap) / (cell + gap)))
+  local rows = math.max(1, math.ceil(#list / cols))
+  local gh = rows * (cell + gap) - gap + pad * 2
+  panel(gx, top, gw, gh, 0.85)
+  if #list == 0 then
+    printCentered("He can make everything you can show him.", gx + gw / 2, top + gh / 2 - F.small:getHeight() / 2, F.small, FAINT)
+  end
+  local gridW = cols * (cell + gap) - gap
+  local x0 = gx + math.floor((gw - gridW) / 2)
+  local focusedEntry
+  for i, e in ipairs(list) do
+    local cx = x0 + ((i - 1) % cols) * (cell + gap)
+    local cy = top + pad + math.floor((i - 1) / cols) * (cell + gap)
+    local seen = meta.isSeen(e.category, e.id)
+    local cost = meta.teachCost(e.category, e.id)
+    local focused = widget({ id = "camp:teach:" .. e.category .. ":" .. e.id, x = cx, y = cy, w = cell, h = cell, activate = function()
+      if not seen or marks < cost then
+        audio.play("deny")
+        return
+      end
+      confirm({
+        text = "Teach him the " .. e.name .. "?",
+        detail = "It joins the pool for every run. " .. cost .. " marks.",
+        yesLabel = "Teach",
+        yes = function()
+          if meta.teach(e.category, e.id) then
+            audio.play("buy")
+          end
+          pop()
+        end,
+      })
+    end })
+    if focused then
+      focusedEntry = e
+    end
+    love.graphics.setColor(seen and { 0.09, 0.07, 0.11, 0.95 } or { 0.035, 0.03, 0.05, 0.95 })
+    love.graphics.rectangle("fill", cx, cy, cell, cell, u * 0.6, u * 0.6)
+    local edge = seen and ((e.rarity and RARITY[e.rarity]) or BORDER) or { 0.2, 0.18, 0.24 }
+    love.graphics.setLineWidth(math.max(1, u * 0.4))
+    love.graphics.setColor(edge[1], edge[2], edge[3], seen and 0.8 or 0.6)
+    love.graphics.rectangle("line", cx, cy, cell, cell, u * 0.6, u * 0.6)
+    compendium.drawIcon(e, cx + 2 * u, cy + 2 * u, cell - 4 * u, cell - 4 * u, not seen)
+    if focused then
+      focusFrame(cx, cy, cell, cell)
+    end
+  end
+
+  -- The focused one: what it is and what teaching it costs
+  local dy = top + gh + 4 * u
+  local e = focusedEntry
+  if e then
+    local seen = meta.isSeen(e.category, e.id)
+    local cost = meta.teachCost(e.category, e.id)
+    shadowPrint(seen and e.name or "???", gx, dy, F.body, seen and TEXT or FAINT)
+    if seen then
+      markPrice(tostring(cost), gx + gw, dy, F.body, marks >= cost and meta.SIGIL_COLOR or DANGER)
+      local text = (e.desc or "") .. (marks >= cost and "" or "  (Not enough marks.)")
+      wrapped(text, gx, dy + F.body:getHeight() + u, gw, F.small, DIM)
+    else
+      wrapped("Not seen yet. Bosses, and now and then a chest, give out things he doesn't make; find one and he can learn it.", gx, dy + F.body:getHeight() + u, gw, F.small, FAINT)
+    end
+  elseif #list > 0 then
+    wrapped("Choose something you have seen to teach him.", gx, dy, gw, F.small, FAINT)
+  end
 end
 
 -- Settings ---------------------------------------------------------------------------
@@ -896,7 +1209,7 @@ PAGES.settings = function()
     end
   else
     -- Key bindings: two keys per action
-    local kh = math.floor(9.5 * u)
+    local kh = math.floor(math.min(9.5, 139 / #input.ACTIONS) * u) -- (every action fits above the buttons)
     local kw = math.floor(46 * u)
     for _, a in ipairs(input.ACTIONS) do
       shadowPrint(a.name, X(70), y + (kh - F.small:getHeight()) / 2, F.small, DIM)
@@ -1122,6 +1435,174 @@ local function drawPoster(cx, cy, w, h, noun, photo, scale, spin, alpha)
   end
   ink((noun or "Unknown"):upper(), cx, py + ph + 3 * u, F.body)
   love.graphics.pop()
+end
+
+-- The ghost merchant (src.events) --------------------------------------------------------
+
+PAGES.ghost = function()
+  local events = require("src.events")
+  local icons = require("src.icons")
+  local game = require("src.game")
+  local ww, wh = love.graphics.getDimensions()
+  love.graphics.setColor(0.01, 0.02, 0.04, 0.93)
+  love.graphics.rectangle("fill", 0, 0, ww, wh)
+  pageTitle("The Ghost Merchant", X(14), Y(9))
+  shadowPrint("Pale hands, odd prices. Pay in gold, in blood, or in marks. He is gone when the lantern gutters.", X(14), Y(26), F.small, { 0.5, 0.7, 0.85 })
+  local offers = events.ghostOffers()
+  if not offers then
+    printCentered("He has drifted off.", X(200), Y(100), F.body, FAINT)
+    return
+  end
+  local x, y, w = X(14), Y(40), math.floor(372 * u)
+  local player = game.player()
+  for i, o in ipairs(offers) do
+    local h = math.floor(30 * u)
+    local can = (o.currency == "gold" and player.inventory.gold >= o.price) or (o.currency == "blood" and player.hp > o.price) or (o.currency == "marks" and meta.marks() >= o.price)
+    local focused = widget({ id = "ghost:" .. i, x = x, y = y, w = w, h = h, activate = function()
+      if not o.sold then
+        act("ghostbuy", i)
+      end
+    end })
+    panel(x, y, w, h, focused and 0.95 or 0.82, { 0.4, 0.65, 0.85 })
+    if focused then
+      focusFrame(x, y, w, h, { 0.5, 0.8, 1 })
+    end
+    local img = icons.get(o.item)
+    if img then
+      local s = math.max(1, math.floor(h / img:getHeight() * 0.7))
+      love.graphics.setColor(1, 1, 1, o.sold and 0.25 or 1)
+      love.graphics.draw(img, x + 4 * u, y + (h - img:getHeight() * s) / 2, 0, s, s)
+    end
+    local tx = x + 26 * u
+    shadowPrint(o.item.name, tx, y + 4 * u, F.body, o.sold and FAINT or TEXT)
+    wrapped(o.item.desc or "", tx, y + 4 * u + F.body:getHeight() + u * 0.5, w - 90 * u, F.small, o.sold and FAINT or DIM)
+    local price
+    if o.sold then
+      price = "Sold"
+    elseif o.currency == "gold" then
+      price = o.price .. " gold"
+    elseif o.currency == "blood" then
+      price = o.price .. " health"
+    else
+      price = o.price .. " marks"
+    end
+    shadowPrint(price, x + w - 6 * u - F.body:getWidth(price), y + 4 * u, F.body, o.sold and FAINT or (can and { 0.6, 0.9, 1 } or DANGER))
+    y = y + h + 4 * u
+  end
+end
+
+-- The survey map (src.surveymap) ---------------------------------------------------------
+
+PAGES.map = function()
+  local ww, wh = love.graphics.getDimensions()
+  love.graphics.setColor(0.015, 0.01, 0.025, 0.94)
+  love.graphics.rectangle("fill", 0, 0, ww, wh)
+  pageTitle("Survey Map", X(14), Y(9))
+  local tier = meta.tier("survey")
+  shadowPrint("Charted by your own boots this run. " .. (tier >= 2 and "Gold: chests. Cyan: shops. Red: a bounty's quarry. " or "A second survey tier marks shops, chests and bounty quarries. ") .. "Click to mark a spot, right-click a mark to take it down.", X(14), Y(26), F.small, FAINT)
+  local game = require("src.game")
+  local sm = require("src.surveymap")
+  love.graphics.setFont(F.small)
+  local mx, my, mw, mh = X(14), Y(36), math.floor(372 * u), math.floor(182 * u)
+  sm.draw(mx, my, mw, mh, u, game.player(), tier, game.mapMarks())
+  -- zoom buttons in the corner of the map's border (the wheel zooms too)
+  local bs = math.floor(10 * u)
+  local gap = math.floor(2 * u)
+  button("map:zoomout", "-", mx + mw - bs * 2 - gap * 2, my + gap, bs, bs, function()
+    sm.zoom(1 / 1.4)
+  end, { font = F.body })
+  button("map:zoomin", "+", mx + mw - bs - gap, my + gap, bs, bs, function()
+    sm.zoom(1.4)
+  end, { font = F.body })
+end
+
+-- The bounty board (src.bounties) --------------------------------------------------------
+-- Three wanted posters side by side, each with what is wanted, where, the
+-- reward and a button to take it (or give it up). Taken ones are stamped.
+
+local posterPhotos = {} -- kind -> photo, made once
+
+PAGES.board = function()
+  local bounties = require("src.bounties")
+  local enemies = require("src.enemies")
+  local ww, wh = love.graphics.getDimensions()
+  love.graphics.setColor(0.015, 0.01, 0.025, 0.93)
+  love.graphics.rectangle("fill", 0, 0, ww, wh)
+  local marks = meta.marks()
+  pageTitle("Bounty Board", X(14), Y(9))
+  markPrice(marks .. (marks == 1 and " mark" or " marks"), X(386), Y(11), F.body, meta.SIGIL_COLOR)
+  local taken = bounties.taken()
+  shadowPrint(string.format("Take up to %d. A taken bounty waits in its area every run until you claim it; the reward is paid the moment it dies.", bounties.MAX_TAKEN), X(14), Y(26), F.small, FAINT)
+  local list = bounties.list()
+  if #list == 0 then
+    printCentered("Nothing posted. Come back after your next run.", X(200), Y(100), F.body, FAINT)
+    return
+  end
+  local t = love.timer.getTime()
+  for i, b in ipairs(list) do
+    local cx = X(200 + (i - 2) * 128)
+    local pw, ph = math.floor(56 * u), math.floor(66 * u)
+    local cy = Y(76)
+    if not posterPhotos[b.kind] then
+      posterPhotos[b.kind] = enemies.photo(nil, b.kind) or false
+    end
+    drawPoster(cx, cy, pw, ph, b.name, posterPhotos[b.kind] or nil, 1, (i - 2) * 0.02, 1)
+    if b.taken then
+      -- A red "TAKEN" stamp across the paper
+      love.graphics.push()
+      love.graphics.translate(cx, cy + 4 * u)
+      love.graphics.rotate(-0.3)
+      love.graphics.setLineWidth(math.max(1, u * 0.7))
+      love.graphics.setColor(0.72, 0.1, 0.08, 0.85)
+      local sw = F.head:getWidth("TAKEN") + 6 * u
+      love.graphics.rectangle("line", -sw / 2, -F.head:getHeight() / 2 - u, sw, F.head:getHeight() + 2 * u)
+      love.graphics.setFont(F.head)
+      love.graphics.print("TAKEN", math.floor(-F.head:getWidth("TAKEN") / 2), math.floor(-F.head:getHeight() / 2))
+      love.graphics.pop()
+    end
+    -- What and where
+    local ty = cy + ph / 2 + 6 * u
+    local names = {}
+    for _, a in ipairs(b.affixes) do
+      names[#names + 1] = enemies.AFFIXES[a].name
+    end
+    local kindName = enemies.defs[b.kind].name or b.kind
+    local what = table.concat(names, " ") .. " " .. kindName
+    local c = enemies.AFFIXES[b.affixes[1]].color
+    printCentered(what, cx, ty, F.small, { c[1] * 0.5 + 0.5, c[2] * 0.5 + 0.5, c[3] * 0.5 + 0.5 })
+    ty = ty + F.small:getHeight() * 1.25
+    printCentered("Last seen in " .. bounties.where(b), cx, ty, F.small, DIM)
+    ty = ty + F.small:getHeight() * 1.5
+    local rt = "Reward " .. b.reward
+    local s = math.max(1, math.floor(u * 0.75 + 0.5))
+    local rw = F.body:getWidth(rt) + 7 * s + 2 * u
+    markPrice(rt, cx + rw / 2, ty, F.body, meta.SIGIL_COLOR)
+    ty = ty + F.body:getHeight() + 4 * u
+    local bw, bh = math.floor(60 * u), math.floor(12 * u)
+    if b.taken then
+      button("board:" .. b.id, "Give it up", math.floor(cx - bw / 2), ty, bw, bh, function()
+        confirm({
+          text = "Give up the bounty on " .. b.name .. "?",
+          detail = "The poster comes down. Nothing is paid back.",
+          yesLabel = "Give up",
+          danger = true,
+          yes = function()
+            bounties.abandon(b)
+            pop()
+          end,
+        })
+      end, { danger = true })
+    else
+      local full = taken >= bounties.MAX_TAKEN
+      button("board:" .. b.id, full and "Hands full" or "Take it", math.floor(cx - bw / 2), ty, bw, bh, function()
+        if bounties.take(b) then
+          audio.play("buy")
+        else
+          audio.play("deny")
+        end
+      end, { disabled = full })
+    end
+  end
 end
 
 PAGES.recap = function()
@@ -1404,7 +1885,7 @@ local function back()
     audio.play("back")
     return
   end
-  if not pop() and root == "pause" then
+  if not pop() and (root == "pause" or root == "camp" or root == "board" or root == "map" or root == "ghost") then
     act("resume")
   end
 end
@@ -1445,6 +1926,25 @@ function menu.keypressed(key)
     return
   end
   local cur = find(focusId)
+  if root == "map" and #stack == 0 then
+    if input.is("map", key) or input.is("interact", key) then
+      act("resume")
+      return
+    elseif key == "=" or key == "+" or key == "kp+" then
+      require("src.surveymap").zoom(1.4)
+      return
+    elseif key == "-" or key == "kp-" then
+      require("src.surveymap").zoom(1 / 1.4)
+      return
+    elseif key == "0" then
+      require("src.surveymap").fit()
+      return
+    end
+  end
+  if (root == "camp" or root == "board" or root == "ghost") and #stack == 0 and input.is("interact", key) then
+    act("resume") -- (the key that opened a camp page closes it again)
+    return
+  end
   if key == "up" or key == "w" then
     moveFocus(0, -1)
   elseif key == "down" or key == "s" then
@@ -1494,6 +1994,22 @@ function menu.mousepressed(x, y, button)
     return
   end
   mouseX, mouseY = x, y
+  if top() == "map" then
+    -- On the survey map: left-click marks a spot, right-click takes a mark down
+    -- (or, dragged, moves the map)
+    local sm = require("src.surveymap")
+    if sm.inBox(x, y) and not hovered() then
+      if button == 1 then
+        if sm.addMarker(x, y) then
+          audio.play("select")
+        end
+        return
+      elseif button == 2 then
+        mapDrag = { x = x, y = y, moved = false }
+        return
+      end
+    end
+  end
   if button == 2 then
     back()
     return
@@ -1518,6 +2034,14 @@ function menu.mousepressed(x, y, button)
 end
 
 function menu.mousereleased(x, y, button)
+  if mapDrag and button == 2 then
+    local drag = mapDrag
+    mapDrag = nil
+    if not drag.moved and require("src.surveymap").removeMarkerAt(x, y) then
+      audio.play("back")
+    end
+    return
+  end
   if not root or button ~= 1 then
     return
   end
@@ -1536,6 +2060,9 @@ function menu.mousereleased(x, y, button)
 end
 
 function menu.wheelmoved(_, dy)
+  if top() == "map" then
+    require("src.surveymap").zoom(1.18 ^ dy, mouseX, mouseY)
+  end
   if top() == "compendium" and comp.region then
     comp.target = comp.target - dy * 24 * u
   end
@@ -1549,6 +2076,26 @@ function menu.update(dt)
     return
   end
   local mx, my = love.mouse.getPosition()
+  if top() == "map" then
+    local sm = require("src.surveymap")
+    -- a right-button drag moves the map; the arrow keys and WASD do too
+    if mapDrag and love.mouse.isDown(2) then
+      local dx, dy = mx - mouseX, my - mouseY
+      if dx ~= 0 or dy ~= 0 then
+        sm.pan(dx, dy)
+        if math.abs(mx - mapDrag.x) + math.abs(my - mapDrag.y) > 4 then
+          mapDrag.moved = true
+        end
+      end
+    else
+      mapDrag = nil
+    end
+    local kx = (love.keyboard.isDown("left", "a") and 1 or 0) - (love.keyboard.isDown("right", "d") and 1 or 0)
+    local ky = (love.keyboard.isDown("up", "w") and 1 or 0) - (love.keyboard.isDown("down", "s") and 1 or 0)
+    if kx ~= 0 or ky ~= 0 then
+      sm.pan(kx * 420 * dt, ky * 420 * dt)
+    end
+  end
   if mx ~= mouseX or my ~= mouseY then
     mouseX, mouseY = mx, my
     if dragging then

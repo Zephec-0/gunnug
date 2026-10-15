@@ -344,13 +344,34 @@ local function rollSlots(def, random)
   return math.max(1, def.slots + delta + (def.slotBias or 0))
 end
 
+-- Hooks set by src.meta (the camp's upgrades and the unlocked pool):
+guns.isAvailable = nil -- function(archetype): may it be generated at random?
+guns.rollBoost = nil -- function(): how much better bonuses roll (1 = as normal)
+guns.extraSlotChance = nil -- function(): chance of one slot more
+
 -- rng: a love.math RandomGenerator (default: the global one);
 -- fitChance: chance each slot already holds an item (default FIT_CHANCE)
 function guns.generate(archetype, rng, fitChance)
   local items = require("src.items")
   local random = rng and function(...) return rng:random(...) end or love.math.random
-  archetype = archetype or ARCHETYPE_ORDER[random(1, #ARCHETYPE_ORDER)]
-  local gun = guns.new(archetype, rollSlots(guns.defs[archetype], random))
+  if not archetype then
+    local pool = {}
+    for _, id in ipairs(ARCHETYPE_ORDER) do
+      if not guns.isAvailable or guns.isAvailable(id) then
+        pool[#pool + 1] = id
+      end
+    end
+    if #pool == 0 then
+      pool = { "revolver" }
+    end
+    archetype = pool[random(1, #pool)]
+  end
+  local slots = rollSlots(guns.defs[archetype], random)
+  if guns.extraSlotChance and random() < guns.extraSlotChance() then
+    slots = slots + 1
+  end
+  local gun = guns.new(archetype, slots)
+  local boost = guns.rollBoost and guns.rollBoost() or 1
 
   local order = {}
   for i = 1, 7 do
@@ -369,14 +390,14 @@ function guns.generate(archetype, rng, fitChance)
   for rank, idx in ipairs(order) do
     local stat, dir, prefix = ROLL_STATS[idx][1], ROLL_STATS[idx][2], ROLL_STATS[idx][3]
     if dir ~= 0 and rank <= 2 then
-      apply(stat, dir, 0.08 + random() * 0.10)
+      apply(stat, dir, (0.08 + random() * 0.10) * boost)
       if stat == "chambers" then
         -- Whole chambers only: a "capacious" gun always holds at least one more
         rolls.chambers = math.max(rolls.chambers, (gun.def.chambers + 1) / gun.def.chambers)
       end
       best = best or prefix
     elseif dir ~= 0 and rank == 3 then
-      apply(stat, dir, -(0.05 + random() * 0.07))
+      apply(stat, dir, -(0.05 + random() * 0.07) / boost)
     else
       apply(stat, dir == 0 and 1 or dir, (random() * 2 - 1) * 0.04)
     end

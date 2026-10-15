@@ -22,23 +22,43 @@ function inventory.reloadsHolstered(gun)
   return perks.sum("bgReload") > 0 or gun:stats().bgReload > 0
 end
 
+-- Set by src.meta: function(base chance) -> the chance the starting revolver
+-- comes with an item fitted (the Gunsmith's Loaded Holster makes it certain)
+inventory.startItemChance = nil
+
+-- Every run starts with a revolver that has rolled its own stat variation
+-- and, half the time, one ammo type or attachment already fitted (never a
+-- cursed one)
+function inventory.starterGun()
+  local gun = guns.generate("revolver", nil, 0)
+  local chance = inventory.startItemChance and inventory.startItemChance(START_ITEM_CHANCE) or START_ITEM_CHANCE
+  if love.math.random() < chance then
+    local item
+    for _ = 1, 50 do
+      item = items.random()
+      if item.rarity ~= "cursed" then
+        break
+      end
+    end
+    if item and item.rarity ~= "cursed" then
+      gun.slots[love.math.random(1, gun.slotCount)] = item
+    end
+  end
+  return gun
+end
+
 function inventory.new()
   local self = setmetatable({ weapons = {}, items = {}, perks = {}, selected = 1, gold = 0, fuse = fuser.new() }, Inventory)
   perks.bind(self)
-  -- Every run starts with a revolver that has rolled its own stat variation
-  -- and, half the time, one ammo type or attachment already fitted (never a
-  -- cursed one)
-  local gun = guns.generate("revolver", nil, 0)
-  if love.math.random() < START_ITEM_CHANCE then
-    local item
-    repeat
-      item = items.random()
-    until item.rarity ~= "cursed"
-    gun.slots[love.math.random(1, gun.slotCount)] = item
-  end
-  self.weapons[1] = gun
+  self.weapons[1] = inventory.starterGun()
+  self.dynamite = inventory.startDynamite and inventory.startDynamite() or 0
+  self.flasks = inventory.startFlasks and inventory.startFlasks() or 0
   return self
 end
+
+-- Set by src.meta: sticks of dynamite a run starts with
+inventory.startDynamite = nil
+inventory.startFlasks = nil
 
 function Inventory:selectedGun()
   return self.weapons[self.selected]

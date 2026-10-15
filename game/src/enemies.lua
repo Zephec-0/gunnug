@@ -15,6 +15,7 @@ local Body = require("src.body")
 local config = require("src.config")
 local destruction = require("src.destruction")
 local effects = require("src.effects")
+local gore = require("src.gore")
 local fluids = require("src.fluids")
 local hud = require("src.hud")
 local perks = require("src.perks")
@@ -175,7 +176,7 @@ enemies.defs.wisp = {
 enemies.defs.worm = {
   w = 4,
   h = 4,
-  hp = 28,
+  hp = 14, -- (halved twice on 2026-10-14: still too hard to fight)
   speed = 108, -- it swims through the rock, never slowed by it
   lungeSpeed = 172,
   turn = 5.5, -- radians per second it can swing its head
@@ -386,6 +387,11 @@ local DPS_IDLE = 2
 
 local ITEM_DROP_CHANCE = 0.1 -- chance a dying monster drops an ammo type or attachment
 local ACTIVE_RANGE = 520 -- enemies further than this from the hunter are frozen
+-- Bullets only test the monsters within this of the hunter (rebuilt every
+-- frame): testing every monster in the world at every pixel a bullet moved
+-- made heavy fire slow
+local HIT_RANGE = 1000
+local near = {}
 local GLOB_LIFE = 4
 
 local DRAW_REF, GLOW_REF = {}, {} -- filled in once the drawing functions exist (below)
@@ -400,7 +406,7 @@ local clock = 0 -- game time (stops while paused), for the DPS meter
 enemies.onKill = nil
 
 function enemies.clear()
-  list, globs, sticks = {}, {}, {}
+  list, globs, sticks, near = {}, {}, {}, {}
 end
 
 function enemies.count()
@@ -408,8 +414,41 @@ function enemies.count()
 end
 
 -- Every enemy (for src.fluids and tests)
+-- 0..1: how hard monsters are pressing (px, py): awake ones close by count,
+-- bosses more (drives the music's tension layer)
+function enemies.threat(px, py)
+  local t = 0
+  for _, e in ipairs(near) do
+    if not e.dead and e.state ~= "idle" and e.state ~= "sleep" then
+      local b = e.body
+      local d = math.sqrt((b.x + b.w / 2 - px) ^ 2 + (b.y + b.h / 2 - py) ^ 2)
+      if d < 300 then
+        t = t + (e.def.boss and 0.8 or 0.3) * (1 - d / 300)
+      end
+    end
+  end
+  return math.min(1, t)
+end
+
+-- Draws a rectangle for each creature in view (into the light-blocking mask)
+function enemies.drawOccluders(view)
+  for _, e in ipairs(near) do
+    local b = e.body
+    if not e.dead and not e.noShadow and b.x + b.w > view.x and b.x < view.x + view.w and b.y + b.h > view.y and b.y < view.y + view.h then
+      love.graphics.rectangle("fill", b.x + 1, b.y + 1, math.max(1, b.w - 2), math.max(1, b.h - 2))
+    end
+  end
+end
+
 function enemies.all()
   return list
+end
+
+-- The living monsters within ~1000 px of the hunter (rebuilt every frame by
+-- enemies.update): what drawing, lights, blasts and fluids need to look at,
+-- instead of every monster in the world
+function enemies.nearby()
+  return near
 end
 
 -- Spawns an enemy. Ghouls stand on the ground at (x, groundY); bats and
@@ -421,13 +460,13 @@ local function newEnemy(kind, x, y, toughness, level, swarm)
     kind = kind,
     def = def,
     body = Body.new(math.floor(x - def.w / 2), math.floor(top), def.w, def.h),
-    hp = math.floor(def.hp * (toughness or 1) + 0.5),
-    maxHp = math.floor(def.hp * (toughness or 1) + 0.5),
+    hp = math.floor(def.hp * (toughness or 1) * (def.boss and 1 or require("src.meta").enemyHpMul()) + 0.5),
+    maxHp = math.floor(def.hp * (toughness or 1) * (def.boss and 1 or require("src.meta").enemyHpMul()) + 0.5),
     toughness = toughness or 1,
     state = def.dummy and "still" or def.ground and "idle" or "sleep",
     level = level or 1,
     swarm = swarm, -- the colony this monster belongs to: { members = {...}, awake }
-    dmgMul = 1 + ((level or 1) - 1) * DAMAGE_PER_AREA,
+    dmgMul = (1 + ((level or 1) - 1) * DAMAGE_PER_AREA) * require("src.meta").enemyDmgMul(),
     facing = love.math.random() < 0.5 and -1 or 1,
     timer = love.math.random() * 2, -- general-purpose state timer
     cooldown = 0,
@@ -453,6 +492,7 @@ end
 function enemies.spawn(kind, x, y, toughness, level, swarm)
   local e = newEnemy(kind, x, y, toughness, level, swarm)
   list[#list + 1] = e
+  near[#near + 1] = e -- (testable by bullets at once, until the next frame's list)
   if swarm then
     swarm.members = swarm.members or {}
     swarm.members[#swarm.members + 1] = e
@@ -572,16 +612,171 @@ local function removePhysics(e)
   end
 end
 
+-- Elites (design doc §11a-iii) -------------------------------------------------------
+-- A few monsters in every area are elite: three times the health, a quarter
+-- more damage, more gold, a pulsing tint in their affix's colour with a crest
+-- of diamonds over the head (one per affix), and a health bar with their name
+-- once they are fighting. They pay marks and drop a locked item when killed
+-- (enemies.onEliteKilled, set by src.game). Affixes are mostly data plus a
+-- few hooks (enemies.damage, die, the update loop):
+enemies.AFFIXES = {
+  armoured = { name = "Armoured", color = { 0.62, 0.74, 1.0 }, desc = "Takes a third of the damage from the front. Shoot it from behind, or blow it up." },
+  burning = { name = "Burning", color = { 1.0, 0.5, 0.18 }, desc = "Leaves fire where it goes, sets gas alight and can't be burned." },
+  splitting = { name = "Splitting", color = { 0.55, 1.0, 0.5 }, desc = "Breaks into two of its kind when it dies." },
+}
+enemies.AFFIX_ORDER = { "armoured", "burning", "splitting" }
+local ELITE_HP, ELITE_DAMAGE, ELITE_GOLD = 3, 1.25, 2.5
+local ELITE_FRONT = 0.35 -- what an armoured elite takes from the front
+local ELITE_BLAST = 1.5 -- ...and from blasts
+-- Kinds that can be elite (and of those, the ones that can split)
+local ELITE_KINDS = { ghoul = true, bat = true, spitter = true, hopper = true, bloater = true, miner = true, roller = true }
+local SPLIT_KINDS = { ghoul = true, bat = true, hopper = true, bloater = true, miner = true, roller = true }
+-- Elites per area, by depth tier
+local ELITES_PER_TIER = { 3, 4, 5, 6, 7 }
+local BOUNTY_POINT = 700 -- a bounty's quarry is pointed to on the screen's edge within this (px)
+
+-- Set by src.game: called with the elite when one dies (marks, its trophy)
+enemies.onEliteKilled = nil
+local blasting = false -- (set while a blast is dealing damage: armoured elites take more)
+
+-- Makes e elite with the given affixes (ids from enemies.AFFIXES)
+function enemies.makeElite(e, affixes)
+  e.elite = { affixes = affixes, has = {}, trail = 0, ember = 0 }
+  for _, a in ipairs(affixes) do
+    e.elite.has[a] = true
+  end
+  e.hp = math.floor(e.hp * ELITE_HP + 0.5)
+  e.maxHp = e.hp
+  e.dmgMul = e.dmgMul * ELITE_DAMAGE
+  e.fireproof = e.elite.has.burning or nil
+end
+
+-- A bounty's named elite (src.bounties): its affixes, half as much health
+-- again as an elite, its name, and a pointer on the screen's edge when near
+function enemies.makeBounty(e, b)
+  if e.elite then
+    e.elite.affixes, e.elite.has = b.affixes, {}
+    for _, a in ipairs(b.affixes) do
+      e.elite.has[a] = true
+    end
+    e.fireproof = e.elite.has.burning or nil
+  else
+    enemies.makeElite(e, b.affixes)
+  end
+  e.hp = math.floor(e.hp * 1.5 + 0.5)
+  e.maxHp = e.hp
+  e.bounty, e.bountyName = b.id, b.name
+end
+
+-- "Armoured Burning Ghoul" (or a bounty's name: "Old Gnasher")
+function enemies.eliteName(e)
+  if e.bountyName then
+    return e.bountyName
+  end
+  local parts = {}
+  for _, a in ipairs(e.elite and e.elite.affixes or {}) do
+    parts[#parts + 1] = enemies.AFFIXES[a].name
+  end
+  local d = e.def
+  parts[#parts + 1] = d.name or (e.kind:sub(1, 1):upper() .. e.kind:sub(2))
+  return table.concat(parts, " ")
+end
+
+-- Picks `count` of an area's monsters (a list) to be elite; tier is the
+-- area's depth. From the second tier on, some get two affixes.
+function enemies.rollElites(monsters, tier, random)
+  random = random or love.math.random
+  local pool = {}
+  for _, e in ipairs(monsters) do
+    if ELITE_KINDS[e.kind] and not e.def.boss and not e.swarm and not e.elite then
+      pool[#pool + 1] = e
+    end
+  end
+  local count = ELITES_PER_TIER[math.max(1, math.min(#ELITES_PER_TIER, tier or 1))]
+  local made = {}
+  for _ = 1, math.min(count, #pool) do
+    local e = table.remove(pool, random(1, #pool))
+    local options = {}
+    for _, a in ipairs(enemies.AFFIX_ORDER) do
+      if a ~= "splitting" or SPLIT_KINDS[e.kind] then
+        options[#options + 1] = a
+      end
+    end
+    local affixes = { table.remove(options, random(1, #options)) }
+    if (tier or 1) >= 2 and #options > 0 and random() < 0.35 then
+      affixes[2] = table.remove(options, random(1, #options))
+    end
+    enemies.makeElite(e, affixes)
+    made[#made + 1] = e
+  end
+  return made
+end
+
+-- Every frame an elite is active: the burning one's trail and embers
+local function updateElite(e, dt)
+  local el = e.elite
+  if el.has.burning then
+    local b = e.body
+    el.ember = el.ember - dt
+    if el.ember <= 0 then
+      el.ember = 0.07
+      effects.particle(b.x + love.math.random() * b.w, b.y + love.math.random() * b.h * 0.6, (love.math.random() - 0.5) * 10, -20 - love.math.random() * 20, 0.4, { 1, 0.45 + love.math.random() * 0.35, 0.12 }, -30, true)
+    end
+    el.trail = el.trail - dt
+    local moving = math.abs(b.vx or 0) > 12 or math.abs(b.vy or 0) > 12
+    if el.trail <= 0 and moving and e.state ~= "sleep" then
+      el.trail = 0.3
+      if e.def.ground then
+        fluids.ignite(b.x + b.w / 2, b.y + b.h - 1, 1)
+      else
+        fluids.ignite(b.x + b.w / 2, b.y + b.h / 2, 0.6, true) -- (a flyer only lights gas)
+      end
+    end
+  end
+end
+
+-- An elite falls: it splits, drops its loot, and pays out (src.game)
+local function eliteDies(e, cx, cy)
+  local el = e.elite
+  if el.has.splitting then
+    local b = e.body
+    for _, side in ipairs({ -1, 1 }) do
+      local y = e.def.ground and (b.y + b.h) or b.y
+      local kid = enemies.spawn(e.kind, cx + side * 5, y, e.toughness * 0.5, e.level)
+      kid.state = (e.kind == "spitter") and "watch" or "chase"
+      kid.seesPlayer = true
+      kid.body.vx, kid.body.vy = side * 90, -110
+      kid.stun = 0.3
+    end
+    effects.ring(cx, cy, 16, enemies.AFFIXES.splitting.color)
+  end
+  pickups.dropGold(cx, cy, math.floor(love.math.random(e.def.gold[1], e.def.gold[2]) * e.toughness * (ELITE_GOLD - 1) + 0.5))
+  if e.carriesKey then
+    require("src.events").dropKey(e.carriesKey, cx, cy)
+  end
+  local meta = require("src.meta")
+  local item = meta.lockedItem() or require("src.items").random()
+  pickups.dropItem(cx, cy - 4, item, (love.math.random() - 0.5) * 40, -110)
+  effects.popup(cx, e.body.y - 10, "ELITE SLAIN", { 1, 0.85, 0.45 })
+  if enemies.onEliteKilled then
+    enemies.onEliteKilled(e)
+  end
+end
+
 local function die(e)
   e.dead = true
   audio.play("enemy_die")
   removePhysics(e)
   local cx, cy = center(e)
+  gore.burst(cx, cy, gore.color(e), math.min(2.5, (e.body.w * e.body.h) / 160))
   local share = e.goldShare or 1 -- a Queen remnant's cut of the Queen's gold
   local gold = love.math.random(e.def.gold[1], e.def.gold[2])
   local greed = e.lastFx and e.lastFx.greed or 0
   pickups.dropGold(cx, cy, math.floor(gold * e.toughness * (1 + greed) * share + 0.5))
   pickups.maybeDropItem(cx, cy, ITEM_DROP_CHANCE * perks.prod("loot") * share)
+  if e.elite then
+    eliteDies(e, cx, cy)
+  end
   if enemies.onKill then
     enemies.onKill(e, e.lastFx)
   end
@@ -601,10 +796,22 @@ local function die(e)
     local amount = math.floor(love.math.random(e.def.gold[1], e.def.gold[2]) * e.toughness * 0.5)
     pickups.dropGold(cx, cy, amount)
     pickups.dropGold(cx, cy, amount)
-    for _ = 1, 4 do
-      pickups.maybeDropItem(cx + (r() - 0.5) * 10, cy, 1)
+    -- (one of the items, and now and then the weapon, is something still
+    -- locked, src.meta: a thing to see and later teach the Gunsmith)
+    local meta = require("src.meta")
+    local lockedItem = meta.lockedItem()
+    for k = 1, 4 do
+      if k == 1 and lockedItem then
+        pickups.dropItem(cx + (r() - 0.5) * 10, cy, lockedItem)
+      else
+        pickups.maybeDropItem(cx + (r() - 0.5) * 10, cy, 1)
+      end
     end
-    pickups.maybeDropWeapon(cx, cy, 1, 0.5)
+    local lockedGun = r() < 0.4 and meta.lockedArchetype() or nil
+    pickups.dropWeapon(cx, cy, require("src.guns").generate(lockedGun, nil, 0.5))
+    if e.reward then
+      pickups.dropPerk(cx + 12, cy - 6, e.reward, 30, -80) -- (what this boss guards, see src.cavegen's bossReward)
+    end
     -- ...and a perk, one the hunter doesn't have yet, left where it fell
     local perk = perks.roll(1)[1]
     if perk then
@@ -771,6 +978,19 @@ function enemies.damage(e, amount, dx, dy, force, crit, fx)
   elseif e.state == "dizzy" then
     amount = math.floor(amount * 1.5 + 0.5) -- soft and uncurled
   end
+  if e.elite and e.elite.has.armoured then
+    if blasting then
+      amount = math.floor(amount * ELITE_BLAST + 0.5) -- plates don't stop a blast
+    elseif dx and dx * e.facing < 0 then
+      -- Struck from the front: the plates turn most of it aside
+      amount = math.max(1, math.floor(amount * ELITE_FRONT + 0.5))
+      audio.play("clank", 0.25, 1.5)
+      local ax, ay = center(e)
+      for _ = 1, 2 do
+        effects.particle(ax + e.facing * e.body.w / 2, ay, e.facing * (30 + love.math.random() * 60), -love.math.random() * 60, 0.15, { 0.8, 0.88, 1 }, 200, true)
+      end
+    end
+  end
   if e.def.dummy then
     recordDps(e, amount)
   else
@@ -788,6 +1008,10 @@ function enemies.damage(e, amount, dx, dy, force, crit, fx)
     -- A hit shoves the sprite back for a moment
     e.stagger = math.min(0.2, 0.08 + (force or 0) / 2500)
     e.hitDir = dx > 0 and 1 or -1
+  end
+  if not e.def.dummy and not e.armored then
+    local gx, gy = center(e)
+    gore.spray(gx, gy, dx or 0, dy or -0.3, gore.color(e), math.min(9, 2 + math.floor(amount / 3)))
   end
   local cx = center(e)
   if crit then
@@ -818,7 +1042,8 @@ end
 -- Explosions: hurts every enemy within the radius (more at the centre) and
 -- throws them away from it. `force` is the shove speed at the centre.
 function enemies.damageArea(x, y, radius, damage, force)
-  for _, e in ipairs(list) do
+  blasting = true
+  for _, e in ipairs(near) do
     if not e.dead then
       local cx, cy = center(e)
       local dx, dy = cx - x, cy - y
@@ -831,12 +1056,13 @@ function enemies.damageArea(x, y, radius, damage, force)
       end
     end
   end
+  blasting = false
 end
 
 -- Sets an enemy alight: dps burning damage for `time` seconds (a stronger
 -- fire replaces a weaker one; it refreshes the time)
 function enemies.ignite(e, dps, time)
-  if e.dead then
+  if e.dead or e.fireproof then
     return
   end
   if e.burn then
@@ -916,7 +1142,7 @@ end
 
 -- Singularity Rounds: drags enemies within radius toward (x, y)
 function enemies.pull(x, y, radius, speed)
-  for _, e in ipairs(list) do
+  for _, e in ipairs(near) do
     if not e.dead and e.def.knockback > 0 then
       local cx, cy = center(e)
       local dx, dy = x - cx, y - cy
@@ -1155,7 +1381,7 @@ end
 
 -- Bullet hit test: an enemy or an acid glob at the pixel (globs can be shot down)
 function enemies.hitTest(px, py)
-  for _, e in ipairs(list) do
+  for _, e in ipairs(near) do
     local b = e.body
     if not e.dead and px >= b.x and px < b.x + b.w and py >= b.y and py < b.y + b.h then
       return e
@@ -2217,7 +2443,8 @@ local function propImpacts(e, dt)
   end
   -- A pixel wider all round: the enemy's physics stand-in stops objects at
   -- contact, so they touch rather than overlap
-  for p in pairs(props.overlapping(b.x - 1, b.y - 1, b.w + 2, b.h + 2)) do
+  e.touching = props.overlapping(b.x - 1, b.y - 1, b.w + 2, b.h + 2, e.touching)
+  for p in pairs(e.touching) do
     if not e.propHit[p] then
       -- The object's own velocity as it arrived, before the collision
       local pvx, pvy = p.prevVx or 0, p.prevVy or 0
@@ -2445,6 +2672,32 @@ local function throwDynamite(e, px, py)
     fuse = def.fuse,
     spin = 0,
     mul = e.dmgMul * def.blast,
+  }
+  audio.play("worm_lunge", 0.5, 1.6)
+end
+
+-- The hunter's own dynamite (the Prospector's): thrown from (x, y) toward
+-- (tx, ty), it bounces and goes off 1.4 s later in a bigger blast that digs
+-- a crater in any rock (and hurts him too, if he is close). Shooting it in
+-- the air sets it off early, like a miner's.
+function enemies.throwStick(x, y, tx, ty)
+  local dx, dy = tx - x, ty - y
+  local d = math.max(1, math.sqrt(dx * dx + dy * dy))
+  local speed = math.min(320, 120 + d * 1.2)
+  sticks[#sticks + 1] = {
+    isStick = true,
+    isGlob = true,
+    x = x,
+    y = y,
+    vx = dx / d * speed,
+    vy = dy / d * speed - 70,
+    grav = 520,
+    fuse = 1.4,
+    spin = 0,
+    mul = 1.6,
+    dig = 11,
+    digPower = 3.5,
+    cause = "selfblast",
   }
   audio.play("worm_lunge", 0.5, 1.6)
 end
@@ -2812,7 +3065,7 @@ local UPDATE = {
 -- Before the physics step: moves each stand-in to its enemy via velocity (like
 -- the hunter's), so physics objects get proper contact responses
 function enemies.syncPhysics(dt)
-  for _, e in ipairs(list) do
+  for _, e in ipairs(near) do
     if e.phys and not e.dead then
       local b = e.body
       local tx, ty = b.x + b.w / 2, b.y + b.h / 2
@@ -2831,6 +3084,15 @@ function enemies.update(dt, world, player)
   clock = clock + dt
   local px, py = player:center()
   local pb = player.body
+  for i = #near, 1, -1 do
+    near[i] = nil
+  end
+  for _, e in ipairs(list) do
+    local b = e.body
+    if not e.dead and math.abs(b.x - px) < HIT_RANGE and math.abs(b.y - py) < HIT_RANGE then
+      near[#near + 1] = e
+    end
+  end
   for i = #list, 1, -1 do
     local e = list[i]
     if e.dead then
@@ -2844,7 +3106,7 @@ function enemies.update(dt, world, player)
         e.spitT = math.max(0, (e.spitT or 0) - dt)
         e.stun = math.max(0, e.stun - dt)
         e.cooldown = math.max(0, e.cooldown - dt)
-        e.ignoreProps = props.overlapping(e.body.x, e.body.y, e.body.w, e.body.h)
+        e.ignoreProps = props.overlapping(e.body.x, e.body.y, e.body.w, e.body.h, e.ignoreProps)
         if not e.phys then
           local b = e.body
           e.phys = love.physics.newBody(physics.world, b.x + b.w / 2, b.y + b.h / 2, "kinematic")
@@ -2866,6 +3128,9 @@ function enemies.update(dt, world, player)
         updateBurn(e, dt)
         updatePoison(e, dt)
         updateStatusFx(e, dt)
+        if e.elite then
+          updateElite(e, dt)
+        end
         if not e.def.dummy then
           updateMotes(e, dt)
         end
@@ -2895,6 +3160,10 @@ function enemies.update(dt, world, player)
             end
           end
         end
+      elseif e.phys then
+        -- Frozen far from the hunter: its physics stand-in goes (one is made
+        -- again when he comes near), so it doesn't drift or cost anything
+        removePhysics(e)
       end
     end
   end
@@ -2926,7 +3195,7 @@ function enemies.update(dt, world, player)
     end
     if s.fuse <= 0 or s.dead then
       table.remove(sticks, i)
-      require("src.bullets").blast(s.x, s.y, 1, s.mul, nil, nil, "dynamite")
+      require("src.bullets").blast(s.x, s.y, 1, s.mul, s.dig, s.digPower, s.cause or "dynamite")
     end
   end
 
@@ -3009,6 +3278,9 @@ end
 -- glowing eyes. A heavy, hunched brute: it shambles with its long arms
 -- dragging behind it, rears back to attack, and flings both arms forward as
 -- it lunges.
+-- (The pose is the creature's own table, refilled each time it is asked for:
+-- a few dozen ghouls making fifteen fresh tables twice a frame was one of
+-- the bigger sources of garbage.)
 local function ghoulPose(e)
   local b, f = e.body, e.facing
   local def = e.def
@@ -3017,33 +3289,38 @@ local function ghoulPose(e)
   local wind = e.windT and (1 - e.windT / def.windup) or 0 -- 0 -> 1 while rearing back
   local strike = (e.strikeT or 0) / def.strike -- 1 -> 0 after the lunge
   local mid = b.x + b.w / 2
-  local pose = { f = f, wind = wind, strike = strike, moving = moving }
+  local pose = e.pose
+  if not pose then
+    pose = { pelvis = { 0, 0 }, shoulder = { 0, 0 }, head = { 0, 0 }, feet = { { 0, 0 }, { 0, 0 } }, hands = { { 0, 0 }, { 0, 0 } } }
+    e.pose = pose
+  end
+  pose.f, pose.wind, pose.strike, pose.moving = f, wind, strike, moving
   local bob = moving and math.abs(math.sin(t)) * 1.0 or math.sin(t * 0.5) * 0.4
   local lean = 2.4 - 3.4 * wind + 2.4 * strike
-  pose.pelvis = { mid - f * 1, b.y + 11.5 + bob * 0.3 }
-  pose.shoulder = { mid + f * lean, b.y + 6 + bob * 0.6 + wind * 1.2 }
-  pose.head = { pose.shoulder[1] + f * (3 + strike - wind), pose.shoulder[2] - 2 + math.sin(t * 0.7) * 0.5 + wind * 0.5 }
+  local pelvis, shoulder, head = pose.pelvis, pose.shoulder, pose.head
+  pelvis[1], pelvis[2] = mid - f * 1, b.y + 11.5 + bob * 0.3
+  shoulder[1], shoulder[2] = mid + f * lean, b.y + 6 + bob * 0.6 + wind * 1.2
+  head[1], head[2] = shoulder[1] + f * (3 + strike - wind), shoulder[2] - 2 + math.sin(t * 0.7) * 0.5 + wind * 0.5
   -- Feet shuffle along the ground, set wide, lifting only a little
   local ground = b.y + b.h - 1
-  pose.feet = {}
   for i = 1, 2 do
     local ph = t + (i - 1) * math.pi
     local swing = moving and math.sin(ph) * 3 or (i == 1 and 2 or -1.5)
     local lift = (moving and math.cos(ph) > 0) and math.cos(ph) * 2 or 0
-    pose.feet[i] = { mid + f * swing, ground - lift }
+    local foot = pose.feet[i]
+    foot[1], foot[2] = mid + f * swing, ground - lift
   end
   -- Arms: trailing and dragging behind; raised behind the head when rearing
   -- back; thrown forward in the strike
-  local sx, sy = pose.shoulder[1], pose.shoulder[2] + 1
-  pose.hands = {}
+  local sx, sy = shoulder[1], shoulder[2] + 1
   for i = 1, 2 do
     local drag = (moving and math.sin(t + i) * 1.2 or 0)
-    local rest = { sx - f * (5 + i * 1.8 + drag), ground - (i - 1) }
-    local back = { sx - f * (4 + wind * 2 + i), sy - 4 - wind * 3 + i * 0.6 }
-    local fwd = { sx + f * (5 + 6 * (1 - (1 - strike) ^ 2) + i), sy + 0.5 + i * 1.2 - strike }
-    local h = { lerp(rest[1], back[1], wind), lerp(rest[2], back[2], wind) }
-    h = { lerp(h[1], fwd[1], strike), lerp(h[2], fwd[2], strike) }
-    pose.hands[i] = h
+    local restX, restY = sx - f * (5 + i * 1.8 + drag), ground - (i - 1)
+    local backX, backY = sx - f * (4 + wind * 2 + i), sy - 4 - wind * 3 + i * 0.6
+    local fwdX, fwdY = sx + f * (5 + 6 * (1 - (1 - strike) ^ 2) + i), sy + 0.5 + i * 1.2 - strike
+    local hand = pose.hands[i]
+    hand[1] = lerp(lerp(restX, backX, wind), fwdX, strike)
+    hand[2] = lerp(lerp(restY, backY, wind), fwdY, strike)
   end
   return pose
 end
@@ -4624,7 +4901,7 @@ end
 
 -- view: { x, y, w, h } in world pixels
 function enemies.draw(view)
-  for _, e in ipairs(list) do
+  for _, e in ipairs(near) do
     if onScreen(e, view) then
       local off = staggerOffset(e)
       love.graphics.push()
@@ -4638,6 +4915,12 @@ function enemies.draw(view)
       local tr, tg, tb, amount
       if e.flash <= 0 then
         tr, tg, tb, amount = statusTint(e, t)
+        if not amount and e.elite then
+          -- An elite pulses with its affix's colour (taking turns with two)
+          local afx = e.elite.affixes
+          local c = enemies.AFFIXES[afx[math.floor(t * 0.8 + e.phase) % #afx + 1]].color
+          tr, tg, tb, amount = c[1], c[2], c[3], 0.2 + 0.12 * math.sin(t * 3 + e.phase)
+        end
       end
       local shader = amount and getTintShader()
       if shader then
@@ -4668,11 +4951,29 @@ end
 -- After the lighting: eyes, glowing mouths and acid globs
 function enemies.drawEmissive(view)
   drawSticksGlow()
-  for _, e in ipairs(list) do
+  local t = love.timer.getTime()
+  for _, e in ipairs(near) do
     if onScreen(e, view) then
       love.graphics.push()
       love.graphics.translate(staggerOffset(e), 0)
       GLOW[e.kind](e)
+      if e.elite then
+        -- The elite's crest: a small diamond per affix, bobbing over its head
+        local b = e.body
+        local n = #e.elite.affixes
+        local bob = math.floor(math.sin(t * 2.5 + e.phase) + 0.5)
+        local x0 = math.floor(b.x + b.w / 2 - (n * 4 - 1) / 2)
+        local y = math.floor(b.y - 6 + bob)
+        for i, a in ipairs(e.elite.affixes) do
+          local c = enemies.AFFIXES[a].color
+          local x = x0 + (i - 1) * 4
+          love.graphics.setColor(c[1], c[2], c[3], 0.95)
+          love.graphics.rectangle("fill", x + 1, y, 1, 3)
+          love.graphics.rectangle("fill", x, y + 1, 3, 1)
+          love.graphics.setColor(1, 1, 1, 0.9)
+          love.graphics.rectangle("fill", x + 1, y + 1, 1, 1)
+        end
+      end
       love.graphics.pop()
     end
   end
@@ -4692,12 +4993,16 @@ function enemies.addLights(lighting, view)
   for _, g in ipairs(globs) do
     lighting.add(g.x, g.y, 26, 0.5, 1, 0.35, 0.7)
   end
-  for _, e in ipairs(list) do
+  for _, e in ipairs(near) do
     if onScreen(e, view) then
       local cx, cy = center(e)
       -- The purple back-light, at a tenth of its old strength
       if not e.def.dummy then
         lighting.add(cx, cy, 13, AURA[1], AURA[2], AURA[3], e.state == "sleep" and 0.03 or 0.045)
+      end
+      if e.elite then
+        local c = enemies.AFFIXES[e.elite.affixes[1]].color
+        lighting.add(cx, cy, e.elite.has.burning and 44 or 26, c[1], c[2], c[3], e.elite.has.burning and 0.45 or 0.2)
       end
       if e.kind == "spitter" then
         lighting.add(cx, cy + 4, e.windup and 30 or 16, 0.5, 1, 0.35, 0.5)
@@ -4721,7 +5026,7 @@ end
 -- A boss that has noticed the hunter but is off screen is pointed to by a
 -- small, wide red triangle on the screen's edge; it goes when the boss is
 -- back in view.
-local function drawBossPointer(sx, sy, sw, sh, unit)
+local function drawBossPointer(sx, sy, sw, sh, unit, gold)
   local cx, cy = sw / 2, sh / 2
   local dx, dy = sx - cx, sy - cy
   local len = math.sqrt(dx * dx + dy * dy)
@@ -4744,7 +5049,11 @@ local function drawBossPointer(sx, sy, sw, sh, unit)
   local bx2, by2 = px - dx * back - nx * half, py - dy * back - ny * half
   love.graphics.setColor(0, 0, 0, 0.85)
   love.graphics.polygon("fill", ax + dx * 2, ay + dy * 2, bx1 - nx * 2, by1 - ny * 2, bx2 + nx * 2, by2 + ny * 2)
-  love.graphics.setColor(1, 0.25 * pulse, 0.24 * pulse)
+  if gold then
+    love.graphics.setColor(1, 0.72 * pulse, 0.2 * pulse)
+  else
+    love.graphics.setColor(1, 0.25 * pulse, 0.24 * pulse)
+  end
   love.graphics.polygon("fill", ax, ay, bx1, by1, bx2, by2)
   love.graphics.setColor(1, 0.7, 0.66, 0.9)
   love.graphics.polygon("fill", ax, ay, px - dx * back * 0.2 + nx * half * 0.28, py - dy * back * 0.2 + ny * half * 0.28, px - dx * back * 0.2 - nx * half * 0.28, py - dy * back * 0.2 - ny * half * 0.28)
@@ -4784,6 +5093,41 @@ function enemies.drawScreen(toScreen, font)
         if frac > 0 then
           hud.gradRect(x, y, w * frac, h, { 0.95, 0.22, 0.26 }, { 0.62, 0.07, 0.13 })
         end
+      end
+    end
+    if e.bounty and not e.dead then
+      -- A bounty off screen but near is pointed to in gold
+      local x0, y0 = toScreen(b.x, b.y)
+      local x1, y1 = toScreen(b.x + b.w, b.y + b.h)
+      if x1 < 0 or x0 > sw or y1 < 0 or y0 > sh then
+        local mx, my = toScreen(b.x + b.w / 2, b.y + b.h / 2)
+        local far = math.max(math.abs(mx - sw / 2), math.abs(my - sh / 2)) / unit
+        if far < BOUNTY_POINT then
+          drawBossPointer(mx, my, sw, sh, unit, true)
+        end
+      end
+    end
+    if e.elite and not e.dead and (aggro or e.bounty) then
+      -- An elite's bar: thinner than a boss's, edged in gold, its name over it
+      local sx, sy = toScreen(b.x + b.w / 2, b.y - 9)
+      if sx > -100 and sx < sw + 100 and sy > -40 and sy < sh + 40 then
+        local w, h = math.max(b.w * unit * 1.6, 70), math.max(5, unit * 1.3)
+        local x, y = math.floor(sx - w / 2), math.floor(sy - h)
+        love.graphics.setColor(0.85, 0.66, 0.3, 0.85)
+        love.graphics.rectangle("fill", x - 1, y - 1, w + 2, h + 2)
+        love.graphics.setColor(0.10, 0.02, 0.04, 0.9)
+        love.graphics.rectangle("fill", x, y, w, h)
+        local frac = math.max(0, e.hp) / e.maxHp
+        if frac > 0 then
+          hud.gradRect(x, y, w * frac, h, { 0.95, 0.22, 0.26 }, { 0.62, 0.07, 0.13 })
+        end
+        local name = enemies.eliteName(e)
+        local c = e.bounty and { 1, 0.75, 0.3 } or enemies.AFFIXES[e.elite.affixes[1]].color
+        local nx, ny = math.floor(sx - font:getWidth(name) / 2), math.floor(y - font:getHeight() - 1)
+        love.graphics.setColor(0, 0, 0, 0.8)
+        love.graphics.print(name, nx + 2, ny + 2)
+        love.graphics.setColor(math.min(1, c[1] * 0.4 + 0.6), math.min(1, c[2] * 0.4 + 0.6), math.min(1, c[3] * 0.4 + 0.6))
+        love.graphics.print(name, nx, ny)
       end
     end
     if e.def.dummy and e.meter then

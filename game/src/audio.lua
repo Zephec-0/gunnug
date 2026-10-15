@@ -729,6 +729,279 @@ DEFS.swallow = {
   cooldown = 0.6,
 }
 
+-- Footsteps by material ---------------------------------------------------------------
+-- A step is a short scuff: filtered noise for the surface, plus a body tone
+-- (a thump for earth, a knock for wood, a ring for iron). Played a little
+-- varied, so a run of steps doesn't repeat itself.
+
+local function stepSound(duration, noiseCoef, noiseGain, tone, toneGain, toneDecay, ringF)
+  return function()
+    local body = lp(noiseCoef)
+    return synth(duration, function(t, p)
+      local n = body(noise()) * noiseGain * math.exp(-p * 9)
+      local th = tone > 0 and math.sin(t * tone * TAU) * toneGain * math.exp(-t * toneDecay) or 0
+      local ring = ringF and math.sin(t * ringF * TAU) * 0.22 * math.exp(-t * 38) or 0
+      return n + th + ring
+    end)
+  end
+end
+
+DEFS.step_dirt = { gen = stepSound(0.09, 0.25, 1.6, 90, 0.5, 40), volume = 0.04, cooldown = 0.08 }
+DEFS.step_sand = { gen = stepSound(0.12, 0.12, 1.9, 0, 0, 1), volume = 0.03, cooldown = 0.08 }
+DEFS.step_rock = { gen = stepSound(0.07, 0.5, 1.1, 150, 0.4, 55, 1900), volume = 0.045, cooldown = 0.08 }
+DEFS.step_wood = { gen = stepSound(0.1, 0.35, 0.7, 180, 0.9, 38, 640), volume = 0.048, cooldown = 0.08 }
+DEFS.step_metal = { gen = stepSound(0.16, 0.6, 0.6, 210, 0.35, 30, 1320), volume = 0.042, cooldown = 0.08 }
+DEFS.step_ash = { gen = stepSound(0.1, 0.08, 1.7, 0, 0, 1), volume = 0.027, cooldown = 0.08 }
+DEFS.step_water = {
+  gen = function()
+    local body = lp(0.3)
+    return synth(0.16, function(t, p)
+      local f = 420 + 700 * p
+      return (body(noise()) * 0.8 + math.sin(t * f * TAU) * 0.35) * math.sin(math.min(1, p * 6) * math.pi * 0.5) * math.exp(-p * 7)
+    end)
+  end,
+  volume = 0.06,
+  cooldown = 0.08,
+}
+
+-- Reloads, one voice per gun ------------------------------------------------------------
+-- The animation (src.playeranim) fires "eject", "click" and "snap" moments;
+-- each model answers with its own sounds.
+
+local function ting(f, t0, decay)
+  return { t = t0, kind = "ting", f = f, d = decay or 22 }
+end
+
+DEFS.rev_eject = { -- shells tapped out of the cylinder and bouncing about
+  gen = function()
+    return timeline(0.45, { { t = 0, kind = "click", f = 700, d = 60 }, ting(2900, 0.05), ting(3300, 0.11), ting(2600, 0.16), ting(3100, 0.24), ting(3700, 0.3), ting(2800, 0.36) })
+  end,
+  volume = 0.4,
+}
+DEFS.rev_load = { -- every round in: the cylinder spun to a stop, ticks slowing down
+  gen = function()
+    local events = {}
+    local t = 0
+    for i = 0, 6 do
+      events[#events + 1] = { t = t, kind = "click", f = 1500 - i * 70, d = 90 }
+      t = t + 0.02 + i * 0.012
+    end
+    return timeline(0.4, events)
+  end,
+  volume = 0.4,
+}
+DEFS.rev_close = { -- the end of it: one crisp click
+  gen = function()
+    return timeline(0.12, { { t = 0, kind = "click", f = 1100, d = 70 }, { t = 0.004, kind = "thump", f = 220, d = 50, gain = 0.5 } })
+  end,
+  volume = 0.5,
+}
+DEFS.sg_break = { -- the hinge: a metal clack and a creak
+  gen = function()
+    return timeline(0.3, { { t = 0, kind = "thump", f = 170, d = 30, gain = 0.8 }, { t = 0, kind = "click", f = 700, d = 45 }, { t = 0.02, kind = "swish", len = 0.16, gain = 0.15 } })
+  end,
+  volume = 0.5,
+}
+DEFS.sg_eject = { -- two hulls hitting the floor
+  gen = function()
+    return timeline(0.3, { { t = 0.02, kind = "thump", f = 110, d = 30, gain = 0.8 }, { t = 0.03, kind = "click", f = 420, d = 45 }, { t = 0.14, kind = "thump", f = 130, d = 34, gain = 0.6 }, { t = 0.15, kind = "click", f = 470, d = 50 } })
+  end,
+  volume = 0.4,
+}
+DEFS.sg_shell = {
+  gen = function()
+    return timeline(0.18, { { t = 0, kind = "thump", f = 180, d = 38, gain = 0.8 }, { t = 0, kind = "click", f = 1100, d = 70 } })
+  end,
+  volume = 0.4,
+}
+DEFS.sg_close = { -- snapped shut with a flick: a clack and a low thud
+  gen = function()
+    return timeline(0.26, { { t = 0, kind = "click", f = 520, d = 38 }, { t = 0.01, kind = "thump", f = 90, d = 22, gain = 1.0 }, ting(1600, 0.015, 40) })
+  end,
+  volume = 0.55,
+}
+-- Broomhandle: the magazine drops, a new one goes in, a click
+DEFS.pi_magdrop = {
+  gen = function()
+    return timeline(0.4, { { t = 0, kind = "click", f = 800, d = 70 }, { t = 0.08, kind = "thump", f = 95, d = 24, gain = 0.9 }, { t = 0.085, kind = "click", f = 420, d = 40 }, { t = 0.15, kind = "click", f = 1500, d = 90 } })
+  end,
+  volume = 0.5,
+}
+DEFS.pi_magin = {
+  gen = function()
+    return timeline(0.26, { { t = 0, kind = "swish", len = 0.05, gain = 0.3 }, { t = 0.05, kind = "click", f = 1000, d = 60 }, { t = 0.06, kind = "thump", f = 140, d = 36, gain = 0.8 }, { t = 0.11, kind = "click", f = 1700, d = 90 } })
+  end,
+  volume = 0.5,
+}
+DEFS.pi_click = {
+  gen = function()
+    return timeline(0.1, { { t = 0, kind = "click", f = 1300, d = 80 }, { t = 0.003, kind = "thump", f = 200, d = 50, gain = 0.4 } })
+  end,
+  volume = 0.5,
+}
+
+-- Machine gun: the clip drops out and rings, a few sounds as the new one goes in, a click
+DEFS.mg_eject = {
+  gen = function()
+    return timeline(0.5, { { t = 0, kind = "click", f = 600, d = 50 }, { t = 0.03, kind = "thump", f = 85, d = 20, gain = 1.0 }, { t = 0.05, kind = "ting", f = 1900, d = 22 }, { t = 0.2, kind = "thump", f = 100, d = 30, gain = 0.6 }, { t = 0.21, kind = "ting", f = 2300, d = 30 } })
+  end,
+  volume = 0.5,
+}
+DEFS.mg_load = {
+  gen = function()
+    local events = { { t = 0, kind = "swish", len = 0.07, gain = 0.3 }, { t = 0.07, kind = "thump", f = 90, d = 22, gain = 1.0 }, { t = 0.07, kind = "click", f = 520, d = 40 } }
+    for i = 1, 4 do
+      events[#events + 1] = { t = 0.12 + i * 0.03, kind = "click", f = 1200 + (i % 3) * 350, d = 85 }
+    end
+    return timeline(0.4, events)
+  end,
+  volume = 0.55,
+}
+DEFS.mg_click = {
+  gen = function()
+    return timeline(0.1, { { t = 0, kind = "click", f = 900, d = 60 }, { t = 0.004, kind = "thump", f = 160, d = 40, gain = 0.5 } })
+  end,
+  volume = 0.5,
+}
+
+-- Gatling: the hopper shaken like a chain, the barrels spun up and slowed, a click
+DEFS.gat_rattle = {
+  gen = function()
+    local events = {}
+    local t = 0
+    local f = 0
+    while t < 1.0 do
+      f = f + 1
+      events[#events + 1] = { t = t, kind = (f % 3 == 0) and "ting" or "click", f = 2200 + ((f * 7919) % 2600), d = 40 + (f * 31) % 40 }
+      t = t + 0.012 + ((f * 13) % 9) * 0.004
+    end
+    events[#events + 1] = { t = 0, kind = "swish", len = 1.0, gain = 0.15 }
+    return timeline(1.15, events)
+  end,
+  volume = 0.4,
+}
+DEFS.gat_spin = {
+  gen = function()
+    local events = {}
+    local t = 0
+    for i = 0, 17 do
+      local speed = math.sin(i / 17 * math.pi) -- speeds up, then slows to a stop
+      events[#events + 1] = { t = t, kind = "click", f = 1400 + speed * 600, d = 80 }
+      t = t + 0.065 - 0.045 * speed
+    end
+    return timeline(t + 0.15, events)
+  end,
+  volume = 0.4,
+}
+DEFS.gat_click = {
+  gen = function()
+    return timeline(0.1, { { t = 0, kind = "click", f = 800, d = 55 }, { t = 0.004, kind = "thump", f = 130, d = 36, gain = 0.6 } })
+  end,
+  volume = 0.5,
+}
+
+-- Distant things: heard from far off, panned and quieted by distance (audio.playAt) --------
+
+DEFS.growl_far = {
+  gen = function()
+    local body = lp(0.04)
+    local ph = 0
+    return synth(1.8, function(t, p)
+      local f = 52 + 18 * math.sin(p * 9) + 14 * math.sin(p * math.pi)
+      ph = ph + f / RATE
+      local env = math.sin(p * math.pi) ^ 1.5
+      return (math.sin(ph * TAU) * 0.6 + math.sin(ph * 2 * TAU + 1) * 0.3 + body(noise()) * 1.2) * env
+    end)
+  end,
+  volume = 0.5,
+  cooldown = 0.5,
+}
+DEFS.rumble = {
+  gen = function()
+    local body = lp(0.025)
+    return synth(2.4, function(t, p)
+      return body(noise()) * 3.5 * math.sin(p * math.pi) ^ 1.2
+    end)
+  end,
+  volume = 0.45,
+  cooldown = 1,
+}
+DEFS.crackle = { -- a fire's small pops, fed to it as one sound
+  gen = function()
+    return synth(0.5, function(t, p)
+      local v = 0
+      if math.random() < 0.012 then
+        v = noise() * 0.9
+      end
+      return v + noise() * 0.05
+    end)
+  end,
+  volume = 0.25,
+  cooldown = 0.3,
+}
+DEFS.lava_bubble = {
+  gen = function()
+    local body = lp(0.2)
+    return synth(0.28, function(t, p)
+      local f = 90 + 220 * p
+      return (math.sin(t * f * TAU) * 0.6 + body(noise()) * 0.3) * math.sin(p * math.pi) ^ 0.7 * math.exp(-p * 2)
+    end)
+  end,
+  volume = 0.4,
+  cooldown = 0.15,
+}
+DEFS.steam_hiss = {
+  gen = function()
+    local hi = hp(0.5)
+    return synth(0.7, function(t, p)
+      return hi(noise()) * 0.5 * math.sin(math.min(1, p * 8) * math.pi * 0.5) * math.exp(-p * 4)
+    end)
+  end,
+  volume = 0.3,
+  cooldown = 0.2,
+}
+DEFS.acid_fizz = {
+  gen = function()
+    local hi = hp(0.4)
+    return synth(0.35, function(t, p)
+      local pop = math.random() < 0.05 and 1 or 0
+      return hi(noise()) * 0.2 * math.exp(-p * 3) + pop * noise() * 0.5
+    end)
+  end,
+  volume = 0.3,
+  cooldown = 0.2,
+}
+DEFS.wind_gust = {
+  gen = function()
+    local body = lp(0.05)
+    return synth(2.2, function(t, p)
+      return body(noise()) * 2.2 * math.sin(p * math.pi) ^ 2 + math.sin(t * 520 * TAU + math.sin(t * 6) * 4) * 0.03 * math.sin(p * math.pi)
+    end)
+  end,
+  volume = 0.35,
+  cooldown = 1,
+}
+DEFS.skitter = {
+  gen = function()
+    return synth(0.35, function(t, p)
+      local tick = (math.floor(t * 55) % 2 == 0 and 1 or 0) * (math.random() < 0.5 and 1 or 0.3)
+      return noise() * tick * 0.35 * math.sin(p * math.pi)
+    end)
+  end,
+  volume = 0.2,
+  cooldown = 0.2,
+}
+DEFS.wing_flutter = {
+  gen = function()
+    local body = lp(0.3)
+    return synth(0.4, function(t, p)
+      return body(noise()) * (0.5 + 0.5 * math.sin(t * 38 * TAU)) * 0.9 * math.sin(p * math.pi)
+    end)
+  end,
+  volume = 0.2,
+  cooldown = 0.3,
+}
+
 -- Beds ------------------------------------------------------------------------------
 -- The desert wind over the surface (the areas have music instead, see below)
 
@@ -1357,9 +1630,36 @@ local function renderTrack(def)
   return data
 end
 
+-- A tension layer for an area's theme: kick and snare, ticking hats and a
+-- sawtooth drone on the chord roots, laid over the same chords, tempo and
+-- length so it stays in step with the theme itself
+local function tensionDef(base)
+  return {
+    bpm = base.bpm,
+    bars = base.bars,
+    repeats = base.repeats,
+    echo = base.echo,
+    prog = base.prog,
+    chords = base.chords,
+    channels = {
+      { drum = true, gain = 0.5, steps = 8, tokens = everyBar("k - - k k - s - ") },
+      { drum = true, gain = 0.2, steps = 8, tokens = everyBar("h h h h h h h h") },
+      { wave = "saw", gain = 0.06, steps = 1, a = 0.3, r = 0.6, legato = 1.0, tokens = bassPattern("R") },
+      { wave = "tri", gain = 0.1, steps = 2, a = 0.05, r = 0.3, legato = 0.7, tokens = bassPattern("R 5") },
+    },
+  }
+end
+
 -- Setup and playback ---------------------------------------------------------------------
 
 local areaMusic = {} -- the area themes, one looping source each
+local tensionMusic = {} -- a driving layer per area (drums, a low drone) that fades in when monsters are on the hunter
+local tension, tensionTarget = 0, 0
+local effectsOk = false -- OpenAL effects (reverb) available
+local space, spaceTarget = 0, 0 -- how big the place the hunter stands in is: 0 tight tunnel .. 1 cavern, -1 open air
+local listenerX, listenerY = 0, 0
+local lastSpace -- the reverb setting last sent
+local MAX_HEARD = 460 -- px: beyond this a positional sound is silent
 -- Areas whose theme is a recorded file (looped) rather than synthesised.
 -- To change one: replace the file (or point this at a different one). Its
 -- volume is set automatically from how loud the recording is (AREA_GAIN is
@@ -1408,12 +1708,28 @@ function audio.load()
       src:setVolume(0)
       areaMusic[i] = src
     end
+    for i, def in ipairs(TRACKS) do
+      local made, data = pcall(function()
+        return renderTrack(tensionDef(def))
+      end)
+      if made then
+        local src = love.audio.newSource(data, "static")
+        src:setLooping(true)
+        src:setVolume(0)
+        tensionMusic[i] = src
+      end
+    end
     menuMusic = love.audio.newSource(renderTrack(MENU_TRACK), "static")
     menuMusic:setLooping(true)
     menuMusic:setVolume(0)
     recapMusic = love.audio.newSource(renderTrack(RECAP_TRACK), "static")
     recapMusic:setLooping(true)
     recapMusic:setVolume(0)
+    pcall(love.audio.setDistanceModel, "none") -- (positional sounds are only panned; their volume is set by hand)
+    effectsOk = love.audio.isEffectsSupported and love.audio.isEffectsSupported() or false
+    if effectsOk then
+      effectsOk = pcall(love.audio.setEffect, "env", { type = "reverb", gain = 0.0, decaytime = 0.6, density = 0.6, diffusion = 0.8, highgain = 0.6 })
+    end
     enabled = true
   end)
   if not ok then
@@ -1422,7 +1738,45 @@ function audio.load()
 end
 
 -- Plays a named sound. volume scales it; pitch (default 1) is varied a little.
-function audio.play(name, volume, pitch)
+-- With x, y (world pixels) it is heard from there: panned left and right of
+-- the listener and quieter the further away it is.
+-- A voice for a sound: one of its own that has finished, or a new one. All of
+-- a sound's voices share one buffer (clones of the first): a new source made
+-- from the samples for every shot, hit and coin copied the whole sound into a
+-- fresh buffer each time.
+local VOICES_PER_SOUND = 8
+local function voice(def)
+  local pool = def.pool
+  if not pool then
+    pool = {}
+    def.pool = pool
+  end
+  for _, s in ipairs(pool) do
+    if not s:isPlaying() then
+      s:stop() -- (back to the start)
+      return s
+    end
+  end
+  if #pool >= VOICES_PER_SOUND then
+    return nil
+  end
+  local ok, src
+  if pool[1] then
+    ok, src = pcall(pool[1].clone, pool[1])
+  else
+    ok, src = pcall(love.audio.newSource, def.data, "static")
+  end
+  if not ok then
+    return nil
+  end
+  if effectsOk and not def.dry then
+    pcall(src.setEffect, src, "env")
+  end
+  pool[#pool + 1] = src
+  return src
+end
+
+local function start(name, volume, pitch, x, y)
   if not enabled then
     return
   end
@@ -1444,21 +1798,71 @@ function audio.play(name, volume, pitch)
   if #playing >= MAX_VOICES then
     return
   end
-  local ok, src = pcall(love.audio.newSource, def.data, "static")
-  if not ok then
+  local gain = volume or 1
+  local dx, dy
+  if x then
+    dx, dy = x - listenerX, y - listenerY
+    local d = math.sqrt(dx * dx + dy * dy)
+    if d >= MAX_HEARD then
+      return -- (out of earshot: no voice taken)
+    end
+    gain = gain * (1 - d / MAX_HEARD) ^ 1.5
+  end
+  local src = voice(def)
+  if not src then
     return
   end
-  src:setVolume(def.volume * (volume or 1) * MASTER * volMaster * volSfx * (0.9 + love.math.random() * 0.2))
+  if x then
+    src:setRelative(true)
+    src:setPosition(math.max(-1, math.min(1, dx / 160)), 0, -0.4)
+  else
+    src:setRelative(false)
+    src:setPosition(0, 0, 0)
+  end
+  src:setVolume(def.volume * gain * MASTER * volMaster * volSfx * (0.9 + love.math.random() * 0.2))
   src:setPitch((pitch or 1) * (0.94 + love.math.random() * 0.12))
   if muffled then
     pcall(src.setFilter, src, MUFFLE)
+  else
+    pcall(src.setFilter, src)
   end
   src:play()
   playing[#playing + 1] = src
 end
 
+function audio.play(name, volume, pitch)
+  start(name, volume, pitch)
+end
+
+function audio.playAt(name, x, y, volume, pitch)
+  start(name, volume, pitch, x, y)
+end
+
+-- Where the hunter's ears are (call every frame)
+function audio.setListener(x, y)
+  listenerX, listenerY = x, y
+end
+
+-- Scales the surface wind bed (the weather sets it: louder in a dust storm)
+local windGain = 1
+function audio.setWindGain(g)
+  windGain = g
+end
+
+-- How big a place the hunter is in, -1 (open air: no echo) to 0 (a tight
+-- tunnel) to 1 (a cavern): sets the reverb the sounds go through
+function audio.setSpace(v)
+  spaceTarget = v
+end
+
+-- 0..1: how hard monsters are pressing the hunter (drives the music's tension layer)
+function audio.setTension(v)
+  tensionTarget = math.max(0, math.min(1, v or 0))
+end
+
 local eventTimers = {}
 local lastArea
+local AREA_TRACK = { [6] = 1, [7] = 3, [8] = 2, [9] = 5, [10] = 1, [11] = 2 } -- areas that borrow another's music and sounds
 
 -- Fades the wind, the area themes and the shop's piano: underground is 0 (open
 -- air) to 1; area is the number of the area the hunter is in (nil on the
@@ -1468,6 +1872,7 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
   if not enabled then
     return
   end
+  area = area and (AREA_TRACK[area] or area) -- (a side branch plays another area's theme)
   -- The weapon panel: the same sounds, but as if through a wall (a low-pass
   -- filter on everything playing; without effects support, just quieter)
   if (muffle and true or false) ~= muffled then
@@ -1487,6 +1892,25 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
       apply(src)
     end
   end
+  -- Reverb follows the size of the space: dry in the open, a short slap in
+  -- tunnels, a long wash in caverns
+  space = space + (spaceTarget - space) * math.min(1, dt * 1.5)
+  if effectsOk and math.abs(space - (lastSpace or 99)) > 0.01 then
+    lastSpace = space
+    local big = math.max(0, space)
+    pcall(love.audio.setEffect, "env", {
+      type = "reverb",
+      gain = space < 0 and 0.01 or 0.11 + 0.25 * big,
+      decaytime = 0.4 + 1.9 * big,
+      decayhighratio = 0.65,
+      density = 0.4 + 0.5 * big,
+      diffusion = 0.9,
+      highgain = 0.5,
+      latedelay = 0.011 + 0.05 * big,
+      earlydelay = 0.007 + 0.03 * big,
+    })
+  end
+  tension = tension + (tensionTarget - tension) * math.min(1, dt * (tensionTarget > tension and 1.2 or 0.3))
   -- The title screens play the void and the menu theme over silence
   local function toward(src, target, k)
     src:setVolume(src:getVolume() + (target - src:getVolume()) * k)
@@ -1513,6 +1937,9 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
     for _, src in ipairs(areaMusic) do
       src:setVolume(0)
     end
+    for _, src in pairs(tensionMusic) do
+      src:setVolume(0)
+    end
     music:setVolume(0)
     return
   end
@@ -1526,15 +1953,24 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
       src:play()
     end
   end
+  for _, src in pairs(tensionMusic) do
+    if not src:isPlaying() then
+      src:play()
+    end
+  end
   if not music:isPlaying() then
     music:play()
   end
   local fade = math.min(1, dt * 1.2)
   local wind = ambient.wind
-  wind:setVolume(wind:getVolume() + (0.10 * (1 - underground) * MASTER * 2 * volMaster * volSfx - wind:getVolume()) * math.min(1, dt * 1.5))
+  wind:setVolume(wind:getVolume() + (0.10 * windGain * (1 - underground) * MASTER * 2 * volMaster * volSfx - wind:getVolume()) * math.min(1, dt * 1.5))
   for i, src in ipairs(areaMusic) do
     local target = ((i == area and not inShop) and 0.10 * underground or 0) * (AREA_GAIN[i] or 1)
     src:setVolume(src:getVolume() + (target * MASTER * 2 * volMaster * volMusic - src:getVolume()) * fade)
+  end
+  for i, src in pairs(tensionMusic) do
+    local target = ((i == area and not inShop) and 0.09 * underground * tension or 0) * (AREA_GAIN[i] or 1)
+    src:setVolume(src:getVolume() + (target * MASTER * 2 * volMaster * volMusic - src:getVolume()) * math.min(1, dt * 2))
   end
   music:setVolume(music:getVolume() + ((inShop and 0.13 or 0) * MASTER * 2 * volMaster * volMusic - music:getVolume()) * fade)
 

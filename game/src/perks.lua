@@ -276,6 +276,16 @@ perks.defs = {
   },
 }
 
+-- Not in the order below, so never rolled: it is only given (the Quarry boss drops it)
+perks.defs.diving_helm = {
+  name = "Diving Helm",
+  short = "DH",
+  color = { 0.45, 0.82, 0.88 },
+  rarity = "rare",
+  desc = "A brass helm with a glass face and a hose to nowhere. Breathe under water: you no longer drown.",
+  fx = { diving = 1 },
+}
+
 perks.order = {
   "thick_skin", "iron_will", "second_wind", "scar_tissue", "last_stand", "regeneration", "bloodthirst", "adrenaline",
   "springheel", "fleet_foot", "slick_soles", "double_jump",
@@ -308,12 +318,17 @@ function perks.list()
   return owned
 end
 
+-- Set by src.meta: function() -> a table of named numbers like a perk's fx
+-- (the Taxidermist's mounted trophies, permanent for the profile)
+perks.extraFx = nil
+
 function perks.sum(key)
   local total = 0
   for _, id in ipairs(owned) do
     total = total + (perks.defs[id].fx[key] or 0)
   end
-  return total
+  local extra = perks.extraFx and perks.extraFx()
+  return total + (extra and extra[key] or 0)
 end
 
 function perks.prod(key)
@@ -321,7 +336,8 @@ function perks.prod(key)
   for _, id in ipairs(owned) do
     total = total * (perks.defs[id].fx[key] or 1)
   end
-  return total
+  local extra = perks.extraFx and perks.extraFx()
+  return total * (extra and extra[key] or 1)
 end
 
 function perks.maxHp(base)

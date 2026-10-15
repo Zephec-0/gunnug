@@ -40,6 +40,20 @@ local LIQUID_BOTTOM = { 0.17, 0.01, 0.035 }
 local bubbles, drops = {}, {}
 local lastBarTime
 
+-- The liquid's vertices and mesh are kept and refilled every frame (a new
+-- mesh and ~800 little tables a frame was the biggest source of garbage in
+-- the game, and so of the collector's pauses)
+local barVerts, barMesh = {}, nil
+local function barVert(k, vx, vy, r, g, b)
+  local v = barVerts[k]
+  if not v then
+    v = { 0, 0, 0, 0, 0, 0, 0, 1 }
+    barVerts[k] = v
+  end
+  v[1], v[2], v[5], v[6], v[7] = vx, vy, r, g, b
+end
+local RING, FILL, GLINT = { 0.80, 0.16, 0.19 }, { 0.30, 0.02, 0.05 }, { 1.0, 0.62, 0.62 }
+
 function hud.drawHealthBar(player, u, x, y, w, h)
   local now = love.timer.getTime()
   local dt = math.min(0.1, lastBarTime and now - lastBarTime or 0)
@@ -67,7 +81,7 @@ function hud.drawHealthBar(player, u, x, y, w, h)
   local cw = q
   local amp = (0.32 + 2.0 * low) * u * 0.5
   local speed = 2 + 9 * low
-  local verts = {}
+  local nv = 0
   local function top(px)
     local raw = amp * (0.5 + 0.5 * math.sin(px * 0.045 / u * 4.8 + now * speed) + 0.4 * math.sin(px * 0.11 + now * speed * 1.7))
     return y + math.floor(raw / q + 0.5) * q -- the surface moves in whole pixel steps
@@ -86,23 +100,28 @@ function hud.drawHealthBar(player, u, x, y, w, h)
     local ta, tb2 = top(xa), top(xb)
     local mida, midb = ta + (y + h - ta) * 0.35, tb2 + (y + h - tb2) * 0.35
     -- Two quads per column: the bright upper part, then down into the deep red
-    verts[#verts + 1] = { xa, ta, 0, 0, tr, tg, tb, 1 }
-    verts[#verts + 1] = { xb, tb2, 0, 0, tr, tg, tb, 1 }
-    verts[#verts + 1] = { xb, midb, 0, 0, mr, mg, mb, 1 }
-    verts[#verts + 1] = { xa, ta, 0, 0, tr, tg, tb, 1 }
-    verts[#verts + 1] = { xb, midb, 0, 0, mr, mg, mb, 1 }
-    verts[#verts + 1] = { xa, mida, 0, 0, mr, mg, mb, 1 }
-    verts[#verts + 1] = { xa, mida, 0, 0, mr, mg, mb, 1 }
-    verts[#verts + 1] = { xb, midb, 0, 0, mr, mg, mb, 1 }
-    verts[#verts + 1] = { xb, y + h, 0, 0, br, bg, bb, 1 }
-    verts[#verts + 1] = { xa, mida, 0, 0, mr, mg, mb, 1 }
-    verts[#verts + 1] = { xb, y + h, 0, 0, br, bg, bb, 1 }
-    verts[#verts + 1] = { xa, y + h, 0, 0, br, bg, bb, 1 }
+    barVert(nv + 1, xa, ta, tr, tg, tb)
+    barVert(nv + 2, xb, tb2, tr, tg, tb)
+    barVert(nv + 3, xb, midb, mr, mg, mb)
+    barVert(nv + 4, xa, ta, tr, tg, tb)
+    barVert(nv + 5, xb, midb, mr, mg, mb)
+    barVert(nv + 6, xa, mida, mr, mg, mb)
+    barVert(nv + 7, xa, mida, mr, mg, mb)
+    barVert(nv + 8, xb, midb, mr, mg, mb)
+    barVert(nv + 9, xb, y + h, br, bg, bb)
+    barVert(nv + 10, xa, mida, mr, mg, mb)
+    barVert(nv + 11, xb, y + h, br, bg, bb)
+    barVert(nv + 12, xa, y + h, br, bg, bb)
+    nv = nv + 12
   end
-  if #verts > 0 then
-    local mesh = love.graphics.newMesh(verts, "triangles", "static")
+  if nv > 0 then
+    if not barMesh or barMesh:getVertexCount() < nv then
+      barMesh = love.graphics.newMesh(math.max(nv, 1200), "triangles", "dynamic")
+    end
+    barMesh:setVertices(barVerts, 1, nv)
+    barMesh:setDrawRange(1, nv)
     love.graphics.setColor(1, 1, 1)
-    love.graphics.draw(mesh)
+    love.graphics.draw(barMesh)
   end
   -- A lit meniscus along the surface
   love.graphics.setColor(0.95, 0.30, 0.32, 0.5)
@@ -128,7 +147,6 @@ function hud.drawHealthBar(player, u, x, y, w, h)
       }
     end
   end
-  local RING, FILL, GLINT = { 0.80, 0.16, 0.19 }, { 0.30, 0.02, 0.05 }, { 1.0, 0.62, 0.62 }
   local function pix(bx, by, c, a)
     love.graphics.setColor(c[1], c[2], c[3], a or 1)
     love.graphics.rectangle("fill", math.floor((x + bx) / q) * q, math.floor((y + by) / q) * q, q, q)
@@ -226,6 +244,75 @@ function hud.draw(player, scale)
   local bagL, bagR, bagBottom = goldbag.draw(player.inventory.gold, player, ww - margin, y + barH + 20 * u, p)
   love.graphics.setColor(0.97, 0.98, 1)
   shadowText(goldText, math.floor((bagL + bagR) / 2 - f:getWidth(goldText) / 2), math.floor(bagBottom + 2 * u), f)
+  -- Under the gold, one column: the marks (the sigil over its count), then a
+  -- row for each thing carried (an icon and "x count"): dynamite, flasks,
+  -- vault keys, silver bells. Every row is centred under the gold sack and
+  -- spaced out so none touches another.
+  do
+    local meta = require("src.meta")
+    local inv = player.inventory
+    local s = math.max(1, math.floor(u * 0.75 + 0.5))
+    local cx = math.floor((bagL + bagR) / 2)
+    local fh = f:getHeight()
+    local y = math.floor(bagBottom + 2 * u + fh + 7 * u)
+    local profile = require("src.save").profile()
+    if profile and (profile.marks > 0 or (profile.stats.marksEarned or 0) > 0) then
+      local markText = tostring(profile.marks)
+      meta.drawSigil(cx - math.floor(3.5 * s), y, s)
+      local c = meta.SIGIL_COLOR
+      love.graphics.setColor(c[1], c[2], c[3])
+      shadowText(markText, math.floor(cx - f:getWidth(markText) / 2), math.floor(y + 7 * s + u), f)
+      y = math.floor(y + 7 * s + u + fh + 7 * u)
+    end
+    local nb = 0
+    for _ in pairs(inv.relics or {}) do
+      nb = nb + 1
+    end
+    local rows = {
+      { inv.dynamite or 0, function(ix, iy)
+        love.graphics.setColor(0.75, 0.16, 0.12)
+        love.graphics.rectangle("fill", ix + s, iy + 3 * s, 3 * s, 7 * s)
+        love.graphics.setColor(0.95, 0.85, 0.65)
+        love.graphics.rectangle("fill", ix + s, iy + 5 * s, 3 * s, s)
+        love.graphics.setColor(0.6, 0.5, 0.35)
+        love.graphics.rectangle("fill", ix + 2 * s, iy + s, s, 2 * s)
+        love.graphics.setColor(1, 0.75, 0.35)
+        love.graphics.rectangle("fill", ix + 2 * s, iy, s, s)
+      end },
+      { inv.flasks or 0, function(ix, iy)
+        love.graphics.setColor(0.45, 0.85, 0.55)
+        love.graphics.rectangle("fill", ix + s, iy + 4 * s, 3 * s, 6 * s)
+        love.graphics.setColor(0.8, 0.95, 0.85)
+        love.graphics.rectangle("fill", ix + 2 * s, iy + s, s, 3 * s)
+        love.graphics.setColor(0.6, 0.45, 0.3)
+        love.graphics.rectangle("fill", ix + 2 * s, iy, s, s)
+      end },
+      { inv.keys or 0, function(ix, iy)
+        love.graphics.setColor(0.86, 0.68, 0.30)
+        love.graphics.rectangle("fill", ix + s, iy, 3 * s, 3 * s)
+        love.graphics.rectangle("fill", ix + 2 * s, iy + 3 * s, s, 6 * s)
+        love.graphics.rectangle("fill", ix + 3 * s, iy + 7 * s, 2 * s, s)
+      end },
+      { nb, function(ix, iy)
+        love.graphics.setColor(0.78, 0.82, 0.92)
+        love.graphics.rectangle("fill", ix + s, iy + s, 4 * s, 5 * s)
+        love.graphics.rectangle("fill", ix, iy + 5 * s, 6 * s, 2 * s)
+        love.graphics.rectangle("fill", ix + 2 * s, iy + 7 * s, s, s)
+      end },
+    }
+    for _, row in ipairs(rows) do
+      if row[1] > 0 then
+        local text = "x" .. row[1]
+        local gap = math.floor(3 * u)
+        local width = 6 * s + gap + f:getWidth(text)
+        local ix = cx - math.floor(width / 2)
+        row[2](ix, y)
+        love.graphics.setColor(0.97, 0.98, 1)
+        shadowText(text, ix + 6 * s + gap, math.floor(y + 5 * s - fh / 2), f)
+        y = math.floor(y + math.max(10 * s, fh) + 6 * u)
+      end
+    end
+  end
   love.graphics.setColor(1, 1, 1)
 
   hud.drawBanner(scale)

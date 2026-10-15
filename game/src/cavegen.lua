@@ -62,6 +62,19 @@ local PLAYER_W, PLAYER_H = config.player.width, config.player.height
 --   glowCount      how many glowing mushroom clusters to scatter (default 150)
 --   gasPools       how many pools of poison gas to settle in low spots (default 0)
 --   waterPools     how many pools of water to settle in low spots (default 0)
+--   lavaPools      how many pools of lava (default 0); acidPools the same for acid
+--   flood          { level }: flood every open cell below level px under the top
+--   arenaFrac, arenaH, arenaWidth   where the arena starts (fraction of the height, default 0.75),
+--                  how tall (400) and how wide (fraction of the width, 0.52) it is
+--   bossReward     a perk id the boss drops
+--   climb          true: a climbing area (a mountain): the entrance is at the bottom and the
+--                  routes go UP, with ladders of one-way platforms in the climbs, to the arena
+--                  at the top (arenaFrac small, arenaCx its centre). No shop: the arena's exit
+--                  shaft (info.exit) leads up and out through a gate that opens with the boss.
+--   profile        function(y) -> xLeft, xRight: the area's silhouette (rows outside it are left
+--                  alone, as sky); groundY: where the silhouette meets the ground
+--   open           true: a very open area (the sky): no caves, floating islands and spires over a
+--                  thick floor, an entrance hole through the floor, one shop at the far end
 --   monsters       { kind = count } per 1920x3680 of area (default ghoul 60, bat 40, spitter 26)
 --   boss           kind of the area's one boss (see src.enemies), if any; a
 --                  list picks one of them at random for each run
@@ -81,6 +94,8 @@ function cavegen.generate(world, area, seed, tick)
   local rng = love.math.newRandomGenerator(seed)
   local noiseSeed = (seed % 1000) + 0.5
   local level = area.level or 1
+  -- This rectangle is painted here, not on demand
+  world:claim(X0, math.min(Y0 - 24 - 16, (area.shaftTop or math.huge) - 16), X1, Y1)
   local ROCKID = area.palette and area.palette.rock or ROCK
   local DIRTID = area.palette and area.palette.dirt or DIRT
   -- Counts below scale with the area's size
@@ -105,12 +120,32 @@ function cavegen.generate(world, area, seed, tick)
   local arena
   local shopXs = { shopX }
   if area.arena then
-    arena = { cx = X0 + W / 2, w = math.floor(W * 0.52), top = Y0 + math.floor(H * 0.75), h = 400 }
+    arena = { cx = area.arenaCx or (X0 + W / 2), w = math.floor(W * (area.arenaWidth or 0.52)), top = Y0 + math.floor(H * (area.arenaFrac or 0.75)), h = area.arenaH or 400 }
     arena.floorY = arena.top + arena.h
     arena.x0 = math.floor(arena.cx - arena.w / 2)
     arena.x1 = arena.x0 + arena.w - 1
     shopXs = { X0 + W * 0.3, X0 + W * 0.7 } -- a shop at each lower corner
     funnel.top = math.huge -- (no funnel: the arena is the gathering place)
+  end
+  local climb, open, profile = area.climb, area.open, area.profile
+  if climb then
+    shopXs = {} -- (a climbing area has no shop: its arena's exit leads on)
+  elseif open then
+    shopXs = { X0 + 700 } -- one shop, at the far end from the way in
+  end
+  if climb or open then
+    funnel.top = math.huge
+  end
+  -- Inside the area's silhouette, m px in from its edge (always true without one)
+  local function inProfile(x, y, m)
+    if not profile then
+      return true
+    end
+    if y < Y0 + m then
+      return false
+    end
+    local xa, xb = profile(y)
+    return xa ~= nil and x >= xa + m and x <= xb - m
   end
   local function inArena(x, y, margin)
     return arena and x > arena.x0 - margin and x < arena.x1 + margin and y > arena.top - margin and y < arena.floorY + margin
@@ -127,6 +162,9 @@ function cavegen.generate(world, area, seed, tick)
 
   -- Inside the funnel, with a ragged edge
   local function inFunnel(x, y)
+    if profile and not inProfile(x, y, 36) then
+      return false
+    end
     if y < funnel.top then
       return true
     end
@@ -155,13 +193,33 @@ function cavegen.generate(world, area, seed, tick)
   -- Base rock: dirt pockets in rock, dirt more common near the top. The top
   -- edge wavers so it doesn't meet the surface's sandstone in a straight line.
   local function fillBase()
-    for y = Y0 - BLEND, Y1 do
+    if open then
+      -- Only the thick floor; the rest is sky
+      local floorTop = Y1 - 200
+      for y = floorTop - 12, Y1 do
+        for x = X0, X1 do
+          if y >= floorTop + math.floor(love.math.noise(x * 0.015, noiseSeed + 21) * 12) then
+            local n = love.math.noise(x * 0.011, y * 0.011, noiseSeed)
+            world:setRaw(x, y, n > 0.5 and DIRTID or ROCKID)
+          end
+        end
+        tick()
+      end
+      return
+    end
+    for y = (climb and Y0 or Y0 - BLEND), Y1 do
       local depth = math.max(0, (y - Y0) / H)
-      for x = X0, X1 do
-        local top = Y0 - BLEND + math.floor(love.math.noise(x * 0.02, noiseSeed + 21) * BLEND)
-        if y >= top then
-          local n = love.math.noise(x * 0.011, y * 0.011, noiseSeed)
-          world:setRaw(x, y, n > 0.38 + depth * 0.35 and DIRTID or ROCKID)
+      local xa, xb = X0, X1
+      if profile then
+        xa, xb = profile(y)
+      end
+      if xa then
+        for x = xa, xb do
+          local top = climb and Y0 or Y0 - BLEND + math.floor(love.math.noise(x * 0.02, noiseSeed + 21) * BLEND)
+          if y >= top then
+            local n = love.math.noise(x * 0.011, y * 0.011, noiseSeed)
+            world:setRaw(x, y, n > 0.38 + depth * 0.35 and DIRTID or ROCKID)
+          end
         end
       end
       tick()
@@ -172,6 +230,9 @@ function cavegen.generate(world, area, seed, tick)
   -- pixel resolution with noise for natural edges. Kept clear of the top so
   -- the caves don't open into the surface.
   local function carveCaves()
+    if open then
+      return
+    end
     local gw, gh = math.ceil(W / CELL), math.ceil(H / CELL)
     local grid = {}
     for i = 0, gw * gh - 1 do
@@ -228,6 +289,9 @@ function cavegen.generate(world, area, seed, tick)
   -- Large open caverns with ragged edges and flatter floors, each with a few
   -- rock ledges to climb on. They break up the cramped tunnels.
   local function carveCaverns()
+    if open then
+      return
+    end
     local count = scaled(6 + rng:random(0, 2))
     for c = 1, count do
       local rx = 170 + rng:random() * 150
@@ -339,7 +403,24 @@ function cavegen.generate(world, area, seed, tick)
 
   -- Extra corridors and drops scattered across the cave. They cut across
   -- the routes, so the routes join up and you can switch between them.
+  local ladders = {} -- one-way platforms for climbing: { x0, x1, y }
+
+  -- A ladder up a vertical shaft carved from (x, yBottom) to (x, yTop) with
+  -- seed wanderSeed (see carveSegment): a platform every 28 px, one side then
+  -- the other, each inside the shaft, so it can be climbed by jumping
+  local function addLadder(x, yBottom, yTop, wanderSeed)
+    local side = 1
+    for y = math.floor(yBottom - 26), math.floor(yTop), -28 do
+      local cx = x + (love.math.noise(y * 0.015, wanderSeed) - 0.5) * 36 + side * 6
+      ladders[#ladders + 1] = { x0 = math.floor(cx - 13), x1 = math.floor(cx + 13), y = y }
+      side = -side
+    end
+  end
+
   local function carveCrossings()
+    if open then
+      return
+    end
     for i = 1, scaled(10) do
       local y = Y0 + 200 + rng:random() * (H - 500)
       local len = 400 + rng:random() * 700
@@ -351,6 +432,9 @@ function cavegen.generate(world, area, seed, tick)
       local len = 350 + rng:random() * 550
       local y = Y0 + 150 + rng:random() * (H - 400 - len)
       carveSegment(x, y, x, y + len, 14 + rng:random() * 4, noiseSeed + 70 + i)
+      if climb then
+        addLadder(x, y + len, y, noiseSeed + 70 + i)
+      end
     end
   end
 
@@ -412,6 +496,143 @@ function cavegen.generate(world, area, seed, tick)
       a.braziers[#a.braziers + 1] = { x = bx, y = world:findGround(bx, a.floorY - 40) }
     end
     a.gates = {}
+  end
+
+  -- A route UP to (toX, toY) for a climbing area: climbs (vertical shafts with
+  -- ladders) of 200-420 px alternating with level corridors
+  local function clampUp(x, y)
+    local xa, xb = X0, X1
+    if profile then
+      xa, xb = profile(y)
+      xa = xa or X0
+      xb = xb or X1
+    end
+    return math.max(xa + 100, math.min(xb - 100, x))
+  end
+
+  local function carveRouteUp(fromX, fromY, toX, toY, r, wanderSeed)
+    local x, y = fromX, fromY
+    while y > toY + 420 do
+      local climbLen = 200 + rng:random() * 220
+      local seed = wanderSeed + math.floor(y)
+      carveSegment(x, y, x, y - climbLen, r, seed)
+      addLadder(x, y, y - climbLen, seed)
+      y = y - climbLen
+      if y > toY + 420 then
+        local dir = rng:random() < 0.5 and -1 or 1
+        local nx = clampUp(x + dir * (300 + rng:random() * 500), y)
+        if math.abs(nx - x) < 150 then
+          nx = clampUp(x - dir * (300 + rng:random() * 500), y)
+        end
+        carveSegment(x, y, nx, y, r, wanderSeed + 1)
+        x = nx
+      end
+    end
+    -- Over to under the goal, then the last climb
+    local gx = clampUp(toX, y)
+    carveSegment(x, y, gx, y, r, wanderSeed + 1)
+    local seed = wanderSeed + 99
+    carveSegment(gx, y, gx, toY, r, seed)
+    addLadder(gx, y, toY, seed)
+  end
+
+  -- A climbing area's way in: a doorway into the mountain's face at ground
+  -- level and a chamber behind it, no drop. Carved straight (not limited to the
+  -- silhouette's margin, which would leave the face closed).
+  local function carveWalkIn(ex, ey)
+    local edgeX = profile(ey) or X0
+    local ground = world:findGround(edgeX - 8, ey - 90)
+    local cy = ground - 18
+    for x = edgeX - 14, ex do
+      for y = cy - 17, cy + 17 do
+        local dx, dy = 0, y - cy
+        if dy * dy <= 17 * 17 then
+          world:setRaw(x, y, AIR)
+        end
+      end
+    end
+    for y = cy - 40, cy + 17 do
+      for x = ex - 70, ex + 70 do
+        local dx, dy = (x - ex) / 70, (y - cy) / 40
+        if y >= cy or dx * dx + dy * dy <= 1 then
+          world:setRaw(x, y, AIR)
+        end
+      end
+    end
+    return cy
+  end
+
+  -- The sky: rock islands (flat on top, tapering below) and spires, scattered
+  -- through the open air over the floor
+  local function carveIslands()
+    local floorTop = Y1 - 200
+    local placed = {}
+    -- Keep the sky clear over the shop and over the hole where the way in arrives
+    local keepClear = { { (shopXs[1] or X0) - 90, (shopXs[1] or X0) + 90 } }
+    if area.shaftX0 then
+      keepClear[#keepClear + 1] = { area.shaftX0 - 110, area.shaftX1 + 110 }
+    end
+    local function clear(x0, x1)
+      for _, k in ipairs(keepClear) do
+        if x1 > k[1] and x0 < k[2] then
+          return false
+        end
+      end
+      return true
+    end
+    local wanted = scaled(70)
+    for _ = 1, wanted * 4 do
+      if #placed >= wanted then
+        break
+      end
+      local rx, ry = 45 + rng:random() * 170, 14 + rng:random() * 30
+      local cx = X0 + BORDER + rx + 50 + rng:random() * (W - 2 * (BORDER + rx + 50))
+      local cy = Y0 + 110 + rng:random() * (floorTop - Y0 - 260)
+      local ok = clear(cx - rx * 1.2, cx + rx * 1.2)
+      for _, o in ipairs(placed) do
+        local nx, ny = (cx - o.cx) / (rx + o.rx + 40), (cy - o.cy) / (ry + o.ry + 70)
+        if nx * nx + ny * ny < 1 then
+          ok = false
+          break
+        end
+      end
+      if ok then
+        placed[#placed + 1] = { cx = cx, cy = cy, rx = rx, ry = ry }
+        for y = math.floor(cy - ry * 0.4), math.ceil(cy + ry * 2) do
+          local dy = (y - cy) / (y < cy and ry * 0.4 or ry * 1.8)
+          for x = math.floor(cx - rx * 1.2), math.ceil(cx + rx * 1.2) do
+            local dx = (x - cx) / rx
+            local edge = (love.math.noise(x * 0.04, y * 0.04, noiseSeed + 5) - 0.5) * 0.4
+            if dx * dx + dy * dy + edge < 1 then
+              local n = love.math.noise(x * 0.02, y * 0.02, noiseSeed)
+              world:setRaw(x, y, (y < cy + 5 or n > 0.62) and DIRTID or ROCKID)
+            end
+          end
+          tick()
+        end
+      end
+    end
+    -- Spires from the floor
+    for _ = 1, scaled(14) do
+      local x = X0 + BORDER + 80 + rng:random() * (W - 2 * (BORDER + 80))
+      local h = 160 + rng:random() * 360
+      local w = 22 + rng:random() * 34
+      if clear(x - w, x + w) then
+        for y = math.floor(floorTop - h), floorTop + 4 do
+          local t = (y - (floorTop - h)) / h
+          local hw = w * (0.35 + 0.65 * t) / 2
+          for xx = math.floor(x - hw), math.ceil(x + hw) do
+            world:setRaw(xx, y, ROCKID)
+          end
+        end
+      end
+      tick()
+    end
+  end
+
+  -- The hole through the sky's floor where the shaft from the mountain arrives
+  local function carveSkyEntrance(x0, x1)
+    world:fillRect(x0, Y1 - 205, x1, Y1, AIR)
   end
 
   -- Chamber the player arrives in from the shaft. Timber ledges either side,
@@ -526,8 +747,8 @@ function cavegen.generate(world, area, seed, tick)
           queue[#queue + 1] = nkey
         end
       end
-      if head % 2000 == 0 then
-        tick()
+      if head % 256 == 0 then
+        tick() -- (2000 steps of this search ran 4-5 ms past the frame's budget)
       end
     end
     return false
@@ -555,7 +776,7 @@ function cavegen.generate(world, area, seed, tick)
           end
         end
         local supported = world:isSolid(x - 5, ground + 3) and world:isSolid(x + 5, ground + 3)
-        if isOpen and supported and ground < Y1 - BORDER and not avoid(x, ground) then
+        if isOpen and supported and ground < Y1 - BORDER and inProfile(x, ground - 10, 30) and not avoid(x, ground) then
           spots[#spots + 1] = { x, ground }
         end
       end
@@ -591,7 +812,7 @@ function cavegen.generate(world, area, seed, tick)
             end
           end
         end
-        if ok and not avoid(x, ceiling) then
+        if ok and inProfile(x, ceiling + 10, 30) and not avoid(x, ceiling) then
           spots[#spots + 1] = { x, ceiling }
         end
       end
@@ -623,24 +844,66 @@ function cavegen.generate(world, area, seed, tick)
   carveCaves()
   placeOre()
   carveCaverns()
+  if open then
+    carveIslands()
+  end
 
   local entranceX, entranceY = area.entranceX, area.entranceY
   -- One wide main route and narrower side routes; they wander independently,
-  -- so they cross each other on the way down
-  for p = 1, PATHS do
-    if arena then
-      carveRoute(entranceX, entranceY, arena.cx + (p - 2.5) * 300, arena.top + 24, p == 1 and 21 or 17, noiseSeed + p * 13)
-    else
-      carveRoute(entranceX, entranceY, shopX, tunnelEndY, p == 1 and 21 or 17, noiseSeed + p * 13)
+  -- so they cross each other on the way down (or, in a climbing area, up)
+  local routeEnds = {}
+  if climb then
+    for p = 1, PATHS do
+      local gx = arena.cx + (p - 2.5) * 220
+      routeEnds[#routeEnds + 1] = gx
+      carveRouteUp(entranceX, entranceY, gx, arena.floorY + 30, p == 1 and 21 or 17, noiseSeed + p * 13)
+    end
+  elseif not open then
+    for p = 1, PATHS do
+      if arena then
+        carveRoute(entranceX, entranceY, arena.cx + (p - 2.5) * 300, arena.top + 24, p == 1 and 21 or 17, noiseSeed + p * 13)
+      else
+        carveRoute(entranceX, entranceY, shopX, tunnelEndY, p == 1 and 21 or 17, noiseSeed + p * 13)
+      end
     end
   end
   carveCrossings()
   if arena then
     carveArena()
-  else
+  elseif not open then
     carveAntechamber()
   end
-  carveEntrance(entranceX, entranceY)
+  local exit
+  if climb then
+    -- The routes come up into the arena through its floor
+    for i, gx in ipairs(routeEnds) do
+      local seed = noiseSeed + 200 + i
+      carveSegment(gx, arena.floorY + 70, gx, arena.floorY - 14, 17, seed)
+      addLadder(gx, arena.floorY + 70, arena.floorY - 12, seed)
+    end
+    -- A cap of bedrock across the summit, and the exit shaft up through it and
+    -- the rock over the arena, shut by a gate until the boss is dead
+    for y = Y0, Y0 + 29 do
+      local xa, xb = profile(y)
+      if xa then
+        world:fillRect(xa, y, xb, y, BEDROCK)
+      end
+    end
+    exit = { cx = math.floor(arena.cx), x0 = math.floor(arena.cx) - 21, x1 = math.floor(arena.cx) + 21 }
+    world:fillRect(exit.x0, Y0, exit.x1, arena.top - 10, AIR)
+    local gate = { x0 = exit.x0 - 1, x1 = exit.x1 + 1, y0 = arena.top - 9, y1 = arena.top - 6 }
+    world:fillRect(gate.x0, gate.y0, gate.x1, gate.y1, IRON)
+    arena.gates[#arena.gates + 1] = gate
+    addLadder(exit.cx, arena.top - 12, Y0, noiseSeed + 300)
+    entranceY = carveWalkIn(entranceX, entranceY)
+  elseif open then
+    if area.shaftX0 then
+      carveSkyEntrance(area.shaftX0, area.shaftX1)
+      addLadder((area.shaftX0 + area.shaftX1) / 2, Y1 + 2, Y1 - 205, noiseSeed + 301)
+    end
+  else
+    carveEntrance(entranceX, entranceY)
+  end
   local shops = {}
   for _, sx in ipairs(shopXs) do
     shops[#shops + 1] = buildShop(sx, shopFloor)
@@ -665,11 +928,21 @@ function cavegen.generate(world, area, seed, tick)
   if not area.hasNext then
     world:fillRect(X0, Y1 - BORDER + 1, X1, Y1, BEDROCK)
   end
-  world:fillRect(X0, Y0 - BLEND, X0 + BORDER - 1, Y1, BEDROCK)
-  world:fillRect(X1 - BORDER + 1, Y0 - BLEND, X1, Y1, BEDROCK)
+  local sideTop = climb and (area.groundY or Y0) or Y0 - BLEND
+  world:fillRect(X0, sideTop, X0 + BORDER - 1, Y1, BEDROCK)
+  world:fillRect(X1 - BORDER + 1, sideTop, X1, Y1, BEDROCK)
+  if open then
+    world:fillRect(X0, Y0, X1, Y0 + BORDER - 1, BEDROCK)
+    if area.shaftX0 then
+      carveSkyEntrance(area.shaftX0, area.shaftX1) -- (the bottom shell must not close the hole)
+    end
+  end
 
   -- Spawn spot (used when starting in the cave): the entrance's left ledge
   local spawnX = math.floor(entranceX - ENTRANCE_GAP - 22)
+  if open then
+    spawnX = math.floor(entranceX - 70)
+  end
   local spawnY = world:findGroundUnder(spawnX, PLAYER_W, entranceY) - PLAYER_H
 
   -- What the hunter must be able to reach: the shop, or the arena's floor
@@ -727,7 +1000,8 @@ function cavegen.generate(world, area, seed, tick)
   end
   -- Tougher the deeper in an area, and a lot tougher with each area
   local function toughnessAt(y)
-    return 1 + ((y - Y0) / H) * 0.6 + (level - 1) * 0.9
+    local depth = climb and (Y1 - y) / H or (y - Y0) / H -- (a climb gets tougher going up)
+    return 1 + depth * 0.6 + (level - 1) * 0.9
   end
   local function place(kind, spots)
     for _, s in ipairs(spots) do
@@ -827,7 +1101,7 @@ function cavegen.generate(world, area, seed, tick)
   local bossKind = type(area.boss) == "table" and area.boss[rng:random(1, #area.boss)] or area.boss
   if bossKind and arena then
     local sz = SIZES[bossKind]
-    enemies[#enemies + 1] = { kind = bossKind, x = arena.cx, y = arena.top + 120, toughness = 1 + (level - 1) * 0.5, boss = true, arena = true }
+    enemies[#enemies + 1] = { kind = bossKind, x = arena.cx, y = arena.top + 120, toughness = 1 + (level - 1) * 0.5, boss = true, arena = true, reward = area.bossReward }
   elseif bossKind then
     local sz = SIZES[bossKind]
     local best
@@ -915,6 +1189,39 @@ function cavegen.generate(world, area, seed, tick)
   end
   local gas = makePools(area.gasPools, 22, 52, true)
   local water = makePools(area.waterPools, 20, 64, false) -- (deeper than before, and more of them)
+  local lava = makePools(area.lavaPools, 14, 36, false) -- (shallow basins of molten rock)
+  local acid = makePools(area.acidPools, 10, 28, false)
+  -- A flooded area: every open cell below the flood level is water (src.fluids
+  -- fills it in). Runs of 2-px cells, { gy, gx0, gx1 }, from the level down
+  local flood
+  if area.flood then
+    local top = Y0 + (area.flood.level or 120)
+    local lake = area.flood.lake -- { x0, x1 }: a lake over the area's top, flooding that width from above Y0
+    local runs = {}
+    local gx0, gx1 = math.ceil((X0 + BORDER) / 2), math.floor((X1 - BORDER) / 2)
+    for gy = math.floor((lake and (Y0 - 28) or top) / 2), math.floor((Y1 - BORDER) / 2) do
+      local y = gy * 2 + 1
+      local start
+      local gxA, gxB = gx0, gx1
+      if lake and y < top then
+        gxA, gxB = math.max(gx0, math.ceil(lake.x0 / 2)), math.min(gx1, math.floor(lake.x1 / 2))
+      end
+      for gx = gxA, gxB do
+        local open = not world:isSolid(gx * 2 + 1, y)
+        if open and not start then
+          start = gx
+        elseif not open and start then
+          runs[#runs + 1] = { gy, start, gx - 1 }
+          start = nil
+        end
+      end
+      if start then
+        runs[#runs + 1] = { gy, start, gxB }
+      end
+      tick()
+    end
+    flood = { top = top, runs = runs }
+  end
   local result = {
     seed = seed,
     area = area,
@@ -931,6 +1238,12 @@ function cavegen.generate(world, area, seed, tick)
     enemies = enemies, -- { kind, x, y, toughness, boss }: ground monsters stand at y, the others hang from it
     gas = gas, -- pools: { cells = { x, y, ... } (POOL_CELL squares), vent = { x, groundY }, level }
     water = water, -- the same, without vents
+    flood = flood, -- { top, runs }: the area's flooded part (runs of 2-px cells { gy, gx0, gx1 })
+    platforms = ladders, -- one-way platforms to climb by: { x0, x1, y }
+    exit = exit, -- a climbing area's way on: { cx, x0, x1 } (the shaft up from its arena)
+    story = require("src.story").generate(world, findFloorSpots(scaled(16), 22, avoidForEnemies), level, rng), -- (src.story: signs, camps, the fallen)
+    lava = lava, -- pools of molten rock (src.fluids): they don't flow
+    acid = acid, -- pools of acid: they don't flow either
     gasCell = POOL_CELL,
   }
 
@@ -1090,6 +1403,160 @@ function cavegen.generate(world, area, seed, tick)
     end
     for _, s in ipairs(findFloorSpots(scaled(28), 12, avoid)) do
       mine.picks[#mine.picks + 1] = { x = s[1], y = s[2], flip = rng:random() < 0.5, tilt = rng:random(-4, 4) / 10 }
+    end
+  end
+
+  -- A prisoner's cage (src.npcs): on the flattest, roomiest stretch of floor
+  -- found, near the middle of the area's depth, which is then levelled and
+  -- cleared so the cage always fits. Placed last, so the rest of the layout
+  -- doesn't change.
+  if area.prisoner then
+    local best, bestScore
+    for _, s in ipairs(findFloorSpots(40, 30, avoidForEnemies)) do
+      local x, g = s[1], s[2]
+      local bumps, blocked = 0, 0
+      for dx = -20, 18, 2 do
+        local gy = world:findGround(x + dx, g - 30)
+        bumps = bumps + math.min(4, math.floor(math.abs(gy - g) / 2))
+      end
+      for dy = 4, 34, 3 do
+        for dx = -14, 13, 3 do
+          if world:isSolid(x + dx, g - dy) then
+            blocked = blocked + 1
+          end
+        end
+      end
+      local score = bumps + blocked * 2 + math.abs((g - Y0) / (Y1 - Y0) - 0.45) * 20
+      if not bestScore or score < bestScore then
+        best, bestScore = s, score
+      end
+    end
+    if best then
+      local x, g = best[1], best[2]
+      for px = x - 20, x + 18 do
+        for py = g - 34, g - 1 do
+          if world:isSolid(px, py) then
+            world:setRaw(px, py, materials.AIR)
+          end
+        end
+        for py = g, g + 3 do
+          if not world:isSolid(px, py) then
+            world:setRaw(px, py, ROCKID)
+          end
+        end
+      end
+      local top
+      if area.prisonerHeld == "rubble" then
+        -- A cave-in: a mound of loose earth with lumps of rock in it, heaped
+        -- over him (src.npcs digs out whether he is free yet)
+        local dirt = area.palette and area.palette.dirt or materials.DIRT
+        for dx = -18, 18 do
+          local k = 1 - (dx / 19) ^ 2
+          local h = math.floor(21 * k ^ 0.7 + rng:random(0, 1))
+          for dy = 1, h do
+            local rocky = rng:random() < 0.12
+            world:setRaw(x + dx, g - dy, rocky and ROCKID or dirt)
+          end
+        end
+        top = g - 21
+      end
+      world:repaintRegion(x - 22, g - 36, x + 20, g + 5)
+      result.prisoner = { id = area.prisoner, x = x, y = g, held = area.prisonerHeld, top = top }
+    end
+  end
+
+  -- Events for the dungeon (src.events): altars, spots for a quest relic, a
+  -- wounded hunter, and a sealed vault. Placed last, so the layout above is
+  -- unchanged.
+  if area.monsters and next(area.monsters) and not area.open and not area.arena then
+    result.altars = findFloorSpots(level >= 3 and 2 or 1, 26, avoidForEnemies)
+    result.relicSpots = findFloorSpots(3, 20, avoidForEnemies)
+    if area.wounded then
+      result.wounded = findFloorSpots(1, 26, avoidForEnemies)[1]
+    end
+    -- A vault: a stone-brick room sealed in solid rock, a short corridor
+    -- running out to the nearest cave with an iron door at its inner end. The
+    -- door takes a key; the brick around it can be dug or blasted through.
+    local STONEBRICK, IRON = materials.STONEBRICK, materials.IRON
+    for _ = 1, 160 do
+      tick()
+      local cx = math.floor(X0 + BORDER + 50 + rng:random() * (W - 2 * BORDER - 100))
+      local cy = math.floor(Y0 + 150 + rng:random() * (H - 450))
+      local solid = true
+      for yy = cy - 13, cy + 13, 3 do
+        for xx = cx - 17, cx + 17, 3 do
+          if not world:isSolid(xx, yy) or not inProfile(xx, yy, 6) or avoidForEnemies(xx, yy) then
+            solid = false
+          end
+        end
+      end
+      if solid then
+        -- Which way is the nearest cave: left, right (level with the floor) or up
+        local best, bestD, dir
+        for _, d in ipairs({ { 1, 0 }, { -1, 0 }, { 0, -1 } }) do
+          for dist = 14, 80, 2 do
+            local ax, ay = cx + d[1] * dist, cy + (d[2] == 0 and 2 or d[2] * (dist - 4))
+            if not world:isSolid(ax, ay) then
+              if not bestD or dist < bestD then
+                best, bestD, dir = d, dist, d
+              end
+              break
+            end
+          end
+        end
+        if best and bestD <= 80 then
+          -- (a shell of iron round the room: nothing can dig or blast into it)
+          for yy = cy - 10, cy + 9 do
+            for xx = cx - 14, cx + 14 do
+              world:setRaw(xx, yy, IRON)
+            end
+          end
+          for yy = cy - 7, cy + 6 do
+            for xx = cx - 11, cx + 11 do
+              world:setRaw(xx, yy, materials.AIR)
+            end
+          end
+          local door
+          if dir[2] == 0 then
+            -- a side corridor, level with the floor, out to the cave
+            local sx = dir[1]
+            for dist = 12, 90 do
+              local xx = cx + sx * dist
+              if dist > 14 and not world:isSolid(xx, cy + 2) then
+                break
+              end
+              for yy = cy - 3, cy + 6 do
+                world:setRaw(xx, yy, materials.AIR)
+              end
+              for yy = cy - 3, cy + 6 do
+                world:setRaw(cx + sx * 12, yy, IRON)
+                world:setRaw(cx + sx * 13, yy, IRON)
+              end
+            end
+            local dx0 = math.min(cx + sx * 12, cx + sx * 13)
+            door = { x0 = dx0, y0 = cy - 3, x1 = dx0 + 1, y1 = cy + 6 }
+          else
+            for dist = 9, 90 do
+              local yy = cy - dist
+              if dist > 12 and not world:isSolid(cx, yy) then
+                break
+              end
+              for xx = cx - 4, cx + 4 do
+                world:setRaw(xx, yy, materials.AIR)
+              end
+            end
+            for xx = cx - 4, cx + 4 do
+              world:setRaw(xx, cy - 8, IRON)
+              world:setRaw(xx, cy - 9, IRON)
+            end
+            door = { x0 = cx - 4, y0 = cy - 9, x1 = cx + 4, y1 = cy - 8 }
+          end
+          world:repaintRegion(cx - 20, cy - 100, cx + 20 + 80, cy + 14)
+          world:repaintRegion(cx - 100, cy - 100, cx + 20, cy + 14)
+          result.vault = { x = cx, y = cy + 6, door = door, dir = dir, room = { x0 = cx - 11, y0 = cy - 7, x1 = cx + 11, y1 = cy + 6 } }
+          break
+        end
+      end
     end
   end
 

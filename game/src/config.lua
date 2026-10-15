@@ -15,7 +15,8 @@ local config = {
 
   -- World gravity, shared by the player and physics objects. Objects scale it
   -- with their own gravityScale (see props.lua).
-  gravity = 672,
+  gravity = 672, -- live: src.scenes.catacombs scales it in areas with less gravity (the sky)
+  baseGravity = 672,
 
   physics = {
     meter = 12.8, -- pixels per Box2D metre; keeps small props in Box2D's comfort zone

@@ -18,10 +18,13 @@ input.ACTIONS = {
   { id = "interact", name = "Interact / pick up", keys = { "e" } },
   { id = "inventory", name = "Weapon panel", keys = { "tab" } },
   { id = "fuse", name = "Lock / release fuser", keys = { "g" } },
+  { id = "throw", name = "Throw dynamite", keys = { "q" } },
+  { id = "heal", name = "Drink flask", keys = { "h" } },
+  { id = "map", name = "Survey map", keys = { "m" } },
   { id = "weapon1", name = "Weapon 1", keys = { "1" } },
   { id = "weapon2", name = "Weapon 2", keys = { "2" } },
   { id = "weapon3", name = "Weapon 3", keys = { "3" } },
-  { id = "restart", name = "Restart run", keys = { "r" } },
+  { id = "restart", name = "Restart run (hold)", keys = { "r" } },
 }
 
 -- The mouse isn't rebindable; the Controls page lists it for reference

@@ -19,6 +19,11 @@
 local audio = require("src.audio")
 local bullets = require("src.bullets")
 local camera = require("src.camera")
+local juice = require("src.juice")
+local fluids = require("src.fluids")
+local ambience = require("src.ambience")
+local critters = require("src.critters")
+local weather = require("src.weather")
 local chests = require("src.chests")
 local compare = require("src.compare")
 local config = require("src.config")
@@ -35,6 +40,11 @@ local itembar = require("src.itembar")
 local lighting = require("src.lighting")
 local menu = require("src.menu")
 local menubg = require("src.menubg")
+local meta = require("src.meta")
+local bounties = require("src.bounties")
+local events = require("src.events")
+local surveymap = require("src.surveymap")
+local npcs = require("src.npcs")
 local perks = require("src.perks")
 local physics = require("src.physics")
 local pickups = require("src.pickups")
@@ -60,6 +70,9 @@ local scene, world, player
 local inv -- the run's inventory; survives area changes, reset on restart
 local pending -- { name, opts } of a scene to load on the next update
 local fade = 0 -- black overlay alpha, fades out after entering a scene
+local restartLatched = false
+local restartHeld, restartFade = 0, 0 -- holding the restart key: seconds held, and the fade to black it brings on
+local RESTART_FADE_AT, RESTART_TIME = 0.5, 2 -- the screen starts to fade after this long, the run restarts after this
 local mouseVX, mouseVY = 0, 0
 local showPhysics = false
 
@@ -92,10 +105,14 @@ local function load(name, opts)
   pickups.clear()
   chests.clear()
   shop.clear()
+  npcs.clear()
+  events.clear()
+  bounties.reset()
   compare.close()
   local spawnX, spawnY
   world, spawnX, spawnY = scene.build(opts)
   physics.init(world)
+  surveymap.reset(world)
   scene.populate(world)
   player = Player.new(spawnX, spawnY, world, inv)
   bullets.player = player
@@ -116,6 +133,10 @@ local function newRun()
   game.enter("overworld")
   if playing then
     save.stat("runs")
+    bounties.refresh()
+    meta.beginRun()
+    inv.flasks = meta.startFlasks()
+    inv.dynamite = meta.startDynamite()
   end
 end
 
@@ -125,6 +146,8 @@ local function note(thing, category, id)
     save.record(category, id)
   end
 end
+
+local seenTimer = 0
 
 -- Logs what the run has collected into the profile (cheap: a few slots a frame)
 local function track(area)
@@ -166,10 +189,31 @@ local function track(area)
   end
   lastGold = inv.gold
   if area then
-    save.statMax("deepest", area)
+    save.statMax("deepest", require("src.scenes.catacombs").rank(area))
+    -- Marks for reaching an area for the first time
+    if not meta.isSeen("area", area) then
+      meta.see("area", area)
+      meta.earn(meta.EARN.area, "area")
+    end
+  end
+  -- Locked things lying near the hunter count as seen (goals for the Gunsmith)
+  seenTimer = seenTimer - 1 / 60
+  if seenTimer <= 0 and player and not player.dead then
+    seenTimer = 0.25
+    local px, py = player:center()
+    for _, p in ipairs(pickups.all()) do
+      if (p.item or p.gun) and math.abs(p.x - px) < 110 and math.abs(p.y - py) < 80 then
+        if p.item and not meta.isUnlocked(p.item.kind, p.item.id) then
+          meta.see(p.item.kind, p.item.id)
+        elseif p.gun and not meta.isUnlocked("weapon", p.gun.id) then
+          meta.see("weapon", p.gun.id)
+        end
+      end
+    end
   end
   if player.dead and deathCounted ~= player then
     deathCounted = player
+    meta.tithe(inv.gold) -- (the Miner's Tithe banks a share of what he carried)
     save.stat("deaths")
     save.flush()
   end
@@ -179,12 +223,52 @@ function game.load()
   audio.load()
   render.load()
   lighting.load()
+  -- (Water reflections, fluids.reflector, are off: drawing every creature a
+  -- second time cost too much frame time)
   settings.load()
   -- A first discovery pops up a note at the side of the screen
   save.onDiscover = function(category, id)
     if playing then
-      toasts.discover(category, id)
+      toasts.discover(category, id, meta.EARN.discover)
       discoveries[#discoveries + 1] = { category, id }
+      meta.earn(meta.EARN.discover, "discover")
+    end
+  end
+  -- The rest of the profile's meta-progression (src.meta): unlock gating in
+  -- the generators, marks shown as they are earned, the camp's people
+  meta.install()
+  meta.onEarn = function(amount, reason)
+    if reason ~= "discover" then -- (a discovery's note already shows its mark)
+      toasts.marks(amount, reason)
+    end
+  end
+  events.onGhost = function()
+    menu.open("ghost")
+  end
+  npcs.onTalk = function(id)
+    menu.open(id == "board" and "board" or "camp", id)
+  end
+  -- A freed prisoner's gift for this run (the Prospector: dynamite)
+  npcs.onFreed = function(id)
+    if id == "prospector" and inv then
+      inv.dynamite = (inv.dynamite or 0) + 2
+    elseif id == "apothecary" and inv then
+      inv.flasks = (inv.flasks or 0) + 1
+    end
+  end
+  -- The Prospector's strongbox, from his page
+  menu.runGold = function()
+    return inv and inv.gold or 0
+  end
+  bounties.onNotice = function(title, label)
+    toasts.notice(title, label)
+  end
+  -- An elite's death: its trophy and its marks
+  enemies.onEliteKilled = function(e)
+    meta.trophy(e.kind)
+    meta.earn(meta.EARN.elite, enemies.eliteName(e))
+    if e.bounty then
+      bounties.claim(e)
     end
   end
   menu.onAction = function(action, arg)
@@ -245,6 +329,7 @@ function game.load()
       save.stat("kills")
       if e.def.boss then
         save.stat("bosses")
+        meta.earn(meta.EARN.boss, e.def.name or "boss")
       end
     else
       save.stat("kills")
@@ -275,7 +360,42 @@ function game.menuAction(action, arg)
     menu.close()
     audio.setMenu(false)
     toasts.clear()
+    -- The world was built behind the title before this profile was known: roll
+    -- the shops and the starting revolver again from its unlocked pool
+    shop.restock()
+    bounties.refresh()
+    meta.beginRun()
+    if inv then
+      inv.dynamite = meta.startDynamite()
+      inv.flasks = meta.startFlasks()
+    end
+    if player then
+      player:refreshMaxHp() -- (mounted trophies belong to the profile just chosen)
+      player.hp = player.maxHp
+    end
+    if inv and inv.weapons[1] and not inv.weapons[2] then
+      inv.weapons[1] = inventory.starterGun()
+    end
     hud.showBanner(scene.title, scene.subtitle)
+  elseif action == "ghostbuy" then
+    local ok, why = events.buy(arg, player)
+    if not ok then
+      local px, py = player:center()
+      effects.popup(px, py - 14, why or "Can't pay that", { 0.9, 0.5, 0.5 })
+      audio.play("deny")
+    end
+  elseif action == "refresh" then
+    if player then
+      player:refreshMaxHp() -- (a mounted trophy may have changed it)
+    end
+  elseif action == "deposit" then
+    local put = meta.deposit(inv.gold)
+    inv.gold = inv.gold - put
+    lastGold = inv.gold -- (not earned again when it comes back out)
+    save.flush()
+  elseif action == "withdraw" then
+    inv.gold = inv.gold + meta.withdraw()
+    lastGold = inv.gold
   elseif action == "resume" then
     menu.close()
   elseif action == "restart" then
@@ -310,7 +430,36 @@ function game.focus(focused)
   end
 end
 
+local spaceTimer = 0
+
+-- How roomy the place around (x, y) is: rays out in 12 directions, the
+-- average distance to rock mapped to -1 (open air above ground) .. 0 (tight
+-- tunnel) .. 1 (a big cavern)
+function game.measureSpace(x, y, underground)
+  local total = 0
+  local n = 12
+  for i = 0, n - 1 do
+    local a = i / n * math.pi * 2
+    local dx, dy = math.cos(a), math.sin(a)
+    local d = 0
+    while d < 240 and not world:isSolid(math.floor(x + dx * d), math.floor(y + dy * d)) do
+      d = d + 8
+    end
+    total = total + d
+  end
+  local avg = total / n
+  local roomy = math.max(0, math.min(1, (avg - 24) / 150))
+  return roomy * underground - (1 - underground)
+end
+
+-- How long the last frame's own work took (update and draw, without the
+-- background generation), so generation can have what is left of the frame
+local FRAME_TARGET = 0.011 -- (of 16.7 ms: the rest is headroom for the GC, the driver and presenting)
+local frameT0, genSpent, lastWork = 0, 0, 0.008
+
 function game.update(dt)
+  frameT0 = love.timer.getTime()
+  genSpent = 0
   dt = math.min(dt, 1 / 30) -- avoid huge steps after hitches
 
   if pending then
@@ -330,8 +479,20 @@ function game.update(dt)
       area, inShop = scene.audioInfo(player:center())
     end
   end
-  -- (with the weapon panel open the area's sound plays on, but muffled)
-  audio.update(dt, underground, menu.isOpen(), area, inShop, itembar.isOpen())
+  -- Where the hunter is listening from, how big the space around him is
+  -- (reverb) and how hard the monsters are pressing him (music tension)
+  if playing and not menu.isFrontEnd() then
+    local lx, ly = player:center()
+    audio.setListener(lx, ly)
+    spaceTimer = spaceTimer - dt
+    if spaceTimer <= 0 then
+      spaceTimer = 0.25
+      audio.setSpace(game.measureSpace(lx, ly, underground))
+      audio.setTension(enemies.threat(lx, ly) + (player.hurtFlash > 0.3 and 0.2 or 0))
+    end
+  end
+  -- (with the weapon panel open the area's sound plays on, but muffled; under water too)
+  audio.update(dt, underground, menu.isOpen(), area, inShop, itembar.isOpen() or (playing and player.submerged))
   -- The weapon panel and the menus pause the game, like Noita's inventory
   love.mouse.setVisible(itembar.isOpen() or menu.isOpen() or compare.isOpen())
   menu.update(dt)
@@ -342,10 +503,21 @@ function game.update(dt)
   toasts.update(dt)
   compare.update()
   if scene.background then
-    scene.background()
+    -- (a bigger share of the frame goes to generating areas while nobody is playing)
+    local px, py
+    if player then
+      px, py = player:center()
+    end
+    local g0 = love.timer.getTime()
+    scene.background(menu.isOpen() or itembar.isOpen() or compare.isOpen(), px, py, FRAME_TARGET - lastWork)
+    genSpent = love.timer.getTime() - g0
   end
   if playing then
     track(area)
+    bounties.update(player, area)
+    if not player.dead then
+      surveymap.update(dt, player:center())
+    end
     -- A death: once the hunter has finished falling, the recap
     if player.dead and not menu.isOpen() then
       if deathPhoto == nil then
@@ -369,12 +541,32 @@ function game.update(dt)
     end
   end
   if itembar.isOpen() or menu.isOpen() or compare.isOpen() then
+    restartHeld, restartFade = 0, 0
     return
+  end
+
+  -- Restarting the run takes the key held down for 2 s: after half a second
+  -- the screen fades to black over the rest of it, and letting go brings it back
+  if restartLatched and not input.down("restart") then
+    restartLatched = false -- (let go of it after a restart before it counts again)
+  end
+  if playing and input.down("restart") and not restartLatched then
+    restartHeld = restartHeld + dt
+    restartFade = restartHeld > RESTART_FADE_AT and math.min(1, (restartHeld - RESTART_FADE_AT) / (RESTART_TIME - RESTART_FADE_AT)) or 0
+    if restartHeld >= RESTART_TIME then
+      restartHeld, restartFade = 0, 0
+      restartLatched = true
+      newRun()
+      return
+    end
+  else
+    restartHeld = 0
+    restartFade = math.max(0, restartFade - dt * 4)
   end
 
   fade = math.max(0, fade - dt * 2)
   mouseVX, mouseVY = render.toVirtual(love.mouse.getPosition())
-  local camX, camY = camera.offset()
+  local camX, camY = camera.baseOffset()
   local aimX, aimY = mouseVX + camX, mouseVY + camY
 
   -- A dead hunter stays where he fell until the run is restarted (R)
@@ -385,7 +577,7 @@ function game.update(dt)
   player:syncPhysics(dt)
   enemies.syncPhysics(dt)
   props.snapshotVelocities()
-  physics.update(dt)
+  physics.update(dt, player:center())
   if not player.dead then
     player:ride(dt)
   end
@@ -394,20 +586,43 @@ function game.update(dt)
   props.update(dt)
   chests.update(dt)
   shop.update(dt, player)
+  npcs.update(dt, player)
+  events.update(dt, player, playing and area or nil)
   bullets.update(dt, world)
   enemies.update(dt, world, player)
   pickups.update(dt, world, player)
   fuser.update(dt, world, player, inv)
   effects.update(dt, world)
+  world:flushRepaints()
   world:refresh()
   hud.update(dt)
 
   if scene.update then
     scene.update(dt, player, game, effects)
   end
+  do
+    -- Air, creatures and weather
+    local view = { x = camX, y = camY, w = config.VIRTUAL_W, h = config.VIRTUAL_H }
+    local areaNow, shopNow = nil, false
+    local under = 0
+    if scene.undergroundFactor then
+      under = scene.undergroundFactor(player:center())
+      if scene.audioInfo then
+        areaNow, shopNow = scene.audioInfo(player:center())
+      end
+    end
+    if shopNow then
+      areaNow = nil
+    end
+    ambience.update(dt, world, player, areaNow, under, view)
+    critters.update(dt, world, player, areaNow, under, view)
+    weather.update(dt, 1 - under)
+  end
 
   local px, py = player:center()
   camera.update(dt, px, py, aimX, aimY)
+  -- the terrain just outside the view, readied a little each frame
+  world:prewarm(camX, camY, config.VIRTUAL_W, config.VIRTUAL_H)
 end
 
 local function drawLoading()
@@ -416,8 +631,10 @@ local function drawLoading()
 end
 
 -- The title screen: the black hole, with the menu over it
+local MENU_FX = { aberr = 1.1, vig = 0.45, contrast = 0.34 }
 local function drawFrontEnd()
   menubg.prepare()
+  render.setMood(MENU_FX, 0, 0, 0)
   render.beginWorld()
   menubg.draw()
   menu.drawWorldLayer()
@@ -426,7 +643,14 @@ local function drawFrontEnd()
   love.graphics.setColor(1, 1, 1)
 end
 
+local drawFrame
+
 function game.draw()
+  drawFrame()
+  lastWork = love.timer.getTime() - frameT0 - genSpent
+end
+
+drawFrame = function()
   if menu.isFrontEnd() then
     -- (a world being built behind the title doesn't blank the screen)
     if pending then
@@ -450,16 +674,28 @@ function game.draw()
   props.addLights(lighting, view)
   chests.addLights(lighting, view)
   shop.addLights(lighting, view)
+  npcs.addLights(lighting, view)
+  events.addLights(lighting, view)
   bullets.addLights(lighting)
   effects.addLights(lighting)
   fuser.addLights(lighting)
+  critters.addLights(lighting, view)
   if scene.addLights then
     scene.addLights(lighting, camX, camY)
   end
   lighting.render(camX, camY, function()
     world:draw(camX, camY, config.VIRTUAL_W, config.VIRTUAL_H)
+  end, function()
+    -- Monsters block light a little, so they throw soft moving shadows (not the
+    -- hunter: the light is his own, and shining out through his body speckles it)
+    love.graphics.setColor(1, 1, 1, 0.7)
+    enemies.drawOccluders(view)
   end)
+  render.setLamps(lighting.lamps(camX, camY, 4))
 
+  -- The look of the frame: the area's mood, bent by the hunter's health and hits
+  local lowhp = player.dead and 0 or math.max(0, math.min(1, (0.4 - player.hp / player.maxHp) / 0.3))
+  render.setMood(scene.fx, player.hurtFlash, lowhp, player.dead and math.min(1, deadTime / 2) or 0)
   render.beginWorld()
   if scene.drawBackground then
     scene.drawBackground(camX, camY)
@@ -469,14 +705,17 @@ function game.draw()
   if scene.drawDecor then
     scene.drawDecor(camX, camY)
   end
-  world:draw(camX, camY, config.VIRTUAL_W, config.VIRTUAL_H)
+  world:draw(camX, camY, config.VIRTUAL_W, config.VIRTUAL_H, lighting.terrainShader())
   targets.draw()
   props.draw(view)
   chests.draw(view)
   shop.draw(view)
+  npcs.draw(view, player)
+  events.draw(view)
   enemies.draw(view)
   player:draw()
   effects.drawWorld()
+  critters.draw(view)
   if scene.drawFront then
     scene.drawFront(camX, camY)
   end
@@ -491,12 +730,15 @@ function game.draw()
   if scene.drawEmissive then
     scene.drawEmissive(camX, camY)
   end
+  critters.drawEmissive(view)
   player:drawEmissive()
   enemies.drawEmissive(view)
   props.drawEmissive(view)
   pickups.drawEmissive(view)
   chests.drawEmissive(view)
   shop.drawEmissive(view)
+  npcs.drawEmissive(view)
+  events.drawEmissive(view)
   bullets.draw()
   effects.drawEmissive()
   fuser.drawEmissive()
@@ -504,6 +746,7 @@ function game.draw()
     physics.drawDebug()
   end
   love.graphics.pop()
+  weather.drawScreen(love.timer.getDelta())
   -- A red flash when the hunter is hurt
   if player.hurtFlash > 0 then
     love.graphics.setColor(0.7, 0.05, 0.05, 0.28 * player.hurtFlash)
@@ -531,6 +774,8 @@ function game.draw()
   pickups.drawScreen(toScreen, font, player)
   chests.drawScreen(toScreen, font, player)
   shop.drawScreen(toScreen, font, player)
+  npcs.drawScreen(toScreen, font, player)
+  events.drawScreen(toScreen, font, player)
   -- Hovering the mouse over a weapon lying about, or on a shop pedestal, shows
   -- what it is before you take it
   if not (itembar.isOpen() or menu.isOpen() or compare.isOpen()) then
@@ -557,6 +802,11 @@ function game.draw()
     local ww, wh = love.graphics.getDimensions()
     local k = math.min(1, (deadTime - DEATH_FADE_START) / (RECAP_DELAY - DEATH_FADE_START))
     love.graphics.setColor(0.05, 0.01, 0.02, 0.8 * k)
+    love.graphics.rectangle("fill", 0, 0, ww, wh)
+  end
+  if restartFade > 0 then
+    local ww, wh = love.graphics.getDimensions()
+    love.graphics.setColor(0, 0, 0, restartFade)
     love.graphics.rectangle("fill", 0, 0, ww, wh)
   end
   compare.draw(inv, render.uiScale())
@@ -604,10 +854,43 @@ function game.keypressed(key)
     player:pressJump()
   elseif input.is("kick", key) and not player.dead then
     player:kick()
+  elseif input.is("map", key) and not player.dead then
+    if meta.tier("survey") > 0 then
+      menu.open("map")
+    else
+      local px, py = player:center()
+      effects.popup(px, py - 14, "No survey map", { 0.8, 0.8, 0.85 })
+    end
+  elseif input.is("heal", key) and not player.dead then
+    if (inv.flasks or 0) > 0 and player.hp < player.maxHp then
+      inv.flasks = inv.flasks - 1
+      player:heal(math.ceil(player.maxHp * 0.35))
+      audio.play("buy")
+      local px, py = player:center()
+      effects.popup(px, py - 14, "Flask", { 0.6, 1, 0.7 })
+      for _ = 1, 8 do
+        effects.particle(px + (love.math.random() - 0.5) * 6, py, (love.math.random() - 0.5) * 30, -20 - love.math.random() * 40, 0.6, { 0.6, 1, 0.7 }, -20, true)
+      end
+    elseif (inv.flasks or 0) <= 0 then
+      local px, py = player:center()
+      effects.popup(px, py - 14, "No flasks", { 0.8, 0.8, 0.85 })
+    end
+  elseif input.is("throw", key) and not player.dead then
+    if (inv.dynamite or 0) > 0 then
+      inv.dynamite = inv.dynamite - 1
+      local mx, my = render.toVirtual(love.mouse.getPosition())
+      local camX, camY = camera.baseOffset()
+      local sx, sy = player:shoulder()
+      enemies.throwStick(sx, sy, mx + camX, my + camY)
+    else
+      local px, py = player:center()
+      effects.popup(px, py - 14, "No dynamite", { 0.8, 0.8, 0.85 })
+      audio.play("deny")
+    end
   elseif input.is("roll", key) and not player.dead then
     player:pressRoll()
   elseif input.is("interact", key) and not player.dead then
-    if not chests.interact(player) and not shop.interact(player) then
+    if not npcs.interact(player) and not events.interact(player) and not chests.interact(player) and not shop.interact(player) then
       pickups.interact(player)
     end
   elseif key == "f6" and not player.dead then
@@ -617,7 +900,7 @@ function game.keypressed(key)
     local px, py = player:center()
     effects.weaponCard(px, py - 22, gun)
   elseif input.is("restart", key) then
-    newRun()
+    -- (held, not pressed: see game.update)
   elseif key == "f9" then
     game.enter("testroom")
   elseif key == "f10" then
@@ -681,6 +964,30 @@ end
 
 function game.player()
   return player
+end
+
+-- What the survey map marks on its second tier: { x, y, color, always }
+function game.mapMarks()
+  local out = {}
+  local cat = require("src.scenes.catacombs")
+  for i = 1, cat.count() do
+    local info = cat.info(i)
+    if info then
+      for _, room in ipairs(info.shops or {}) do
+        out[#out + 1] = { x = room.x + room.w / 2, y = room.y + room.h / 2, color = { 0.4, 0.9, 1 } }
+      end
+      for _, c in ipairs(info.chests or {}) do
+        out[#out + 1] = { x = c[1], y = c[2], color = { 1, 0.85, 0.3 } }
+      end
+    end
+  end
+  for _, b in ipairs(bounties.list()) do
+    local e = b.taken and bounties.placed(b.id)
+    if e and not e.dead then
+      out[#out + 1] = { x = e.body.x, y = e.body.y, color = { 1, 0.3, 0.25 }, always = true }
+    end
+  end
+  return out
 end
 
 return game

@@ -22,8 +22,9 @@ end
 
 -- Tracks ----------------------------------------------------------------------
 
-local function drawTrack(t)
-  for x = t.x0, t.x1 do
+-- (only the stretch in view: a long track is thousands of pixels)
+local function drawTrack(t, view)
+  for x = math.max(t.x0, math.floor(view.x) - 4), math.min(t.x1, math.ceil(view.x + view.w) + 4) do
     local y = t.ys[x]
     if y then
       if (x - t.x0) % 7 == 3 then
@@ -118,6 +119,19 @@ end
 -- Oil lanterns ------------------------------------------------------------------
 
 local function drawLamp(l)
+  if l.broken then
+    -- what is left: the chain, or the post and its arm
+    if l.hung then
+      R(IRON_D, math.floor(l.x), l.y - 8, 1, 5)
+    else
+      local x = math.floor(l.x)
+      local dir = l.flip and -1 or 1
+      R(WOOD, x, l.y - 4, 2, l.post - l.y + 4)
+      R(WOOD, dir > 0 and x or x - 5, l.y - 4, 7, 1)
+      R(WOOD_D, x - 2, l.post - 1, 6, 1)
+    end
+    return
+  end
   if l.hung then
     R(IRON_D, math.floor(l.x), l.y - 8, 1, 6) -- the chain
     local x, y = math.floor(l.x) - 2, l.y - 3
@@ -143,7 +157,113 @@ local function drawLamp(l)
   end
 end
 
+-- Lamps can be shot (src.bullets asks minedecor.lampAt): every hit spills a
+-- little oil (src.fluids), and the fourth, or a blast, breaks the lamp in a
+-- puff of fire that lights what it spilt. A broken lamp gives no light.
+local LAMP_HP, LAMP_OIL = 10, 26
+local lampGrid = {} -- 64-px cells -> the lamps in them
+local LCELL = 64
+local function cellKey(cx, cy)
+  return cy * 65536 + cx -- (a number: every round in flight asks every frame, and string keys were garbage)
+end
+
+local function lampBox(l)
+  if l.hung then
+    local x = math.floor(l.x) - 2
+    return x, l.y - 3, x + 4, l.y + 4
+  end
+  local dir = l.flip and -1 or 1
+  local lx = math.floor(l.x) + dir * 5 + (dir > 0 and 0 or 1)
+  return lx - 2, l.y - 1, lx + 2, l.y + 6
+end
+
+function minedecor.clear()
+  lampGrid = {}
+end
+
+-- Makes an area's lamps shootable (once its props are placed)
+function minedecor.register(mine)
+  for _, l in ipairs(mine.lamps) do
+    l.hp, l.oil, l.broken = LAMP_HP, LAMP_OIL, false
+    local x0, y0, x1, y1 = lampBox(l)
+    local key = cellKey(math.floor((x0 + x1) / 2 / LCELL), math.floor((y0 + y1) / 2 / LCELL))
+    lampGrid[key] = lampGrid[key] or {}
+    table.insert(lampGrid[key], l)
+  end
+end
+
+-- The unbroken lamp under a point, if any
+function minedecor.lampAt(x, y)
+  local cx, cy = math.floor(x / LCELL), math.floor(y / LCELL)
+  for dy = -1, 1 do
+    for dx = -1, 1 do
+      local list = lampGrid[cellKey(cx + dx, cy + dy)]
+      if list then
+        for _, l in ipairs(list) do
+          if not l.broken then
+            local x0, y0, x1, y1 = lampBox(l)
+            if x >= x0 and x <= x1 + 1 and y >= y0 and y <= y1 + 1 then
+              return l
+            end
+          end
+        end
+      end
+    end
+  end
+  return nil
+end
+
+local function breakLamp(l)
+  l.broken = true
+  local x0, y0, x1, y1 = lampBox(l)
+  local x, y = (x0 + x1) / 2, (y0 + y1) / 2
+  local fluids = require("src.fluids")
+  local effects = require("src.effects")
+  fluids.addOil(x, y + 2, l.oil)
+  l.oil = 0
+  fluids.fireBurst(x, y, 7)
+  effects.explosion(x, y, 5)
+  for _ = 1, 10 do
+    effects.particle(x, y, (love.math.random() - 0.5) * 90, -20 - love.math.random() * 60, 0.6, { 0.75, 0.78, 0.85 }, 400, true)
+  end
+  require("src.audio").play("explosion", 0.35, 1.6)
+end
+
+-- A bullet (or anything else) hits a lamp for `damage`
+function minedecor.hitLamp(l, damage)
+  if l.broken then
+    return
+  end
+  local x0, y0, x1, y1 = lampBox(l)
+  local spill = math.min(l.oil, 3 + math.floor(damage / 3))
+  if spill > 0 then
+    l.oil = l.oil - require("src.fluids").addOil((x0 + x1) / 2, y1 + 1, spill)
+  end
+  l.hp = l.hp - damage
+  if l.hp <= 0 then
+    breakLamp(l)
+  end
+end
+
+-- A blast breaks every lamp it reaches
+function minedecor.explosion(x, y, radius)
+  local cx, cy = math.floor(x / LCELL), math.floor(y / LCELL)
+  local reach = math.ceil(radius / LCELL) + 1
+  for dy = -reach, reach do
+    for dx = -reach, reach do
+      for _, l in ipairs(lampGrid[(cx + dx) .. ":" .. (cy + dy)] or {}) do
+        if not l.broken and (l.x - x) ^ 2 + (l.y - y) ^ 2 < (radius + 4) ^ 2 then
+          breakLamp(l)
+        end
+      end
+    end
+  end
+end
+
 local function lampFlame(l)
+  if l.broken then
+    return
+  end
   local x, y
   if l.hung then
     x, y = math.floor(l.x) - 1, l.y - 2
@@ -244,7 +364,7 @@ function minedecor.draw(mine, view)
   for _, t in ipairs(mine.tracks) do
     local y = t.ys[t.x0]
     if inView(view, t.x0, t.x1, y - 12, y + 12, 8) then
-      drawTrack(t)
+      drawTrack(t, view)
     end
   end
   for _, s in ipairs(mine.supports) do
@@ -281,7 +401,7 @@ end
 -- Every lantern lights its surroundings
 function minedecor.addLights(lighting, mine, view)
   for i, l in ipairs(mine.lamps) do
-    if inView(view, l.x, l.x, l.y, l.y, 110) then
+    if not l.broken and inView(view, l.x, l.x, l.y, l.y, 110) then
       lighting.add(l.x, l.y + 2, 96, 1, 0.66, 0.32, 0.95 + flicker(i) * 0.07)
     end
   end

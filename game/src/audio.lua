@@ -1664,7 +1664,9 @@ local MAX_HEARD = 460 -- px: beyond this a positional sound is silent
 -- To change one: replace the file (or point this at a different one). Its
 -- volume is set automatically from how loud the recording is (AREA_GAIN is
 -- filled in at load), so a new file needs no tuning.
-local AREA_FILES = { [1] = "audio/caves.wav" }
+local AREA_FILES = { [1] = "audio/caves.wav", [2] = "audio/saxo.wav" }
+local SHOP_FILE = "audio/shop.wav" -- the shop's music (the synthesised piano if it is missing)
+local shopGain = 1
 local AREA_GAIN = {}
 local TARGET_RMS = 0.126 -- the loudness (RMS, 0..1) a recorded theme is brought to
 local menuMusic -- the title screen's theme
@@ -1681,7 +1683,18 @@ function audio.load()
       src:setVolume(0)
       ambient[name] = src
     end
-    music = love.audio.newSource(composeShopMusic(), "static")
+    local shopOk, shopSrc = pcall(function()
+      local data = love.sound.newSoundData(SHOP_FILE)
+      local sum, n = 0, 0
+      for k = 0, data:getSampleCount() * data:getChannelCount() - 1, 40 do
+        local v = data:getSample(k)
+        sum, n = sum + v * v, n + 1
+      end
+      local rms = math.sqrt(sum / math.max(1, n))
+      shopGain = rms > 0.001 and math.max(0.3, math.min(1.5, TARGET_RMS / rms)) or 1
+      return love.audio.newSource(data, "static")
+    end)
+    music = shopOk and shopSrc or love.audio.newSource(composeShopMusic(), "static")
     music:setLooping(true)
     music:setVolume(0)
     for i, def in ipairs(TRACKS) do
@@ -1972,7 +1985,7 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
     local target = ((i == area and not inShop) and 0.09 * underground * tension or 0) * (AREA_GAIN[i] or 1)
     src:setVolume(src:getVolume() + (target * MASTER * 2 * volMaster * volMusic - src:getVolume()) * math.min(1, dt * 2))
   end
-  music:setVolume(music:getVolume() + ((inShop and 0.13 or 0) * MASTER * 2 * volMaster * volMusic - music:getVolume()) * fade)
+  music:setVolume(music:getVolume() + ((inShop and 0.13 * shopGain or 0) * MASTER * 2 * volMaster * volMusic - music:getVolume()) * fade)
 
   -- Little events over the music
   if area ~= lastArea then

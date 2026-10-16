@@ -1022,7 +1022,11 @@ PAGES.camp = function()
     y = y + F.body:getHeight() + 2 * u
     for _, kind in ipairs(meta.MOUNT_ORDER) do
       local m = meta.MOUNTS[kind]
-      local n, mounted = meta.trophyCount(kind), meta.isMounted(kind)
+      local n, level = meta.trophyCount(kind), meta.mountLevel(kind)
+      local mounted = level > 0
+      local need, cost = meta.mountNeed(kind), meta.mountCost(kind)
+      local maxed = level >= meta.MOUNT_MAX
+      local ready = not maxed and n >= need
       local h = math.floor(17 * u)
       local focused = widget({ id = "camp:mount:" .. kind, x = x, y = y, w = w, h = h, activate = function()
         if meta.mount(kind) then
@@ -1038,16 +1042,25 @@ PAGES.camp = function()
       end
       local tx, ty = x + 5 * u, y + 2.5 * u
       shadowPrint(m.name, tx, ty, F.body, (n > 0) and (focused and TEXT or DIM) or FAINT)
-      shadowPrint(n > 0 and ("Elites slain: " .. n) or "None slain yet", tx, ty + F.body:getHeight() + u * 0.5, F.small, n > 0 and DIM or FAINT)
-      shadowPrint(m.effect, x + 120 * u, ty + u, F.body, mounted and WARM or ((n > 0) and DIM or FAINT))
-      if mounted then
-        shadowPrint("Mounted", x + w - 5 * u - F.body:getWidth("Mounted"), ty + u, F.body, WARM)
-      elseif n > 0 then
-        markPrice(tostring(m.cost), x + w - 5 * u, ty + u, F.body, marks >= m.cost and meta.SIGIL_COLOR or DANGER)
+      local slain = n > 0 and ("Elites slain: " .. n) or "None slain yet"
+      if not maxed and n > 0 and n < need then
+        slain = slain .. "  (next at " .. need .. ")"
+      end
+      shadowPrint(slain, tx, ty + F.body:getHeight() + u * 0.5, F.small, n > 0 and DIM or FAINT)
+      -- what it gives now (level 1's bonus before it is mounted), and what the next level would
+      local shown = meta.mountEffect(kind, math.max(1, level))
+      shadowPrint((mounted and ("Lv " .. level .. "  ") or "") .. shown, x + 120 * u, ty + u * 0.5, F.body, mounted and WARM or ((n > 0) and DIM or FAINT))
+      if mounted and not maxed then
+        shadowPrint("next: " .. meta.mountEffect(kind, level + 1), x + 120 * u, ty + F.body:getHeight() + u * 0.5, F.small, ready and DIM or FAINT)
+      end
+      if maxed then
+        shadowPrint("Max", x + w - 5 * u - F.body:getWidth("Max"), ty + u, F.body, WARM)
+      elseif ready then
+        markPrice(tostring(cost), x + w - 5 * u, ty + u, F.body, marks >= cost and meta.SIGIL_COLOR or DANGER)
       end
       y = y + h + 3 * u
     end
-    wrapped("A mount is for good: its bonus applies in every run. Elites slain are counted per kind; slay one of a kind to be able to mount it.", x, y + u, w, F.small, FAINT)
+    wrapped("A mount is for good: its bonus applies in every run. Slay one elite of a kind to mount it, then five more of that kind for each upgrade. Each upgrade costs 1.2x the last and adds half as much as the one before.", x, y + u, w, F.small, FAINT)
     return
   end
   -- The Prospector's strongbox: gold kept between runs
@@ -1161,7 +1174,7 @@ end
 
 -- Settings ---------------------------------------------------------------------------
 
-local SETTINGS_TABS = { "Audio", "Display", "Controls" }
+local SETTINGS_TABS = { "Audio", "Display", "Controls", "Crosshair" }
 
 local function row(label, y)
   shadowPrint(label, X(70), y + (13 * u - F.body:getHeight()) / 2, F.body, DIM)
@@ -1192,6 +1205,75 @@ PAGES.settings = function()
       y = y + rh
     end
     shadowPrint("Music covers the area themes and the shop's piano; effects include the wind.", X(70), y + 2 * u, F.small, FAINT)
+  elseif settingsTab == 4 then
+    -- The crosshair: style, colour, opacity, thickness, arm length, gap, outline, and a preview
+    local hud = require("src.hud")
+    local styleNames = { "Plus", "Circle", "Dot", "X" }
+    local cur = 1
+    for i, id in ipairs(hud.CROSSHAIR_STYLES) do
+      if id == settings.get("crosshairStyle") then
+        cur = i
+      end
+    end
+    row("Style", y)
+    tabs("set:xh:style", styleNames, cur, cx, y, cw, ch, function(i)
+      settings.set("crosshairStyle", hud.CROSSHAIR_STYLES[i])
+      audio.play("page")
+    end)
+    y = y + rh
+    row("Colour", y)
+    local n = #hud.CROSSHAIR_COLORS
+    local sw = cw / n
+    for i, col in ipairs(hud.CROSSHAIR_COLORS) do
+      local sx = cx + (i - 1) * sw
+      local sel = settings.get("crosshairColor") == i
+      local focused = widget({ id = "set:xh:color" .. i, x = sx, y = y, w = sw - u, h = ch, activate = function()
+        settings.set("crosshairColor", i)
+        audio.play("select")
+      end })
+      love.graphics.setColor(0.05, 0.04, 0.07, 0.9)
+      love.graphics.rectangle("fill", sx, y, sw - u, ch, u, u)
+      love.graphics.setColor(col[1], col[2], col[3])
+      love.graphics.rectangle("fill", sx + 2 * u, y + 2 * u, sw - u - 4 * u, ch - 4 * u)
+      if sel then
+        focusFrame(sx, y, sw - u, ch, WARM)
+      elseif focused then
+        focusFrame(sx, y, sw - u, ch)
+      end
+    end
+    y = y + rh
+    -- {label, setting, lowest, highest, whole numbers?}
+    for _, s in ipairs({
+      { "Opacity", "crosshairOpacity", 0.1, 1, false },
+      { "Line thickness", "crosshairThickness", 1, 4, true },
+      { "Line length", "crosshairLength", 1, 12, true },
+      { "Gap from the centre", "crosshairGap", 0, 10, true },
+    }) do
+      row(s[1], y)
+      local lo, hi = s[3], s[4]
+      slider("set:xh:" .. s[2], cx, y, cw, ch, (settings.get(s[2]) - lo) / (hi - lo), function(v)
+        local value = lo + v * (hi - lo)
+        settings.set(s[2], s[5] and math.floor(value + 0.5) or value)
+      end)
+      y = y + rh
+    end
+    row("Outline", y)
+    toggle("set:xh:outline", cx + cw - math.floor(50 * u), y, math.floor(50 * u), ch, settings.get("crosshairOutline"), function(v)
+      settings.set("crosshairOutline", v)
+    end)
+    y = y + rh
+    -- A preview on a patch of cave wall, drawn at the game's scale
+    local pw, ph = math.floor(92 * u), math.floor(30 * u)
+    local px, py = X(200) - pw / 2, y + u
+    love.graphics.setColor(0.10, 0.09, 0.12, 0.95)
+    love.graphics.rectangle("fill", px, py, pw, ph, u, u)
+    love.graphics.setColor(0.28, 0.24, 0.20, 0.9)
+    love.graphics.rectangle("fill", px + pw * 0.55, py, pw * 0.45, ph)
+    love.graphics.push()
+    love.graphics.translate(px + pw / 2, py + ph / 2)
+    love.graphics.scale(u, u)
+    hud.drawCrosshair(0, 0)
+    love.graphics.pop()
   elseif settingsTab == 2 then
     local opts = {
       { "Fullscreen (F11)", "fullscreen" },

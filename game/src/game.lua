@@ -215,6 +215,7 @@ local function track(area)
     deathCounted = player
     meta.tithe(inv.gold) -- (the Miner's Tithe banks a share of what he carried)
     save.stat("deaths")
+    meta.onDeath()
     save.flush()
   end
 end
@@ -314,6 +315,29 @@ function game.load()
     pickups.dropItem(px + player.facing * 6, py, item, player.facing * 70, -50)
   end
   -- Kills: heal, momentum and refills for the hunter, and Death Burst
+  -- The way home from the shop after a boss: the trip costs most of the gold
+  -- and of the max health (and can kill, if he has not healed up first)
+  shop.onReturn = function(player)
+    if not inv or not scene.toCamp then
+      return
+    end
+    inv.gold = math.floor(inv.gold * (1 - shop.RETURN_GOLD) + 0.5)
+    if player:drainHealth(math.ceil(player.maxHp * shop.RETURN_HEALTH), "portal") then
+      scene.toCamp(player)
+      camera.snap(player:center())
+      audio.play("heal")
+      local cx = player:center()
+      effects.popup(cx, player.body.y - 14, "Home", { 0.7, 0.95, 1 })
+    end
+  end
+  -- A flask or dynamite upgrade is handed over the moment it is bought
+  meta.onBought = function(id)
+    if inv and id == "flask" then
+      inv.flasks = (inv.flasks or 0) + 1
+    elseif inv and id == "blasting" then
+      inv.dynamite = (inv.dynamite or 0) + 2
+    end
+  end
   enemies.onKill = function(e, fx)
     if player then
       player:onKill(e, fx)
@@ -752,14 +776,21 @@ drawFrame = function()
     love.graphics.setColor(0.7, 0.05, 0.05, 0.28 * player.hurtFlash)
     love.graphics.rectangle("fill", 0, 0, config.VIRTUAL_W, config.VIRTUAL_H)
   end
-  if not itembar.isOpen() and not menu.isOpen() and not compare.isOpen() and not player.dead then
-    hud.drawCrosshair(mouseVX, mouseVY)
-  end
   if fade > 0 then
     love.graphics.setColor(0, 0, 0, fade)
     love.graphics.rectangle("fill", 0, 0, config.VIRTUAL_W, config.VIRTUAL_H)
   end
   render.endWorld()
+
+  -- The crosshair goes on after the finished frame, so the bloom can't make it glow
+  if not itembar.isOpen() and not menu.isOpen() and not compare.isOpen() and not player.dead then
+    local sx, sy = render.toScreen(mouseVX, mouseVY)
+    love.graphics.push()
+    love.graphics.translate(sx, sy)
+    love.graphics.scale(render.scale, render.scale)
+    hud.drawCrosshair(0, 0)
+    love.graphics.pop()
+  end
 
   -- Full-resolution overlays
   local function toScreen(x, y)
@@ -767,7 +798,7 @@ drawFrame = function()
   end
   local font = hud.font(render.uiScale())
   if scene.drawScreen then
-    scene.drawScreen(toScreen, font)
+    scene.drawScreen(toScreen, font, player)
   end
   effects.drawScreen(toScreen, font)
   enemies.drawScreen(toScreen, font)
@@ -890,7 +921,7 @@ function game.keypressed(key)
   elseif input.is("roll", key) and not player.dead then
     player:pressRoll()
   elseif input.is("interact", key) and not player.dead then
-    if not npcs.interact(player) and not events.interact(player) and not chests.interact(player) and not shop.interact(player) then
+    if not npcs.interact(player) and not events.interact(player) and not (scene.interact and scene.interact(player)) and not chests.interact(player) and not shop.interact(player) then
       pickups.interact(player)
     end
   elseif key == "f6" and not player.dead then

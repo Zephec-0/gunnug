@@ -443,6 +443,22 @@ function overworld.toArena(player)
   player.physBody:setPosition(b.x + b.w / 2, b.y + b.h / 2)
 end
 
+-- E at a boss pedestal in an arena
+function overworld.interact(player)
+  return catacombs.interact(player)
+end
+
+-- Back to the camp, where the run began (the way home from the shop after a boss)
+function overworld.toCamp(player)
+  local b = player.body
+  local w = player.world
+  local x = SPAWN_X
+  b.x = x - math.floor(b.w / 2)
+  b.y = w:findGroundUnder(x, b.w, 160) - b.h
+  b.vx, b.vy = 0, 0
+  player.physBody:setPosition(b.x + b.w / 2, b.y + b.h / 2)
+end
+
 -- Called once physics exists; the cave adds its own crates when generated
 function overworld.populate(world)
   targets.clear()
@@ -1117,8 +1133,8 @@ function overworld.drawFront(camX, camY)
   catacombs.drawFront(view(camX, camY))
 end
 
-function overworld.drawScreen(toScreen, font)
-  catacombs.drawScreen(toScreen, font)
+function overworld.drawScreen(toScreen, font, player)
+  catacombs.drawScreen(toScreen, font, player)
 end
 
 -- The last of the evening sun falling straight down the mine shaft: a warm

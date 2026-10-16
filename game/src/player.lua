@@ -294,6 +294,23 @@ function Player:loseHealth(amount)
   return amount
 end
 
+-- Takes health outright (no perks, no Second Wind): the price of the way
+-- home. Dies if it is all he has. Returns true if he is still alive.
+function Player:drainHealth(amount, source)
+  if self.dead then
+    return false
+  end
+  self.lastSource, self.lastEnemy = source, nil
+  self.hp = math.max(0, self.hp - amount)
+  if self.hp <= 0 then
+    audio.play("death")
+    self.dead = true
+    playeranim.onDeath(self, self.facing)
+    return false
+  end
+  return true
+end
+
 -- Damage that wears the hunter down rather than striking him (poison gas):
 -- no knockback or invulnerability, and the blink after a hit doesn't stop it
 -- source: what is doing it (an id for src.deaths: an enemy kind, "gas", "fire"...)

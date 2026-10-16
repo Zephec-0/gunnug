@@ -266,6 +266,36 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
 }
 ]]
 
+-- The view got bigger or smaller (the boss fights pull the camera out, see
+-- render.setZoom): the light canvases are made again at the new size
+function lighting.resize(w, h)
+  if w == W and h == H then
+    return
+  end
+  W, H = w, h
+  if not canvas then
+    return
+  end
+  local linear = canvas:getFilter() == "linear"
+  canvas = love.graphics.newCanvas(W, H)
+  hazeCanvas = love.graphics.newCanvas(W, H)
+  maskCanvas = love.graphics.newCanvas(W, H)
+  maskCanvas:setFilter("nearest", "nearest")
+  if linear then
+    canvas:setFilter("linear", "linear")
+    hazeCanvas:setFilter("linear", "linear")
+  end
+  if fogA then
+    local function small()
+      local c = love.graphics.newCanvas(math.floor(W / FOG_DIV), math.floor(H / FOG_DIV))
+      c:setFilter("linear", "linear")
+      c:setWrap("clamp", "clamp")
+      return c
+    end
+    fogA, fogB = small(), small()
+  end
+end
+
 function lighting.load()
   canvas = love.graphics.newCanvas(W, H)
   hazeCanvas = love.graphics.newCanvas(W, H)

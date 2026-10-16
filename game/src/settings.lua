@@ -19,6 +19,14 @@ local DEFAULTS = {
   showFps = false,
   pauseOnFocusLoss = true,
   lastSlot = false, -- the profile played last (Continue on the title screen)
+  -- The crosshair (see src.hud.drawCrosshair)
+  crosshairStyle = "plus", -- plus, circle, dot or x
+  crosshairColor = 1, -- which of hud.CROSSHAIR_COLORS
+  crosshairOpacity = 0.9,
+  crosshairThickness = 1, -- px
+  crosshairLength = 3, -- px of each arm (the circle's ring grows by it)
+  crosshairGap = 2, -- px between the centre and the arms
+  crosshairOutline = true, -- a dark edge so it shows on bright ground
 }
 
 local values = {}

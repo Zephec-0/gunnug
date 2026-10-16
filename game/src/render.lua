@@ -185,9 +185,10 @@ function render.setLamps(list)
   lamps = list or {}
 end
 
-function render.load()
-  love.graphics.setDefaultFilter("nearest", "nearest")
-  love.graphics.setLineStyle("rough") -- crisp, un-antialiased pixel lines
+local BASE_W, BASE_H = config.VIRTUAL_W, config.VIRTUAL_H
+
+-- The canvases the frame is drawn into, at the current view size
+local function makeCanvases()
   canvas = love.graphics.newCanvas(W, H)
   postCanvas = love.graphics.newCanvas(W, H)
   local function small(div)
@@ -197,6 +198,29 @@ function render.load()
     return c
   end
   bloomA, bloomB, bloomC, bloomD = small(2), small(2), small(4), small(4)
+end
+
+-- Pulls the view out (zoom > 1 shows more of the world, 1 is normal): the
+-- virtual screen grows, so everything is drawn smaller and nothing else
+-- changes (the interface keeps its size). Remakes the canvases, so it is done
+-- in small steps, not every frame.
+function render.setZoom(z)
+  local nw, nh = math.floor(BASE_W * z + 0.5), math.floor(BASE_H * z + 0.5)
+  if nw == W and nh == H then
+    return
+  end
+  W, H = nw, nh
+  config.VIRTUAL_W, config.VIRTUAL_H = W, H
+  makeCanvases()
+  upscale = nil
+  render.layout()
+  require("src.lighting").resize(W, H)
+end
+
+function render.load()
+  love.graphics.setDefaultFilter("nearest", "nearest")
+  love.graphics.setLineStyle("rough") -- crisp, un-antialiased pixel lines
+  makeCanvases()
   local ok1, a = pcall(love.graphics.newShader, BRIGHT)
   local ok2, b = pcall(love.graphics.newShader, BLUR)
   local ok3, c = pcall(love.graphics.newShader, FINAL)
@@ -211,6 +235,7 @@ end
 
 function render.layout()
   local ww, wh = love.graphics.getDimensions()
+  render.uiBase = math.min(ww / BASE_W, wh / BASE_H) -- (the interface's scale does not follow the zoom)
   render.scale = math.min(ww / W, wh / H)
   render.offsetX = math.floor((ww - W * render.scale) / 2)
   render.offsetY = math.floor((wh - H * render.scale) / 2)
@@ -329,7 +354,7 @@ end
 
 -- Size of one UI unit in window pixels, independent of the world pixel density
 function render.uiScale()
-  return render.scale * config.UI_SCALE
+  return (render.uiBase or render.scale) * config.UI_SCALE
 end
 
 -- Window pixels -> canvas pixels

@@ -15,14 +15,35 @@ local KICK_RECOVERY = 14 -- how fast a kick eases back
 local TRAUMA_DRAIN = 1.7 -- trauma lost per second
 local MAX_SHAKE = 7 -- px at full trauma
 
+local focus -- { x, y }: a point (a boss) the view looks toward as well as at the hunter
 local kickX, kickY = 0, 0
 local trauma = 0
 local clock = 0
 
 local function target(fx, fy, aimX, aimY)
-  local tx = fx + (aimX - fx) * LOOK_AHEAD - config.VIRTUAL_W / 2
-  local ty = fy + (aimY - fy) * LOOK_AHEAD - config.VIRTUAL_H / 2
+  local W, H = config.VIRTUAL_W, config.VIRTUAL_H
+  if focus then
+    -- Between the hunter and what he fights, but never so far that he drifts to the edge
+    local mx = fx + (focus.x - fx) * 0.5
+    local my = fy + (focus.y - fy) * 0.5
+    local lx, ly = W / 2 - 90, H / 2 - 70
+    local fx2 = fx + math.max(-lx, math.min(lx, mx - fx))
+    local fy2 = fy + math.max(-ly, math.min(ly, my - fy))
+    return fx2 - W / 2, fy2 - H / 2
+  end
+  local tx = fx + (aimX - fx) * LOOK_AHEAD - W / 2
+  local ty = fy + (aimY - fy) * LOOK_AHEAD - H / 2
   return tx, ty
+end
+
+function camera.setFocus(x, y)
+  focus = x and { x = x, y = y } or nil
+end
+
+-- The view changed size: keep what was at its middle in the middle
+function camera.resized(ow, oh, nw, nh)
+  camera.x = camera.x + (ow - nw) / 2
+  camera.y = camera.y + (oh - nh) / 2
 end
 
 function camera.snap(fx, fy)

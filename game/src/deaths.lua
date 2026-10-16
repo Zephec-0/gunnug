@@ -40,6 +40,7 @@ local OTHER = {
   lava = { "Molten Rock", { "Glowing", "Merciless", "Bubbling" } },
   acid = { "Acid", { "Hissing", "Biting", "Green" } },
   dark = { "Dark", { "Unforgiving", "Endless", "Silent" } },
+  portal = { "Road Home", { "Costly", "Hasty", "Ill-Timed" } },
 }
 
 local QUIPS = {

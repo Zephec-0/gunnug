@@ -98,6 +98,7 @@ local THEMES = {
     pillars = { { 0.035, 0.035, 0.012 }, { 0.20, 0.20, 0.08 }, { 0.11, 0.11, 0.05 } },
     monsters = { ghoul = 14, bat = 10, spitter = 12, hopper = 8, bloater = 46, wisp = 40, worm = 12, roller = 8, miner = 8 }, -- gas bags and fire wisps
     boss = "queen", -- the Sulfur Queen, in the arena that fills the last quarter
+    defy = "Caverns", -- (the pedestal at the middle of the arena says "Defy the ...")
     arena = true,
     gasPools = 34, -- pools of poison gas in low spots (src.fluids)
     waterPools = 22,
@@ -122,8 +123,9 @@ local THEMES = {
     pillars = { { 0.04, 0.02, 0.02 }, { 0.26, 0.12, 0.08 }, { 0.14, 0.06, 0.05 } },
     monsters = { ghoul = 30, bat = 16, spitter = 18, hopper = 4, wisp = 36, worm = 14, roller = 14, miner = 14 },
     swarms = { swarmbat = 3, wisp = 3 },
-    waterPools = 14,
+    waterPools = 0, -- (none: the Warrens are lava country)
     lavaPools = 26,
+    prisoner = "taxidermist", -- caged in the ash (src.npcs): found once the board is up
     breakables = { { "emberPot", 30 }, { "urn", 16 }, { "pouch", 14 }, { "skullCandle", 14 }, { "lantern", 8 } },
     stalactites = 80,
   },
@@ -194,8 +196,9 @@ local THEMES = {
     arena = true,
     arenaFrac = 0.11,
     arenaH = 400,
-    arenaBanner = { "The Foreman's Hall", "Kill the Warden. He guards the way into the flooded caverns" },
-    boss = "warden",
+    arenaBanner = { "The Marble Hall", "A colossus of marble stands dormant at the middle of the hall. It guards the way into the flooded caverns" },
+    boss = "golem",
+    defy = "Stone",
     bossReward = "diving_helm",
     stalactites = 30,
     parallax = 1,
@@ -250,6 +253,7 @@ local THEMES = {
     arenaWidth = 0.72,
     arenaBanner = { "The Deep", "Something old and large turns in the dark water" },
     boss = "matron",
+    defy = "Depths",
     flood = { level = 90 },
     fish = 30,
     stalactites = 20,
@@ -299,6 +303,7 @@ local THEMES = {
     arenaBanner = { "The Summit", "Kill the Dreadbat. The way up lies beyond it" },
     arenaWon = { "The Dreadbat Has Fallen", "The gate above the arena is open: the sky lies beyond" },
     boss = "dreadbat",
+    defy = "Heights",
     parallax = 1,
     track = 1,
   },
@@ -353,6 +358,7 @@ THEMES[12] = derive(THEMES[4], {
   ambient = { 0.26, 0.15, 0.11 },
   glowCount = 300,
   lavaPools = 44,
+  prisoner = false, -- (the Warrens' cage is enough)
   monsters = { ghoul = 20, bat = 12, spitter = 14, wisp = 44, worm = 18, roller = 24, miner = 28 },
   breakables = { { "emberPot", 44 }, { "urn", 12 }, { "pouch", 12 }, { "skullCandle", 18 }, { "lantern", 8 } },
   stalactites = 60,
@@ -442,6 +448,9 @@ function catacombs.theme(i)
   return THEMES[i] or THEMES[#THEMES]
 end
 
+local zoomNow, zoomWant, zoomT = 1, 1, 0 -- (the fight camera: see updateBossCamera)
+local updateBossCamera
+
 -- Starts the areas under the surface. first: the first area's rectangle and
 -- entrance (see cavegen.generate); tiers: how deep the layout goes (4 is the
 -- whole of it, 3 stops after the Sulfur Vents).
@@ -471,10 +480,16 @@ function catacombs.start(w, first, seed, tiers)
   enemies.onBossKilled = function(e)
     for _, lv in ipairs(levels) do
       if lv.info and lv.info.arena and e.areaIndex == lv.index then
+        if lv.boss then
+          lv.boss.state = "done"
+        end
         catacombs.openGates(lv)
       end
     end
   end
+  require("src.camera").setFocus(nil)
+  require("src.render").setZoom(1)
+  zoomNow, zoomWant = 1, 1
 end
 
 -- The area (index) that the shop j (1 = left, 2 = right) of area i leads to
@@ -853,7 +868,7 @@ function catacombs.spawnProps()
           end
         end
       end
-      if info.arena and not info.flood then
+      if info.arena and not info.flood and lv.theme.boss ~= "queen" then -- (her gas would catch in them)
         for _, br in ipairs(info.arena.braziers) do
           fluids.addBrazier(br.x, br.y)
         end
@@ -875,7 +890,7 @@ function catacombs.spawnProps()
       end
       -- A prisoner's cage, with two of the things that keep them
       local pr = info.prisoner
-      if pr then
+      if pr and require("src.meta").canFind(pr.id) then
         npcs.spawnCage(pr.id, pr.x, pr.y, pr.held, pr.top)
         for _, dx in ipairs({ -46, 52 }) do
           local gx = pr.x + dx
@@ -892,18 +907,21 @@ function catacombs.spawnProps()
       local swarms = {}
       local spawned = {}
       for _, m in ipairs(info.enemies) do
-        local swarm
-        if m.swarm then
-          swarms[m.swarm] = swarms[m.swarm] or {}
-          swarm = swarms[m.swarm]
-        end
-        local e = enemies.spawn(m.kind, m.x, m.y, m.toughness, lv.row, swarm)
-        spawned[#spawned + 1] = e
-        e.reward = m.reward
-        if m.boss then
-          e.areaIndex = i
-          if m.arena then
-            e.arena = info.arena -- the boss stays inside it, and wakes when the hunter enters
+        if m.boss and m.arena then
+          -- An arena's boss isn't there until the hunter steps up to the
+          -- pedestal at the middle of the arena (catacombs.interact)
+          lv.boss = { m = m, state = "idle" }
+        else
+          local swarm
+          if m.swarm then
+            swarms[m.swarm] = swarms[m.swarm] or {}
+            swarm = swarms[m.swarm]
+          end
+          local e = enemies.spawn(m.kind, m.x, m.y, m.toughness, lv.row, swarm)
+          spawned[#spawned + 1] = e
+          e.reward = m.reward
+          if m.boss then
+            e.areaIndex = i
           end
         end
       end
@@ -920,6 +938,7 @@ local gravityScale = 1
 -- Banners as the hunter reaches each area, the shop-reached message, and gas
 function catacombs.update(player, dt)
   catacombs.spawnProps()
+  updateBossCamera(player, dt)
   fluids.update(dt, player, enemies)
   propTimer = propTimer - dt
   if propTimer <= 0 then
@@ -1010,6 +1029,17 @@ function catacombs.openGates(lv)
   end
   a.open = true
   audio.play("hatch")
+  for _, g in ipairs(a.plugs or {}) do
+    -- (the plugs that sealed the tunnels in)
+    for y = g.y0, g.y1 do
+      for x = g.x0, g.x1 do
+        world:setRaw(x, y, materials.AIR)
+      end
+    end
+    world:repaintRegion(g.x0, g.y0, g.x1, g.y1)
+    physics.rebuildRegion(g.x0, g.y0, g.x1, g.y1)
+  end
+  a.plugs = nil
   for _, g in ipairs(a.gates) do
     for y = g.y0, g.y1 do
       for x = g.x0, g.x1 do
@@ -1024,6 +1054,191 @@ function catacombs.openGates(lv)
   end
   local won = lv.theme.arenaWon or { "The Queen Has Fallen", "The gates are open. Two shops lie below, left and right: choose one" }
   hud.showBanner(won[1], won[2])
+end
+
+-- The boss pedestal ------------------------------------------------------------------
+
+-- What the pedestal says (and what it asks of the hunter), by the area's `defy`
+local function defyTitle(lv)
+  return "Defy the " .. (lv.theme.defy or "Caverns")
+end
+
+-- The pedestal's spot: the middle of the arena, on its floor
+local function altarSpot(lv)
+  local a = lv.info.arena
+  if not lv.boss.spot then
+    lv.boss.spot = { a.cx, world:findGround(math.floor(a.cx), a.floorY - 40) }
+  end
+  return lv.boss.spot[1], lv.boss.spot[2]
+end
+
+-- The pedestal the hunter is standing at, if any (a boss waiting to be woken)
+local function altarNear(px, py)
+  for _, lv in ipairs(levels) do
+    if lv.info and lv.boss and lv.boss.state == "idle" then
+      local ax, ay = altarSpot(lv)
+      if math.abs(px - ax) < 22 and math.abs(py - (ay - 8)) < 30 then
+        return lv
+      end
+    end
+  end
+  return nil
+end
+
+-- The pedestal: a stone column with a bowl and a rune that burns while a boss waits
+local function drawAltar(lv)
+  local x, y = altarSpot(lv)
+  x, y = math.floor(x), math.floor(y)
+  love.graphics.setColor(0.20, 0.19, 0.24)
+  love.graphics.rectangle("fill", x - 9, y - 3, 18, 3)
+  love.graphics.setColor(0.30, 0.29, 0.36)
+  love.graphics.rectangle("fill", x - 6, y - 15, 12, 12)
+  love.graphics.setColor(0.40, 0.39, 0.47)
+  love.graphics.rectangle("fill", x - 6, y - 15, 3, 12)
+  love.graphics.setColor(0.16, 0.15, 0.20)
+  love.graphics.rectangle("fill", x + 3, y - 15, 3, 12)
+  love.graphics.setColor(0.42, 0.41, 0.50)
+  love.graphics.rectangle("fill", x - 9, y - 18, 18, 4)
+  love.graphics.setColor(0.52, 0.51, 0.60)
+  love.graphics.rectangle("fill", x - 9, y - 18, 18, 1)
+end
+
+local function drawAltarGlow(lv)
+  local x, y = altarSpot(lv)
+  x, y = math.floor(x), math.floor(y)
+  local t = love.timer.getTime()
+  local live = lv.boss.state == "idle"
+  local pulse = 0.6 + 0.35 * math.sin(t * 3)
+  local c = live and { 1, 0.45, 0.25 } or { 0.5, 0.2, 0.15 }
+  love.graphics.setColor(c[1], c[2], c[3], live and pulse or 0.4)
+  love.graphics.rectangle("fill", x - 3, y - 11, 6, 1)
+  love.graphics.rectangle("fill", x - 1, y - 13, 2, 5)
+  if live then
+    love.graphics.setColor(1, 0.7, 0.3, 0.5 + 0.3 * pulse)
+    love.graphics.rectangle("fill", x - 2, y - 24 - math.floor(pulse * 2), 4, 6)
+    love.graphics.setColor(1, 0.95, 0.7)
+    love.graphics.rectangle("fill", x - 1, y - 21, 2, 3)
+  end
+end
+
+-- Seals the tunnels into the arena with iron until the boss is dead
+local function sealArena(lv)
+  local a = lv.info.arena
+  a.plugs = {}
+  for _, y in ipairs({ a.top - 12, a.top - 22 }) do
+    local x = a.x0 - 4
+    while x <= a.x1 + 4 do
+      if not world:isSolid(x, y) then
+        local xa = x
+        while x <= a.x1 + 4 and not world:isSolid(x, y) do
+          x = x + 1
+        end
+        a.plugs[#a.plugs + 1] = { x0 = xa - 3, x1 = x + 2, y0 = y - 3, y1 = y + 3 }
+      else
+        x = x + 1
+      end
+    end
+  end
+  for _, g in ipairs(a.plugs) do
+    for y = g.y0, g.y1 do
+      for x = g.x0, g.x1 do
+        if not world:isSolid(x, y) then
+          world:setRaw(x, y, materials.IRON)
+        end
+      end
+    end
+    world:repaintRegion(g.x0, g.y0, g.x1, g.y1)
+    physics.rebuildRegion(g.x0, g.y0, g.x1, g.y1)
+  end
+end
+
+-- The hunter steps up to the pedestal: the arena is sealed, what else lives in
+-- it is cleared out, and the boss comes
+function catacombs.startBoss(lv, player)
+  local a, m = lv.info.arena, lv.boss.m
+  lv.boss.state = "fight"
+  sealArena(lv)
+  for _, e in ipairs(enemies.all()) do
+    local cx, cy = e.body.x + e.body.w / 2, e.body.y + e.body.h / 2
+    if not e.dead and not e.def.boss and cx > a.x0 and cx < a.x1 and cy > a.top - 40 and cy < a.floorY + 40 then
+      enemies.vanish(e)
+    end
+  end
+  local def = enemies.defs[m.kind]
+  local ax = altarSpot(lv)
+  local x = ax + (def.ground and 190 or 0)
+  local y = def.ground and a.floorY - 70 or a.top + 110
+  local e = enemies.spawn(m.kind, x, y, m.toughness, lv.row)
+  e.reward = m.reward
+  e.areaIndex = lv.index
+  e.arena = a
+  if m.kind ~= "queen" then
+    e.state = "chase"
+    e.seesPlayer = true
+  end
+  lv.boss.e = e
+  audio.play("explosion", 1, 0.4)
+  require("src.camera").shake(0.7)
+  effects.ring(x, y, 80, { 1, 0.85, 0.5 })
+  hud.showBanner(defyTitle(lv), (lv.theme.arenaBanner and lv.theme.arenaBanner[1] or "The Arena") .. ": the way out is sealed until the boss falls")
+end
+
+-- E at the pedestal
+function catacombs.interact(player)
+  local px, py = player:center()
+  local lv = altarNear(px, py)
+  if not lv then
+    return false
+  end
+  catacombs.startBoss(lv, player)
+  return true
+end
+
+-- During a boss fight the camera pulls out a little and looks between the
+-- hunter and the boss, so it can't be lost off screen
+local FIGHT_ZOOM = 1.35
+
+local function stepZoom(dt)
+  zoomT = zoomT - dt
+  if zoomNow ~= zoomWant and zoomT <= 0 then
+    zoomT = 0.07
+    local nz = zoomNow < zoomWant and math.min(zoomWant, zoomNow + 0.05) or math.max(zoomWant, zoomNow - 0.05)
+    local render, camera, config = require("src.render"), require("src.camera"), require("src.config")
+    local ow, oh = config.VIRTUAL_W, config.VIRTUAL_H
+    render.setZoom(nz)
+    camera.resized(ow, oh, config.VIRTUAL_W, config.VIRTUAL_H)
+    zoomNow = nz
+  end
+end
+
+updateBossCamera = function(player, dt)
+  local fight
+  for _, lv in ipairs(levels) do
+    if lv.boss and lv.boss.state == "fight" and lv.boss.e and not lv.boss.e.dead then
+      fight = lv.boss.e
+    end
+  end
+  local camera = require("src.camera")
+  if fight then
+    -- (a split Queen: the nearest living piece of her)
+    local px, py = player:center()
+    local best, bd
+    for _, e in ipairs(enemies.all()) do
+      if not e.dead and e.areaIndex == fight.areaIndex and e.def.boss then
+        local d = (e.body.x - px) ^ 2 + (e.body.y - py) ^ 2
+        if not bd or d < bd then
+          best, bd = e, d
+        end
+      end
+    end
+    best = best or fight
+    camera.setFocus(best.body.x + best.body.w / 2, best.body.y + best.body.h / 2)
+    zoomWant = FIGHT_ZOOM
+  else
+    camera.setFocus(nil)
+    zoomWant = 1
+  end
+  stepZoom(dt)
 end
 
 -- Is the point inside a shop room?
@@ -1076,6 +1291,10 @@ function catacombs.addLights(lighting, view)
   local t = love.timer.getTime()
   for _, lv in ipairs(levels) do
     local info = inArea(lv, view) and lv.info
+    if info and lv.boss and lv.boss.state == "idle" and info.arena and visible(view, info.arena.cx, info.arena.floorY, 160) then
+      local ax, ay = altarSpot(lv)
+      lighting.add(ax, ay - 20, 80, 1, 0.5, 0.28, 0.8 + 0.15 * math.sin(t * 3))
+    end
     if info then
       for i, c in ipairs(candles(info)) do
         if visible(view, c[1], c[2], 120) then
@@ -1127,6 +1346,9 @@ function catacombs.drawDecor(view)
     local info = inArea(lv, view) and lv.info
     if info then
       local drawGlow = lv.theme.crystals and drawCrystals or drawFungus
+      if lv.boss and lv.boss.state ~= "done" and lv.info.arena and visible(view, lv.info.arena.cx, lv.info.arena.floorY, 160) then
+        drawAltar(lv)
+      end
       for i, g in ipairs(info.glows) do
         if visible(view, g[1], g[2], 8) then
           drawGlow(g[1], g[2], i, lv.theme.stalk)
@@ -1211,6 +1433,9 @@ function catacombs.drawEmissive(view)
     local info = inArea(lv, view) and lv.info
     if info then
       local g = lv.theme.glow
+      if lv.boss and lv.boss.state ~= "done" and info.arena and visible(view, info.arena.cx, info.arena.floorY, 160) then
+        drawAltarGlow(lv)
+      end
       if info.mine then
         minedecor.drawEmissive(info.mine, view)
       end
@@ -1250,7 +1475,25 @@ function catacombs.drawFront(view)
   fluids.drawFront(view)
 end
 
-function catacombs.drawScreen(toScreen, font)
+function catacombs.drawScreen(toScreen, font, player)
+  if player and not player.dead then
+    local px, py = player:center()
+    local lv = altarNear(px, py)
+    if lv then
+      local ax, ay = altarSpot(lv)
+      local sx, sy = toScreen(ax, ay - 30)
+      love.graphics.setFont(font)
+      local key = require("src.input").label("interact")
+      local lines = { { "[" .. key .. "] " .. defyTitle(lv), { 1, 0.85, 0.6 } }, { "Seals the arena until the boss falls", { 0.85, 0.85, 0.92 } } }
+      for i, l in ipairs(lines) do
+        local x, y = math.floor(sx - font:getWidth(l[1]) / 2), math.floor(sy - font:getHeight() * (#lines - i + 1))
+        love.graphics.setColor(0, 0, 0, 0.85)
+        love.graphics.print(l[1], x + 2, y + 2)
+        love.graphics.setColor(l[2])
+        love.graphics.print(l[1], x, y)
+      end
+    end
+  end
   for _, lv in ipairs(levels) do
     if lv.info then
       for _, s in ipairs(lv.info.shops) do

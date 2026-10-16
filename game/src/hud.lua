@@ -552,18 +552,78 @@ function hud.drawDeath(scale)
   shadowText(sub, math.floor((ww - f:getWidth(sub)) / 2), y + big:getHeight() + 6 * scale, f)
 end
 
+-- The crosshair, set in Settings > Crosshair: style (a plus, a ring, a dot or
+-- an X), colour, opacity, line thickness, arm length and the gap round the
+-- centre, with or without a dark outline. Drawn at (vx, vy) in game pixels.
+hud.CROSSHAIR_COLORS = {
+  { 1, 1, 1 },
+  { 0.3, 1, 0.35 },
+  { 1, 0.95, 0.3 },
+  { 0.3, 0.95, 1 },
+  { 1, 0.35, 0.35 },
+  { 1, 0.45, 0.95 },
+  { 1, 0.62, 0.2 },
+}
+hud.CROSSHAIR_STYLES = { "plus", "circle", "dot", "x" }
+
+-- Calls rect(x, y, w, h) for every bar of the shape (not the ring)
+local function crosshairBars(style, x, y, t, len, gap, rect)
+  local half = math.floor(t / 2)
+  if style == "dot" then
+    local d = t + 1
+    rect(x - math.floor(d / 2), y - math.floor(d / 2), d, d)
+  elseif style == "x" then
+    for i = gap, gap + len - 1 do
+      for _, sx in ipairs({ -1, 1 }) do
+        for _, sy in ipairs({ -1, 1 }) do
+          rect(x + sx * i - half, y + sy * i - half, t, t)
+        end
+      end
+    end
+  else
+    rect(x - gap - len, y - half, len, t)
+    rect(x + gap + 1, y - half, len, t)
+    rect(x - half, y - gap - len, t, len)
+    rect(x - half, y + gap + 1, t, len)
+  end
+end
+
 function hud.drawCrosshair(vx, vy)
+  local settings = require("src.settings")
+  local style = settings.get("crosshairStyle") or "plus"
+  local c = hud.CROSSHAIR_COLORS[settings.get("crosshairColor")] or hud.CROSSHAIR_COLORS[1]
+  local a = settings.get("crosshairOpacity") or 0.9
+  local t = math.max(1, math.floor(settings.get("crosshairThickness") or 1))
+  local len = math.max(1, math.floor(settings.get("crosshairLength") or 3))
+  local gap = math.max(0, math.floor(settings.get("crosshairGap") or 2))
+  local outline = settings.get("crosshairOutline")
   local x, y = math.floor(vx), math.floor(vy)
-  love.graphics.setColor(0, 0, 0, 0.5)
-  love.graphics.rectangle("fill", x - 5, y + 1, 3, 1)
-  love.graphics.rectangle("fill", x + 3, y + 1, 3, 1)
-  love.graphics.rectangle("fill", x + 1, y - 5, 1, 3)
-  love.graphics.rectangle("fill", x + 1, y + 3, 1, 3)
-  love.graphics.setColor(1, 1, 1, 0.9)
-  love.graphics.rectangle("fill", x - 5, y, 3, 1)
-  love.graphics.rectangle("fill", x + 3, y, 3, 1)
-  love.graphics.rectangle("fill", x, y - 5, 1, 3)
-  love.graphics.rectangle("fill", x, y + 3, 1, 3)
+  local function rectFill(rx, ry, w, h)
+    love.graphics.rectangle("fill", rx, ry, w, h)
+  end
+  local function rectEdge(rx, ry, w, h)
+    love.graphics.rectangle("fill", rx - 1, ry - 1, w + 2, h + 2)
+  end
+  love.graphics.push("all")
+  love.graphics.setLineStyle("rough")
+  local r = gap + len + 1
+  if outline then
+    love.graphics.setColor(0, 0, 0, 0.6 * a)
+    if style == "circle" then
+      love.graphics.setLineWidth(t + 2)
+      love.graphics.circle("line", x + 0.5, y + 0.5, r, 28)
+    else
+      crosshairBars(style, x, y, t, len, gap, rectEdge)
+    end
+  end
+  love.graphics.setColor(c[1], c[2], c[3], a)
+  if style == "circle" then
+    love.graphics.setLineWidth(t)
+    love.graphics.circle("line", x + 0.5, y + 0.5, r, 28)
+  else
+    crosshairBars(style, x, y, t, len, gap, rectFill)
+  end
+  love.graphics.pop()
 end
 
 return hud

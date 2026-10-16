@@ -323,7 +323,7 @@ function events.interact(player)
       inv.keys = inv.keys - 1
       events.openVault(v)
     else
-      effects.popup(px, py - 14, "Locked: it needs a key (or a lot of digging)", { 0.8, 0.8, 0.85 })
+      effects.popup(px, py - 14, "Locked: it needs a key", { 0.8, 0.8, 0.85 })
       audio.play("deny")
     end
     return true

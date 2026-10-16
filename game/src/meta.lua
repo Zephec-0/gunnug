@@ -24,6 +24,8 @@ local meta = {}
 
 -- Called as onEarn(amount, reason) whenever marks are earned (for the HUD)
 meta.onEarn = nil
+-- Called as onBought(id) when a camp upgrade is bought (src.game hands over what it gives at once)
+meta.onBought = nil
 
 local GATED = { weapon = true, ammo = true, attachment = true }
 
@@ -107,7 +109,8 @@ meta.PEOPLE.bartender = {
 }
 meta.PEOPLE.taxidermist = {
   name = "The Taxidermist",
-  found = "Arrives once you carry an elite's trophy home",
+  found = "Caged in the Cinder Warrens, once you have carried an elite's trophy home",
+  held = "cage",
   blurb = "Mounts the trophies of the elites you have slain. Each kind he mounts gives you a small bonus in every run, for good.",
   greeting = {
     "Don't touch the glass eyes. They watch.",
@@ -118,15 +121,21 @@ meta.PEOPLE.taxidermist = {
 }
 
 -- What mounting each kind's trophy gives (a perk-style fx table), and its name
+-- fx is the first level's bonus; each level after it adds half as much as the
+-- one before (see meta.mountScale), so a kind's bonus tapers off: a Ghoul's
+-- is +10, +15, +17, +19... max health. fmt shows the number for a level.
 meta.MOUNTS = {
-  ghoul = { name = "Ghoul", effect = "+10 max health", fx = { maxHp = 10 }, cost = 3 },
-  bat = { name = "Cave Bat", effect = "+4% movement speed", fx = { speed = 1.04 }, cost = 3 },
-  spitter = { name = "Spitter", effect = "reloads 5% faster", fx = { reload = 0.95 }, cost = 3 },
-  hopper = { name = "Mire Hopper", effect = "+5% jump height", fx = { jump = 1.05 }, cost = 3 },
-  bloater = { name = "Bloater", effect = "take 4% less damage", fx = { dmgTaken = 0.96 }, cost = 3 },
-  miner = { name = "Skeleton Miner", effect = "+6% gold from everything", fx = { gold = 1.06 }, cost = 3 },
-  roller = { name = "Cave Roller", effect = "kicks hit 20% harder", fx = { kickDamage = 1.2 }, cost = 3 },
+  ghoul = { name = "Ghoul", fmt = "+%d max health", base = 10, fx = { maxHp = 10 } },
+  bat = { name = "Cave Bat", fmt = "+%d%% movement speed", base = 4, fx = { speed = 1.04 } },
+  spitter = { name = "Spitter", fmt = "reloads %d%% faster", base = 5, fx = { reload = 0.95 } },
+  hopper = { name = "Mire Hopper", fmt = "+%d%% jump height", base = 5, fx = { jump = 1.05 } },
+  bloater = { name = "Bloater", fmt = "take %d%% less damage", base = 4, fx = { dmgTaken = 0.96 } },
+  miner = { name = "Skeleton Miner", fmt = "+%d%% gold from everything", base = 6, fx = { gold = 1.06 } },
+  roller = { name = "Cave Roller", fmt = "kicks hit %d%% harder", base = 20, fx = { kickDamage = 1.2 } },
 }
+meta.MOUNT_MAX = 8 -- the most levels a kind can be mounted to
+meta.MOUNT_COST = 5 -- marks for a kind's first mount; each level costs 1.2x the last (rounded down)
+meta.MOUNT_KILLS = 5 -- more elites of a kind to slay before each upgrade
 -- The Bartender's house rules: each makes the next run harder and pays more marks
 meta.RULES = {
   { id = "rotgut", name = "Rotgut", desc = "Monsters have 40% more health.", marks = 1.35, enemyHp = 1.4 },
@@ -320,10 +329,28 @@ function meta.lockedItem(random)
   return items.new(pool[random(1, #pool)])
 end
 
+-- The Gatling gun is the first boss's prize: it turns up nowhere else until
+-- a boss has fallen
+function meta.gatlingOpen()
+  local p = profile()
+  return p == nil or (p.stats.bosses or 0) > 0
+end
+
+-- No boss has been slain yet on this profile (checked as the first one drops its prize)
+function meta.firstBoss()
+  local p = profile()
+  return p ~= nil and (p.stats.bosses or 0) == 0
+end
+
 -- A random locked gun archetype (nil if none are left)
 function meta.lockedArchetype(random)
   random = random or love.math.random
-  local pool = meta.locked("weapon")
+  local pool = {}
+  for _, id in ipairs(meta.locked("weapon")) do
+    if id ~= "gatling" or meta.gatlingOpen() then
+      pool[#pool + 1] = id
+    end
+  end
   if #pool == 0 or not profile() then
     return nil
   end
@@ -431,10 +458,60 @@ end
 
 -- The camp ----------------------------------------------------------------------------
 
+-- How the camp and the dungeon open up, run by run (a new profile starts with
+-- nothing but the site):
+--   first run          nobody to find, no elites
+--   after one death    elites spawn; the Gunsmith and the Prospector can be found
+--   after two deaths   the Apothecary and the Cartographer can be found
+--   an elite slain, then a death: the bounty board goes up, and the
+--                      Taxidermist can be found
+--   first boss slain   the Bartender sets up the saloon
+local function deaths()
+  local p = profile()
+  return p and (p.stats.deaths or 0) or 0
+end
+
+function meta.elitesOn()
+  return profile() == nil or deaths() >= 1
+end
+
+-- Called when a run ends in death: if an elite fell in the profile's life so far, the board goes up
+function meta.onDeath()
+  local p = profile()
+  if p and not p.board and meta.trophyTotal() > 0 then
+    p.board = true
+    save.touch()
+  end
+end
+
+function meta.boardOpen()
+  local p = profile()
+  if not p then
+    return true
+  end
+  return p.board == true or (meta.trophyTotal() > 0 and deaths() >= 1) -- (older saves: the same rule from what they have)
+end
+
+-- May this person's cage be there to find in the dungeon yet?
+function meta.canFind(id)
+  local p = profile()
+  if not p then
+    return true
+  end
+  if id == "gunsmith" or id == "prospector" then
+    return deaths() >= 1
+  elseif id == "apothecary" or id == "cartographer" then
+    return deaths() >= 2
+  elseif id == "taxidermist" then
+    return meta.boardOpen()
+  end
+  return true
+end
+
 function meta.atCamp(id)
   local p = profile()
-  if p and id == "taxidermist" then
-    return meta.trophyTotal() > 0 -- (nobody to free: he turns up with the first trophy)
+  if p and id == "taxidermist" and p.camp.taxidermist ~= true then
+    return next(p.mounted) ~= nil -- (older saves: he came with the first mount)
   end
   if p and id == "bartender" then
     return (p.stats.bosses or 0) > 0 -- (and the first boss)
@@ -456,20 +533,62 @@ function meta.trophyCount(kind)
   return p and p.trophies[kind] or 0
 end
 
-function meta.isMounted(kind)
+-- How many times a kind has been mounted / upgraded (0 = not at all; saves
+-- from before levels hold `true`, which counts as 1)
+function meta.mountLevel(kind)
   local p = profile()
-  return p ~= nil and p.mounted[kind] == true
+  local v = p and p.mounted[kind]
+  if v == true then
+    return 1
+  end
+  return tonumber(v) or 0
 end
 
--- Mounts a kind's trophy (needs one slain, and the marks). Returns true if paid.
+function meta.isMounted(kind)
+  return meta.mountLevel(kind) > 0
+end
+
+-- What the next level costs in marks: 5 for the first, then 1.2x the one before
+function meta.mountCost(kind)
+  local cost = meta.MOUNT_COST
+  for _ = 1, meta.mountLevel(kind) do
+    cost = math.floor(cost * 1.2)
+  end
+  return cost
+end
+
+-- Elites of the kind that must have been slain before the next level: one for
+-- the first mount, then five more each time
+function meta.mountNeed(kind)
+  local level = meta.mountLevel(kind)
+  return level == 0 and 1 or 1 + meta.MOUNT_KILLS * level
+end
+
+-- How much of the first level's bonus a level adds up to: 1, 1.5, 1.75, ...
+function meta.mountScale(level)
+  return 2 * (1 - 0.5 ^ level)
+end
+
+-- The bonus's text at a level
+function meta.mountEffect(kind, level)
+  local m = meta.MOUNTS[kind]
+  return string.format(m.fmt, math.floor(m.base * meta.mountScale(level) + 0.5))
+end
+
+-- Mounts a kind's trophy, or upgrades the mount (needs the elites slain and
+-- the marks). Returns true if paid.
 function meta.mount(kind)
   local p = profile()
   local m = meta.MOUNTS[kind]
-  if not p or not m or meta.isMounted(kind) or meta.trophyCount(kind) <= 0 or p.marks < m.cost then
+  if not p or not m then
     return false
   end
-  p.marks = p.marks - m.cost
-  p.mounted[kind] = true
+  local level, cost = meta.mountLevel(kind), meta.mountCost(kind)
+  if level >= meta.MOUNT_MAX or meta.trophyCount(kind) < meta.mountNeed(kind) or p.marks < cost then
+    return false
+  end
+  p.marks = p.marks - cost
+  p.mounted[kind] = level + 1
   meta.mountsDirty = true
   save.touch()
   save.flush()
@@ -542,11 +661,12 @@ function meta.mountFx()
     end
     for kind in pairs(p.mounted) do
       local m = meta.MOUNTS[kind]
+      local scale = meta.mountScale(math.max(1, meta.mountLevel(kind)))
       for k, v in pairs(m and m.fx or {}) do
         if k == "speed" or k == "reload" or k == "jump" or k == "dmgTaken" or k == "gold" or k == "kickDamage" then
-          out[k] = (out[k] or 1) * v
+          out[k] = (out[k] or 1) * (1 + (v - 1) * scale)
         else
-          out[k] = (out[k] or 0) + v
+          out[k] = (out[k] or 0) + v * scale
         end
       end
     end
@@ -592,6 +712,9 @@ function meta.buy(id)
   p.upgrades[id] = meta.tier(id) + 1
   meta.mountsDirty = true
   save.flush()
+  if meta.onBought then
+    meta.onBought(id)
+  end
   return true
 end
 

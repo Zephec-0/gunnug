@@ -335,9 +335,33 @@ enemies.defs.queen = giant("bloater", {
   puff = true,
   globSpeed = 210, globGravity = 60, globDamage = 14,
   holdDist = 60, -- she keeps this far from the hunter (plus her own size); dashes in when further
-  splitDepth = 1, -- below 33% health she splits in two, down to this many splits in a line
+  splitDepth = 3, -- below 33% health she splits in two, and every piece splits again below half of its own, down to this many splits in a line (like a slime)
   splitDamage = 0.75, -- each split deals this much of the damage of the one before
 })
+
+-- The Marble Colossus: the Quarry's boss, a lumbering golem of veined marble.
+-- It swipes, hurls stones, stomps up a wave of rock and sweeps a beam from its
+-- eye; twice (at two thirds and a third of its health) it kneels in a crystal
+-- shell, invulnerable, while little golems come in from both sides: slay them
+-- all and the shell breaks, leaving it open to attack.
+enemies.defs.golem = {
+  name = "The Marble Colossus",
+  boss = true, anchored = true, ground = true,
+  w = 56, h = 84, hp = 1500, speed = 26, jump = 0,
+  sight = 760, forget = 3000, damage = 22,
+  knockback = 0.02, knockMul = 0.06, gold = { 220, 280 }, weight = 40,
+  clawDig = 0, clawPower = 0,
+  spriteW = 56, spriteH = 84, scale = 1,
+  blood = { 0.8, 0.78, 0.84 },
+}
+enemies.defs.minigolem = {
+  ground = true, w = 14, h = 20, hp = 60, speed = 52, jump = 220,
+  lungeRange = 22, lungeSpeed = 120, lungeLift = 90, lungeCooldown = 1.2,
+  windup = 0.35, strike = 0.35, sight = 900, forget = 3000,
+  damage = 12, knockback = 0.3, gold = { 4, 8 }, pushForce = 120, weight = 5,
+  clawDig = 0, clawPower = 0,
+  blood = { 0.8, 0.78, 0.84 },
+}
 
 -- Names and field notes for the compendium's bestiary (src.compendium).
 -- Bosses carry their own name; `compendium = false` keeps a kind out of it.
@@ -359,6 +383,8 @@ local LORE = {
   matron = { nil, "A giant hopper that bounds in great leaps, and calls her brood to her side." },
   behemoth = { nil, "A giant bloater, pouring out gas. Burst in fire, it goes up in a huge blast." },
   dreadbat = { nil, "A bat three times the size. It needs no line of sight: it screeches, then dives at you through the rock itself." },
+  golem = { nil, "A lumbering giant of veined marble. It swipes, hurls stones, stomps up waves of rock and sweeps a beam from its eye. Now and then it kneels in a crystal shell that nothing can break until the little golems it calls are all dead." },
+  minigolem = { "Marble Golemling", "A chip off the old colossus. Slow to start, hard to stop." },
   queen = { nil, "A crowned bloater the size of a house, queen of the Sulfur Vents. Immune to fire, she flies through the walls of her arena, and splits in two when badly hurt." },
 }
 for kind, l in pairs(LORE) do
@@ -371,7 +397,7 @@ enemies.defs.dummy.compendium = false
 -- The order monsters are listed in the bestiary (anything missing is listed after)
 enemies.order = {
   "ghoul", "bat", "swarmbat", "spitter", "hopper", "bloater", "wisp", "worm", "miner", "roller", "piranha",
-  "warden", "dreadbat", "matron", "behemoth", "queen",
+  "warden", "dreadbat", "matron", "behemoth", "queen", "golem", "minigolem",
 }
 
 -- Queen remnant sizes by generation: whole-number sprite scales (the sac is 14 px)
@@ -398,6 +424,7 @@ local DRAW_REF, GLOW_REF = {}, {} -- filled in once the drawing functions exist 
 
 local list = {}
 local globs = {}
+local golemStones, golemWaves = {}, {} -- the Marble Colossus's thrown stones and stone waves
 local sticks = {} -- thrown dynamite
 local clock = 0 -- game time (stops while paused), for the DPS meter
 
@@ -407,6 +434,7 @@ enemies.onKill = nil
 
 function enemies.clear()
   list, globs, sticks, near = {}, {}, {}, {}
+  golemStones, golemWaves = {}, {}
 end
 
 function enemies.count()
@@ -443,6 +471,7 @@ end
 function enemies.all()
   return list
 end
+
 
 -- The living monsters within ~1000 px of the hunter (rebuilt every frame by
 -- enemies.update): what drawing, lights, blasts and fluids need to look at,
@@ -612,6 +641,20 @@ local function removePhysics(e)
   end
 end
 
+-- Removes a monster outright (no loot, no kill counted): the arena's others when a boss comes
+function enemies.vanish(e)
+  if e.dead then
+    return
+  end
+  e.dead = true
+  removePhysics(e)
+  local cx, cy = center(e)
+  effects.ring(cx, cy, 14, { 0.8, 0.7, 1 })
+  for _ = 1, 8 do
+    effects.particle(cx, cy, (love.math.random() - 0.5) * 120, (love.math.random() - 0.5) * 120, 0.5, { 0.8, 0.7, 1 }, 0, true)
+  end
+end
+
 -- Elites (design doc §11a-iii) -------------------------------------------------------
 -- A few monsters in every area are elite: three times the health, a quarter
 -- more damage, more gold, a pulsing tint in their affix's colour with a crest
@@ -686,6 +729,9 @@ end
 -- area's depth. From the second tier on, some get two affixes.
 function enemies.rollElites(monsters, tier, random)
   random = random or love.math.random
+  if not require("src.meta").elitesOn() then
+    return {} -- (the first run has none)
+  end
   local pool = {}
   for _, e in ipairs(monsters) do
     if ELITE_KINDS[e.kind] and not e.def.boss and not e.swarm and not e.elite then
@@ -765,6 +811,16 @@ end
 
 local function die(e)
   e.dead = true
+  if e.kind == "golem" then
+    -- Its little ones crumble with it
+    for _, m in ipairs(e.minis or {}) do
+      if not m.dead then
+        m.dead = true
+        removePhysics(m)
+      end
+    end
+    golemStones, golemWaves = {}, {}
+  end
   audio.play("enemy_die")
   removePhysics(e)
   local cx, cy = center(e)
@@ -777,6 +833,7 @@ local function die(e)
   if e.elite then
     eliteDies(e, cx, cy)
   end
+  local firstBoss = e.def.boss and require("src.meta").firstBoss() -- (before the kill is counted)
   if enemies.onKill then
     enemies.onKill(e, e.lastFx)
   end
@@ -807,8 +864,21 @@ local function die(e)
         pickups.maybeDropItem(cx + (r() - 0.5) * 10, cy, 1)
       end
     end
+    -- The weapon is never worse than an A. The first boss ever slain always
+    -- gives the Gatling gun (it turns up nowhere before that).
     local lockedGun = r() < 0.4 and meta.lockedArchetype() or nil
-    pickups.dropWeapon(cx, cy, require("src.guns").generate(lockedGun, nil, 0.5))
+    if firstBoss and not meta.isUnlocked("weapon", "gatling") then
+      lockedGun = "gatling"
+    end
+    local guns, gunInfo = require("src.guns"), require("src.gunInfo")
+    local prize
+    for _ = 1, 60 do
+      prize = guns.generate(lockedGun, nil, 0.5)
+      if gunInfo.gradeIndex(prize) >= 4 then
+        break
+      end
+    end
+    pickups.dropWeapon(cx, cy, prize)
     if e.reward then
       pickups.dropPerk(cx + 12, cy - 6, e.reward, 30, -80) -- (what this boss guards, see src.cavegen's bossReward)
     end
@@ -955,6 +1025,15 @@ end
 -- Damages an enemy. (dx, dy) is the hit direction, force the impact
 function enemies.damage(e, amount, dx, dy, force, crit, fx)
   if e.dead then
+    return
+  end
+  if e.invuln then
+    -- The Colossus in its shell: everything glances off
+    audio.playAt("clank", e.body.x, e.body.y, 0.4, 1.7)
+    local ax, ay = center(e)
+    for _ = 1, 2 do
+      effects.particle(ax + (love.math.random() - 0.5) * e.body.w, ay + (love.math.random() - 0.5) * e.body.h, (love.math.random() - 0.5) * 120, -love.math.random() * 80, 0.2, { 0.7, 0.9, 1 }, 200, true)
+    end
     return
   end
   if e.acid and e.acid > 0 then
@@ -2186,7 +2265,7 @@ local function queenAttack(e, px, py, aimAng, stage, gen, sf)
     e.minions = alive
     for side = -1, 1, 2 do
       if #e.minions < 3 + stage then
-        local kind = (stage == 1 or (stage == 3 and side == -1)) and "bloater" or "wisp"
+        local kind = "bloater" -- (never wisps: their flames set her own gas alight)
         local m = enemies.spawn(kind, cx + side * 30 * sf - 7, cy + 10 * sf, e.toughness * 0.4, e.level)
         m.state = "chase"
         e.minions[#e.minions + 1] = m
@@ -2221,7 +2300,7 @@ local function updateQueen(e, dt, world, player, px, py)
       return
     end
   end
-  if frac < 0.33 and gen < def.splitDepth then
+  if frac < (gen == 0 and 0.33 or 0.5) and gen < def.splitDepth then
     splitQueen(e)
     return
   end
@@ -2236,6 +2315,7 @@ local function updateQueen(e, dt, world, player, px, py)
   e.qt = e.qt or 2
   local timeScale = 1 + gen * 0.35
   local aimAng = math.atan2(py - cy, px - cx)
+  e.aimAng = aimAng -- (her eyes follow the hunter)
   e.vulnerable = e.qs == "recover" and e.qt > 0.2
 
   -- A faint leak from her sac, no more
@@ -3042,6 +3122,367 @@ local function updatePiranha(e, dt, world, player, px, py)
   end
 end
 
+-- The Marble Colossus ------------------------------------------------------------
+local GOLEM_ATTACKS = {
+  -- name = { windup, act, recover } in seconds
+  swipe = { 0.65, 0.25, 0.55 },
+  throw = { 0.8, 0.2, 0.6 },
+  stomp = { 0.95, 0.3, 0.9 },
+  beam = { 1.15, 2.2, 1.0 },
+}
+
+-- Where its eye is, and the hand that throws
+local function golemEye(e)
+  local b = e.body
+  return b.x + b.w / 2 + e.facing * 9, b.y + 17
+end
+
+local function golemHurtPlayer(e, player, dmg, fx, fy)
+  if player.dead then
+    return false
+  end
+  if player:isDodging() then
+    player:dodged()
+    return false
+  end
+  return player:hurt(math.max(1, math.floor(dmg * e.dmgMul + 0.5)), fx, fy, "golem")
+end
+
+local function golemSpawnMinis(e, world, n)
+  local a = e.arena
+  local cx = center(e)
+  e.minisLeft = n
+  e.miniT = 0.2
+  e.minis = e.minis or {}
+  e.miniSide = e.miniSide or -1
+  e.shellX0 = a and a.x0 + 40 or cx - 360
+  e.shellX1 = a and a.x1 - 40 or cx + 360
+end
+
+local function golemStartShell(e, world, n)
+  e.gs, e.sub, e.gt = "shell", nil, 0
+  e.invuln, e.vulnerable = true, false
+  e.body.vx = 0
+  audio.play("explosion", 0.8, 0.45)
+  effects.ring(center(e), e.body.y + e.body.h / 2, 90, { 0.6, 0.85, 1 })
+  effects.popup(center(e), e.body.y - 10, "SHELL", { 0.6, 0.85, 1 })
+  require("src.camera").shake(0.5)
+  golemSpawnMinis(e, world, n)
+end
+
+local function golemFloorAt(world, x, fromY)
+  return world:findGround(math.floor(x), math.floor(fromY))
+end
+
+local function golemBeginAttack(e, name, px, py)
+  local t = GOLEM_ATTACKS[name]
+  e.gs, e.sub, e.gt, e.gd = name, "wind", t[1], t[1]
+  e.last = name
+  if name == "beam" then
+    local ex, ey = golemEye(e)
+    local base = math.atan2(py - ey, px - ex)
+    local s = love.math.random() < 0.5 and -1 or 1
+    e.beamA0, e.beamA1 = base - s * 0.95, base + s * 0.95
+    e.beamAng = e.beamA0
+    audio.play("bat_screech", 0.5, 0.35)
+  elseif name == "stomp" then
+    audio.play("explosion", 0.3, 0.4)
+  end
+end
+
+-- The effect of an attack as its wind-up ends
+local function golemAct(e, world, player, px, py, stage)
+  local b = e.body
+  local f = e.facing
+  local cx, cy = center(e)
+  local def = e.def
+  if e.gs == "swipe" then
+    audio.play("hit", 0.9, 0.4)
+    b.vx = f * 50
+    local x0, x1 = cx + f * 8, cx + f * (b.w / 2 + 62)
+    local rx, rw = math.min(x0, x1), math.abs(x1 - x0)
+    local pb = player.body
+    if overlaps(rx, b.y + 14, rw, b.h - 14, pb.x, pb.y, pb.w, pb.h) then
+      if golemHurtPlayer(e, player, def.damage, cx, cy) then
+        pb.vx, pb.vy = f * 240, -150
+      end
+    end
+    require("src.camera").shake(0.25)
+    for i = 1, 8 do
+      effects.particle(cx + f * (20 + i * 6), b.y + b.h - 6, f * 40, -20 - love.math.random() * 40, 0.5, { 0.7, 0.68, 0.74 }, 300)
+    end
+  elseif e.gs == "throw" then
+    audio.play("hit", 0.7, 0.5)
+    local n = stage
+    local sx, sy = cx + f * 16, b.y + 4
+    local T = math.max(0.6, math.min(1.2, math.abs(px - sx) / 260))
+    for i = 1, n do
+      local aim = px + (i - (n + 1) / 2) * 46
+      local vx = (aim - sx) / T
+      local vy = (py - sy) / T - 0.5 * 520 * T
+      golemStones[#golemStones + 1] = { x = sx, y = sy, vx = vx, vy = vy, life = 4, spin = love.math.random() * 6, dmg = def.damage * 0.75 }
+    end
+  elseif e.gs == "stomp" then
+    audio.play("explosion", 0.8, 0.4)
+    require("src.camera").shake(0.55)
+    local dirs = { (px < cx) and -1 or 1 }
+    if stage >= 2 then
+      dirs[2] = -dirs[1]
+    end
+    for _, d in ipairs(dirs) do
+      golemWaves[#golemWaves + 1] = { x = cx + d * 34, dir = d, speed = 170 + 30 * stage, life = 2.8, hit = false, dmg = def.damage }
+    end
+    for i = 1, 14 do
+      effects.particle(cx + (love.math.random() - 0.5) * 50, b.y + b.h - 2, (love.math.random() - 0.5) * 120, -40 - love.math.random() * 80, 0.6, { 0.7, 0.68, 0.74 }, 400)
+    end
+  elseif e.gs == "beam" then
+    audio.play("explosion", 0.4, 1.6)
+  end
+end
+
+local function updateGolem(e, dt, world, player, px, py)
+  local def, b = e.def, e.body
+  local collide = collider(e, world)
+  local cx, cy = center(e)
+  local dist = math.sqrt((px - cx) ^ 2 + (py - cy) ^ 2)
+  local a = e.arena
+  e.grounded = Body.isGrounded(b, collide) and b.vy >= 0
+  local frac = e.hp / e.maxHp
+  local stage = frac > 0.66 and 1 or (frac > 0.33 and 2 or 3)
+  if e.state == "idle" or e.state == "sleep" then
+    local inside = not a or (px > a.x0 and px < a.x1 and py > a.top and py < a.floorY)
+    if inside and dist < def.sight then
+      e.state, e.gs, e.gt = "chase", "walk", 1.5
+    else
+      b.vy = math.min(b.vy + config.gravity * dt, 450)
+      if Body.moveY(b, collide, b.vy * dt) then
+        b.vy = 0
+      end
+      return
+    end
+  end
+  e.gs = e.gs or "walk"
+  e.gt = (e.gt or 1) - dt
+  e.minis = e.minis or {}
+  -- The two shell phases
+  if e.gs ~= "shell" and not e.shell1 and frac < 0.66 then
+    e.shell1 = true
+    golemStartShell(e, world, 4)
+  elseif e.gs ~= "shell" and not e.shell2 and frac < 0.33 then
+    e.shell2 = true
+    golemStartShell(e, world, 6)
+  end
+  local want = 0
+  local speed = def.speed * (1 + 0.25 * (stage - 1))
+  if e.gs == "shell" then
+    e.facing = px < cx and -1 or 1
+    -- little golems file in from the arena's sides, one after another
+    if (e.minisLeft or 0) > 0 then
+      e.miniT = e.miniT - dt
+      if e.miniT <= 0 then
+        e.miniT = 0.9
+        e.minisLeft = e.minisLeft - 1
+        e.miniSide = -e.miniSide
+        local x = e.miniSide < 0 and e.shellX0 or e.shellX1
+        local y = (a and a.floorY or cy + 40) - 40
+        local m = enemies.spawn("minigolem", x, golemFloorAt(world, x, y), 1, e.level)
+        m.state = "chase"
+        m.seesPlayer = true
+        e.minis[#e.minis + 1] = m
+        effects.ring(x, m.body.y + 10, 16, { 0.6, 0.85, 1 })
+        audio.play("clank", 0.6, 0.7)
+      end
+    end
+    local alive = 0
+    for _, m in ipairs(e.minis) do
+      if not m.dead then
+        alive = alive + 1
+      end
+    end
+    if (e.minisLeft or 0) <= 0 and alive == 0 then
+      e.invuln = false
+      e.gs, e.gt = "rest", 2.2
+      e.vulnerable = true
+      audio.play("explosion", 0.9, 0.55)
+      require("src.camera").shake(0.5)
+      effects.ring(cx, cy, 80, { 0.6, 0.85, 1 })
+      effects.popup(cx, b.y - 10, "SHELL BROKEN", { 1, 0.9, 0.6 })
+      for _ = 1, 24 do
+        effects.particle(cx + (love.math.random() - 0.5) * 50, cy + (love.math.random() - 0.5) * 70, (love.math.random() - 0.5) * 160, -love.math.random() * 120, 0.8, { 0.65, 0.88, 1 }, 300, true)
+      end
+    end
+  elseif e.gs == "rest" then
+    e.vulnerable = true
+    if e.gt <= 0 then
+      e.vulnerable = false
+      e.gs, e.gt = "walk", 0.8
+    end
+  elseif e.gs == "walk" then
+    e.facing = px < cx and -1 or 1
+    local dx = px - cx
+    if math.abs(dx) > 46 then
+      want = e.facing
+    end
+    if e.gt <= 0 and e.grounded then
+      local near = math.abs(dx) < 96 and math.abs(py - cy) < 70
+      local pool = near and { "swipe", "swipe", "swipe", "stomp", "throw", "beam" } or { "throw", "throw", "stomp", "stomp", "beam", "beam" }
+      for _ = 1, 4 do
+        local pick = pool[love.math.random(#pool)]
+        if pick ~= e.last then
+          golemBeginAttack(e, pick, px, py)
+          break
+        end
+      end
+      if e.gs == "walk" then
+        e.gt = 0.3
+      end
+    end
+  else
+    -- an attack: wind up, act, recover
+    local t = GOLEM_ATTACKS[e.gs]
+    if e.sub == "wind" then
+      if e.gs ~= "beam" or true then
+        e.facing = px < cx and -1 or 1
+      end
+      if e.gt <= 0 then
+        e.sub, e.gt, e.gd = "act", t[2], t[2]
+        e.actAt = true
+      end
+    elseif e.sub == "act" then
+      if e.actAt then
+        e.actAt = false
+        golemAct(e, world, player, px, py, stage)
+      end
+      if e.gs == "beam" then
+        local k = 1 - math.max(0, e.gt) / e.gd
+        e.beamAng = e.beamA0 + (e.beamA1 - e.beamA0) * k
+        local ex, ey = golemEye(e)
+        local dx, dy = math.cos(e.beamAng), math.sin(e.beamAng)
+        local len = 0
+        while len < 900 do
+          len = len + 3
+          if world:isSolid(math.floor(ex + dx * len), math.floor(ey + dy * len)) then
+            break
+          end
+        end
+        e.beamEnd = { ex + dx * len, ey + dy * len }
+        e.beamHitT = (e.beamHitT or 0) - dt
+        -- the hunter's distance from the beam
+        local pcx, pcy = player:center()
+        local u = math.max(0, math.min(len, (pcx - ex) * dx + (pcy - ey) * dy))
+        local ddx, ddy = pcx - (ex + dx * u), pcy - (ey + dy * u)
+        if ddx * ddx + ddy * ddy < 81 and e.beamHitT <= 0 then
+          e.beamHitT = 0.4
+          golemHurtPlayer(e, player, def.damage * 0.8, ex, ey)
+        end
+        if love.math.random() < dt * 40 then
+          effects.particle(ex + dx * len, ey + dy * len, (love.math.random() - 0.5) * 80, -30 - love.math.random() * 60, 0.35, { 1, 0.6, 0.85 }, 200, true)
+        end
+      end
+      if e.gt <= 0 then
+        e.sub, e.gt, e.gd = "rec", t[3], t[3]
+        e.beamEnd = nil
+      end
+    elseif e.sub == "rec" then
+      if e.gt <= 0 then
+        e.gs, e.sub = "walk", nil
+        e.gt = (stage == 1 and 1.3 or (stage == 2 and 1.0 or 0.75)) + love.math.random() * 0.5
+      end
+    end
+  end
+  -- Lumbering: slow to speed up, heavy underfoot
+  if e.grounded then
+    local target = want * speed
+    local step = 220 * dt
+    b.vx = b.vx < target and math.min(b.vx + step, target) or math.max(b.vx - step, target)
+    if want == 0 then
+      b.vx = b.vx * math.max(0, 1 - 6 * dt)
+    end
+  end
+  b.vy = math.min(b.vy + config.gravity * dt, 450)
+  local blocked = Body.moveX(b, collide, b.vx * dt, 6)
+  if blocked then
+    b.vx = 0
+  end
+  if Body.moveY(b, collide, b.vy * dt) then
+    b.vy = 0
+  end
+  if e.grounded and b.vy >= 0 then
+    Body.snapDown(b, collide, 4)
+  end
+  if a then
+    b.x = math.max(a.x0 + 6, math.min(a.x1 - b.w - 6, b.x))
+  end
+  -- Footfalls
+  local step = math.floor(e.phase / math.pi)
+  e.phase = e.phase + dt * (math.abs(b.vx) / 14 + 0.5)
+  if e.grounded and math.abs(b.vx) > 8 and math.floor(e.phase / math.pi) ~= step then
+    audio.play("hit", 0.25, 0.3)
+    require("src.camera").shake(0.06)
+    effects.particle(cx + (love.math.random() - 0.5) * 30, b.y + b.h - 1, 0, -10 - love.math.random() * 14, 0.4, { 0.6, 0.58, 0.64 }, 100)
+  end
+end
+
+-- Thrown stones fly in arcs and shatter; the stone wave runs along the floor
+local function updateGolemShots(dt, world, player)
+  local pb = player.body
+  for i = #golemStones, 1, -1 do
+    local s = golemStones[i]
+    s.life = s.life - dt
+    s.vy = s.vy + 520 * dt
+    s.spin = s.spin + dt * 8
+    local steps = math.max(1, math.ceil(math.max(math.abs(s.vx), math.abs(s.vy)) * dt / 2))
+    local gone = false
+    for _ = 1, steps do
+      s.x, s.y = s.x + s.vx * dt / steps, s.y + s.vy * dt / steps
+      if not player.dead and overlaps(s.x - 4, s.y - 4, 8, 8, pb.x, pb.y, pb.w, pb.h) then
+        if player:isDodging() then
+          player:dodged()
+        else
+          player:hurt(math.max(1, math.floor(s.dmg + 0.5)), s.x - s.vx * 0.01, s.y, "golem")
+          gone = true
+        end
+      elseif world:isSolid(math.floor(s.x), math.floor(s.y)) then
+        gone = true
+      end
+      if gone then
+        break
+      end
+    end
+    if gone or s.life <= 0 then
+      audio.playAt("hit", s.x, s.y, 0.6, 0.5)
+      for _ = 1, 10 do
+        effects.particle(s.x, s.y, (love.math.random() - 0.5) * 140, -love.math.random() * 100, 0.6, { 0.78, 0.76, 0.82 }, 400)
+      end
+      table.remove(golemStones, i)
+    end
+  end
+  for i = #golemWaves, 1, -1 do
+    local w = golemWaves[i]
+    w.life = w.life - dt
+    w.x = w.x + w.dir * w.speed * dt
+    w.y = world:findGround(math.floor(w.x), math.floor((w.y or pb.y) - 30))
+    local blockedAhead = world:isSolid(math.floor(w.x + w.dir * 4), math.floor(w.y - 6))
+    if not w.hit and not player.dead and overlaps(w.x - 7, w.y - 18, 14, 18, pb.x, pb.y, pb.w, pb.h) then
+      if player:isDodging() then
+        player:dodged()
+      else
+        w.hit = true
+        if player:hurt(math.max(1, math.floor(w.dmg + 0.5)), w.x - w.dir * 8, w.y - 6, "golem") then
+          pb.vy = -230
+          pb.vx = w.dir * 120
+        end
+      end
+    end
+    if love.math.random() < dt * 40 then
+      effects.particle(w.x, w.y - 2, (love.math.random() - 0.5) * 30, -40 - love.math.random() * 50, 0.4, { 0.74, 0.72, 0.78 }, 300)
+    end
+    if w.life <= 0 or blockedAhead then
+      table.remove(golemWaves, i)
+    end
+  end
+end
+
 local UPDATE = {
   piranha = updatePiranha,
   worm = updateWorm,
@@ -3059,6 +3500,8 @@ local UPDATE = {
   matron = updateHopper,
   bloater = updateBloater,
   behemoth = updateBloater,
+  golem = updateGolem,
+  minigolem = updateGhoul,
   wisp = updateWisp,
 }
 
@@ -3233,6 +3676,7 @@ function enemies.update(dt, world, player)
       table.remove(globs, i)
     end
   end
+  updateGolemShots(dt, world, player)
 end
 
 -- Drawing ---------------------------------------------------------------
@@ -4840,7 +5284,449 @@ local function drawPiranhaEye(e)
   r(6, 1, 1, 1)
 end
 
+-- How open the Queen's mouth is, 0 (slack) to 1 (wide): open as she spits a
+-- volley or dashes, opening as she winds up
+local function queenMouth(e)
+  if e.spitT and e.spitT > 0 then
+    return 1
+  elseif e.qs == "attack" and e.atk == "dash" then
+    return 1
+  elseif e.qs == "windup" then
+    local k = 1 - (e.qt or 0) / math.max(0.01, e.qtTotal or 1)
+    return 0.3 + 0.5 * math.max(0, math.min(1, k))
+  end
+  return 0.08 + 0.06 * math.sin(e.phase * 1.4)
+end
+
+-- The Queen's body: a blob of gas that wobbles and breathes, squashes as it
+-- moves, and has a face: two eyes that follow the hunter and a mouth that
+-- gapes when she shoots (the glow of it is in drawQueenFaceGlow)
+local function drawQueenBlob(e)
+  local b = e.body
+  local W, H = b.w, b.h
+  local x0, y0 = math.floor(b.x), math.floor(b.y)
+  local white = e.flash > 0
+  local function col(c)
+    love.graphics.setColor(white and { 1, 1, 1 } or c)
+  end
+  local ph = e.phase
+  local cell = math.max(1, math.floor(W / 28)) -- one blob "pixel"
+  local speed = math.sqrt((b.vx or 0) ^ 2 + (b.vy or 0) ^ 2)
+  local stretch = 1 + math.min(0.12, speed / 1600) -- (long along the way she is going)
+  local breathe = 1 + 0.045 * math.sin(ph * 1.3)
+  local swell = e.novaWind and 1.07 or 1
+  local cx = x0 + W / 2
+  local open = queenMouth(e)
+  for row = 0, H - 1, cell do
+    local t = (row + cell / 2) / H
+    local wob = 1 + 0.05 * math.sin(ph * 2 + row * 0.18) + 0.03 * math.sin(ph * 3.1 - row * 0.3)
+    local ww = math.floor(sacWidth(t) * W * wob * breathe * swell / cell) * cell
+    local shift = math.floor(math.sin(ph * 1.6 + row * 0.12) * W * 0.018)
+    local xs = math.floor(cx - ww / 2 + shift)
+    col(t < 0.2 and SAC.light or (t > 0.85 and SAC.deep or (t > 0.62 and SAC.dark or SAC.base)))
+    px(xs, y0 + row, ww, cell)
+    if t > 0.08 then
+      col(SAC.light)
+      px(xs, y0 + row, cell, cell)
+    end
+    col(SAC.deep)
+    px(xs + ww - cell, y0 + row, cell, cell)
+  end
+  -- Bubbles rising inside the gas
+  for k = 1, 7 do
+    local rise = (ph * 0.25 + k * 0.37) % 1
+    local bx = cx + math.sin(k * 2.3 + ph * 0.5) * W * 0.28
+    local by = y0 + H * (0.85 - rise * 0.7)
+    col(SAC.pale)
+    px(bx, by, cell, cell)
+    px(bx - cell, by + cell, cell * 3, cell)
+  end
+  -- Blobby drips from the foot, stretching and shrinking
+  for i = 0, 4 do
+    local len = (2 + 2 * math.sin(ph * 1.7 + i * 1.9)) * cell + cell
+    col(SAC.dark)
+    px(cx - W * 0.22 + i * W * 0.11 + math.sin(ph + i) * cell, y0 + H - cell, cell * 2, len)
+  end
+  -- Eyes, looking at the hunter
+  local look = e.aimAng or 0
+  local lx, ly = math.cos(look) * cell, math.sin(look) * cell
+  for side = -1, 1, 2 do
+    local ex, ey = cx + side * W * 0.2, y0 + H * 0.36
+    col({ 0.18, 0.2, 0.08 })
+    px(ex - cell * 2, ey - cell * 2, cell * 4, cell * 4)
+    col({ 0.95, 0.9, 0.45 })
+    px(ex - cell * 1.5, ey - cell * 1.5, cell * 3, cell * 3)
+    col({ 0.12, 0.14, 0.05 })
+    px(ex - cell / 2 + lx, ey - cell / 2 + ly, cell, cell * 2)
+  end
+  -- The mouth: a slack curve, opening into a dark maw with teeth as she shoots
+  local mx, my = cx, y0 + H * 0.62
+  local mw = W * (0.2 + 0.12 * open)
+  local mh = math.max(cell, math.floor(H * (0.04 + 0.2 * open) / cell) * cell)
+  col({ 0.13, 0.05, 0.06 })
+  px(mx - mw / 2, my, mw, mh)
+  if open > 0.4 then
+    col({ 0.92, 0.9, 0.7 })
+    for i = 0, 3 do
+      px(mx - mw / 2 + cell + i * (mw - cell * 2) / 3.2, my, cell, cell) -- upper teeth
+      px(mx - mw / 2 + cell * 2 + i * (mw - cell * 3) / 3.2, my + mh - cell, cell, cell) -- lower teeth
+    end
+  else
+    col({ 0.13, 0.05, 0.06 })
+    px(mx - mw / 2 - cell, my - cell, cell, cell) -- the slack corners
+    px(mx + mw / 2, my - cell, cell, cell)
+  end
+end
+
+-- The glow of the Queen's face: her mouth's throat lights up as she spits
+local function drawQueenFaceGlow(e)
+  local b = e.body
+  local W, H = b.w, b.h
+  local cell = math.max(1, math.floor(W / 28))
+  local open = queenMouth(e)
+  if open > 0.3 then
+    local cx, my = b.x + W / 2, b.y + H * 0.62
+    local mw = W * (0.2 + 0.12 * open)
+    local mh = math.max(cell, math.floor(H * (0.04 + 0.2 * open) / cell) * cell)
+    local flick = 0.6 + 0.3 * math.sin(love.timer.getTime() * 30)
+    love.graphics.setColor(0.7, 1, 0.3, (open - 0.2) * flick)
+    px(cx - mw / 2 + cell, my + cell, mw - cell * 2, mh - cell * 2)
+  end
+  for side = -1, 1, 2 do
+    love.graphics.setColor(1, 0.95, 0.4, 0.5)
+    px(b.x + W / 2 + side * W * 0.2 - cell, b.y + H * 0.36 - cell, cell * 2, cell * 2)
+  end
+end
+
+-- The Marble Colossus's sprite --------------------------------------------------
+local MARBLE = {
+  light = { 0.98, 0.97, 1.0 },
+  mid = { 0.84, 0.83, 0.92 },
+  dark = { 0.62, 0.61, 0.74 },
+  deep = { 0.42, 0.41, 0.56 },
+  pink = { 1.0, 0.45, 0.78 },
+  blue = { 0.40, 0.66, 1.0 },
+}
+
+local function lerp2(a, b, t)
+  return a + (b - a) * t
+end
+
+-- Where its hands are (in its 56 x 84 box, for a golem facing right), how far
+-- it has crouched, and how high a foot is lifted
+local function golemPose(e)
+  local pose = { fx = 50, fy = 58, bx = 6, by = 58, crouch = 0, lift = 0, stone = false, tilt = 0 }
+  local p = 0
+  if e.gd and e.gd > 0 then
+    p = 1 - math.max(0, e.gt or 0) / e.gd
+  end
+  local gs, sub = e.gs, e.sub
+  if gs == "shell" then
+    pose.crouch = 12
+    pose.fx, pose.fy, pose.bx, pose.by = 44, 70, 12, 70
+  elseif gs == "rest" then
+    pose.crouch = 8
+    pose.fx, pose.fy, pose.bx, pose.by = 46, 72, 10, 72
+  elseif gs == "swipe" then
+    if sub == "wind" then
+      pose.fx, pose.fy = lerp2(50, 40, p), lerp2(58, -2, p)
+    elseif sub == "act" then
+      pose.fx, pose.fy = lerp2(40, 86, p), lerp2(-2, 52, p)
+    else
+      pose.fx, pose.fy = lerp2(86, 50, p), lerp2(52, 58, p)
+    end
+  elseif gs == "throw" then
+    if sub == "wind" then
+      pose.fx, pose.fy = lerp2(50, 42, p), lerp2(58, -6, p)
+      pose.stone = true
+    elseif sub == "act" then
+      pose.fx, pose.fy = lerp2(42, 66, p), lerp2(-6, 18, p)
+    else
+      pose.fx, pose.fy = lerp2(66, 50, p), lerp2(18, 58, p)
+    end
+  elseif gs == "stomp" then
+    if sub == "wind" then
+      pose.lift = 12 * p
+      pose.fx, pose.fy = 44, lerp2(58, 4, p)
+      pose.bx, pose.by = 12, lerp2(58, 4, p)
+    elseif sub == "act" then
+      pose.fx, pose.fy = 52, lerp2(4, 66, math.min(1, p * 3))
+      pose.bx, pose.by = 4, lerp2(4, 66, math.min(1, p * 3))
+    else
+      pose.fx, pose.fy = 50, 62
+    end
+  elseif gs == "beam" then
+    pose.fx, pose.fy = 46, 50
+    pose.tilt = 1
+  else
+    local sway = math.sin(e.phase) * 3
+    pose.fx, pose.fy = 50 + sway * 0.5, 58 + sway
+    pose.bx, pose.by = 6 - sway * 0.5, 58 - sway
+  end
+  return pose
+end
+
+-- A thick block-armed limb from (x0, y0) to (x1, y1)
+local function golemLimb(r, x0, y0, x1, y1, w, c1, c2)
+  local n = math.max(2, math.ceil(math.max(math.abs(x1 - x0), math.abs(y1 - y0)) / 3))
+  for i = 0, n do
+    local t = i / n
+    love.graphics.setColor(i % 2 == 0 and c1 or c2)
+    r(lerp2(x0, x1, t) - w / 2, lerp2(y0, y1, t) - w / 2, w, w)
+  end
+end
+
+local function drawGolem(e)
+  local r, bx, by = mirror(e, 56)
+  local white = e.flash > 0
+  local function col(c, a)
+    if white then
+      love.graphics.setColor(1, 1, 1)
+    else
+      love.graphics.setColor(c[1], c[2], c[3], a or 1)
+    end
+  end
+  local pose = golemPose(e)
+  local crouch = pose.crouch
+  local walk = (e.grounded and math.abs(e.body.vx) > 4) and math.sin(e.phase) or 0
+  local bob = math.abs(walk) * 1.5
+  local top = crouch + bob
+  -- the far arm, then the legs
+  golemLimb(r, 12, 24 + top, pose.bx, pose.by + top, 9, MARBLE.dark, MARBLE.deep)
+  col(MARBLE.dark)
+  r(pose.bx - 6, pose.by + top - 4, 12, 12)
+  col(MARBLE.deep)
+  r(pose.bx - 6, pose.by + top + 5, 12, 3)
+  local lift1 = math.max(0, walk) * 4
+  local lift2 = math.max(0, -walk) * 4 + pose.lift
+  for i, lx in ipairs({ 10, 32 }) do
+    local lift = i == 1 and lift1 or lift2
+    local y0 = 54 + crouch
+    col(MARBLE.mid)
+    r(lx, y0 - lift, 15, 30 - crouch)
+    col(MARBLE.light)
+    r(lx, y0 - lift, 4, 30 - crouch)
+    col(MARBLE.deep)
+    r(lx + 12, y0 - lift, 3, 30 - crouch)
+    col(MARBLE.dark)
+    r(lx - 2, 80 - lift, 19, 4) -- the foot
+  end
+  -- hips, torso and shoulders
+  col(MARBLE.dark)
+  r(8, 46 + top, 40, 12)
+  col(MARBLE.mid)
+  r(6, 18 + top, 44, 32)
+  col(MARBLE.light)
+  r(6, 18 + top, 44, 4)
+  r(6, 18 + top, 5, 32)
+  col(MARBLE.deep)
+  r(44, 22 + top, 6, 28)
+  r(6, 46 + top, 44, 4)
+  -- crystal spikes on the shoulders
+  for i, sx in ipairs({ 4, 14, 38, 48 }) do
+    local h = ({ 10, 7, 8, 11 })[i]
+    col(MARBLE.light)
+    r(sx, 14 + top - h + 4, 4, h)
+    col(MARBLE.mid)
+    r(sx + 3, 14 + top - h + 6, 2, h - 2)
+    col(MARBLE.light)
+    r(sx + 1, 14 + top - h, 2, 3)
+  end
+  -- the veins that run through it (they glow, see drawGolemGlow)
+  for k = 0, 13 do
+    local vx = 8 + math.floor(noise2(k, 3) * 36)
+    local vy = 22 + top + math.floor(noise2(k, 7) * 24)
+    col(k % 2 == 0 and MARBLE.pink or MARBLE.blue)
+    r(vx, vy, 4 + k % 4, 2)
+    r(vx + 3 + k % 4, vy + 2, 2, 5)
+    r(vx + 5 + k % 4, vy + 7, 4, 2)
+  end
+  -- facets: pale chips along the edges
+  for k = 0, 7 do
+    col(k % 2 == 0 and MARBLE.light or MARBLE.dark)
+    r(7 + k * 5, 18 + top + (k * 7) % 12, 3, 5)
+  end
+  -- the head: small and blocky, set low between the shoulders
+  col(MARBLE.mid)
+  r(20, 4 + top + pose.tilt, 18, 16)
+  col(MARBLE.light)
+  r(20, 4 + top + pose.tilt, 18, 3)
+  col(MARBLE.deep)
+  r(32, 7 + top + pose.tilt, 6, 13)
+  col({ 0.12, 0.1, 0.16 })
+  r(27, 9 + top + pose.tilt, 9, 5) -- the eye socket
+  -- the front arm, over the body
+  golemLimb(r, 44, 24 + top, pose.fx, pose.fy + top, 10, MARBLE.mid, MARBLE.light)
+  col(MARBLE.mid)
+  r(pose.fx - 7, pose.fy + top - 5, 14, 14)
+  col(MARBLE.light)
+  r(pose.fx - 7, pose.fy + top - 5, 14, 3)
+  col(MARBLE.deep)
+  r(pose.fx + 3, pose.fy + top - 2, 4, 11)
+  col(MARBLE.pink)
+  r(pose.fx - 3, pose.fy + top + 2, 6, 1)
+  if pose.stone then
+    col(MARBLE.dark)
+    r(pose.fx - 6, pose.fy + top - 16, 14, 12)
+    col(MARBLE.light)
+    r(pose.fx - 6, pose.fy + top - 16, 14, 3)
+    col(MARBLE.blue)
+    r(pose.fx - 2, pose.fy + top - 11, 6, 1)
+  end
+  -- the crystal shell
+  if e.invuln then
+    local t = love.timer.getTime()
+    love.graphics.setColor(0.55, 0.85, 1, 0.28 + 0.1 * math.sin(t * 6))
+    r(-2, 4, 60, 84)
+    love.graphics.setColor(0.8, 0.95, 1, 0.55)
+    r(-2, 4, 60, 2)
+    r(-2, 86, 60, 2)
+    r(-2, 4, 2, 84)
+    r(56, 4, 2, 84)
+    for k = 0, 4 do
+      local sx = -2 + k * 14
+      love.graphics.setColor(0.7, 0.92, 1, 0.5)
+      r(sx, -8 + (k % 2) * 5, 6, 14)
+      love.graphics.setColor(1, 1, 1, 0.5)
+      r(sx + 1, -8 + (k % 2) * 5, 2, 6)
+    end
+  end
+end
+
+local function drawGolemGlow(e)
+  local b = e.body
+  local t = love.timer.getTime()
+  local ex, ey = golemEye(e)
+  ey = ey + (e.invuln and 12 or (e.gs == "rest" and 8 or 0))
+  -- the veins glow in the dark, brighter as it winds up or as it takes damage
+  do
+    local r = mirror(e, 56)
+    local crouch = golemPose(e).crouch + ((e.grounded and math.abs(e.body.vx) > 4) and math.abs(math.sin(e.phase)) * 1.5 or 0)
+    local vp = 0.35 + 0.25 * math.sin(t * 2.2) + (e.sub == "wind" and 0.3 or 0)
+    for k = 0, 13 do
+      local vx = 8 + math.floor(noise2(k, 3) * 36)
+      local vy = 22 + crouch + math.floor(noise2(k, 7) * 24)
+      local c = k % 2 == 0 and { 1, 0.45, 0.78 } or { 0.4, 0.66, 1 }
+      love.graphics.setColor(c[1], c[2], c[3], vp * (e.invuln and 0.5 or 1))
+      r(vx, vy, 4 + k % 4, 2)
+      r(vx + 3 + k % 4, vy + 2, 2, 5)
+    end
+  end
+  local charging = e.gs == "beam" and e.sub == "wind"
+  local pulse = 0.7 + 0.3 * math.sin(t * (charging and 30 or 5))
+  local c = e.invuln and { 0.5, 0.85, 1 } or { 1, 0.35, 0.6 }
+  local s = charging and 5 + 4 * (1 - math.max(0, e.gt) / e.gd) or 3
+  love.graphics.setColor(c[1], c[2], c[3], 0.35 * pulse)
+  px(ex - s, ey - s, s * 2 + 1, s * 2 + 1)
+  love.graphics.setColor(c[1], c[2], c[3], pulse)
+  px(ex - 1, ey - 1, 3, 3)
+  love.graphics.setColor(1, 0.95, 0.95)
+  px(ex, ey, 1, 1)
+  if charging and e.beamA0 then
+    -- the line it will sweep, shown dotted before it fires
+    for _, ang in ipairs({ e.beamA0, e.beamA1 }) do
+      for d = 14, 520, 9 do
+        if math.floor(t * 14 + d / 9) % 2 == 0 then
+          love.graphics.setColor(1, 0.4, 0.65, 0.4)
+          px(ex + math.cos(ang) * d, ey + math.sin(ang) * d, 2, 2)
+        end
+      end
+    end
+  end
+  if e.beamEnd then
+    -- the beam itself
+    local x1, y1 = e.beamEnd[1], e.beamEnd[2]
+    local len = math.sqrt((x1 - ex) ^ 2 + (y1 - ey) ^ 2)
+    for d = 0, len, 2 do
+      local f = d / len
+      local x, y = ex + (x1 - ex) * f, ey + (y1 - ey) * f
+      love.graphics.setColor(1, 0.3, 0.6, 0.35)
+      px(x - 3, y - 3, 7, 7)
+      love.graphics.setColor(1, 0.7, 0.85, 0.8)
+      px(x - 1, y - 1, 3, 3)
+      love.graphics.setColor(1, 1, 1)
+      px(x, y, 1, 1)
+    end
+    love.graphics.setColor(1, 0.8, 0.9, 0.7)
+    px(x1 - 4, y1 - 4, 9, 9)
+  end
+end
+
+-- The little golems and the thrown stones and stone waves
+local function drawMiniGolem(e)
+  local r = mirror(e, 14)
+  local white = e.flash > 0
+  local function col(c)
+    love.graphics.setColor(white and { 1, 1, 1 } or c)
+  end
+  local w = e.grounded and math.abs(e.body.vx) > 4 and math.sin(e.phase * 1.5) or 0
+  local strike = (e.strikeT or 0) > 0
+  col(MARBLE.dark)
+  r(2, 13, 4, 7 - math.max(0, w))
+  r(8, 13, 4, 7 - math.max(0, -w))
+  col(MARBLE.mid)
+  r(1, 5, 12, 9)
+  col(MARBLE.light)
+  r(1, 5, 12, 2)
+  col(MARBLE.deep)
+  r(10, 7, 3, 7)
+  col(MARBLE.mid)
+  r(3, 0, 8, 6)
+  col(MARBLE.light)
+  r(3, 0, 8, 1)
+  col(MARBLE.pink)
+  r(4, 9, 3, 1)
+  col(MARBLE.dark)
+  if strike then
+    r(11, 4, 5, 4)
+  else
+    r(12, 8 + w, 3, 5)
+  end
+end
+
+local function drawMiniGolemGlow(e)
+  local r = mirror(e, 14)
+  love.graphics.setColor(1, 0.4, 0.65, 0.9)
+  r(8, 2, 2, 1)
+end
+
+local function drawGolemShots()
+  for _, s in ipairs(golemStones) do
+    local x, y = math.floor(s.x), math.floor(s.y)
+    love.graphics.setColor(0.52, 0.52, 0.6)
+    love.graphics.rectangle("fill", x - 4, y - 4, 8, 8)
+    love.graphics.setColor(0.88, 0.88, 0.94)
+    love.graphics.rectangle("fill", x - 4 + math.floor(s.spin) % 2, y - 4, 6, 2)
+    love.graphics.setColor(0.96, 0.5, 0.78)
+    love.graphics.rectangle("fill", x - 2, y, 4, 1)
+  end
+  for _, w in ipairs(golemWaves) do
+    local fade = math.min(1, w.life * 2)
+    for k = 0, 4 do
+      local h = 6 + 8 * math.abs(math.sin(k * 1.7 + w.x * 0.05))
+      local x = w.x - w.dir * k * 5
+      love.graphics.setColor(0.72, 0.72, 0.8, fade)
+      love.graphics.polygon("fill", x - 4, w.y, x + 4, w.y, x, w.y - h * (1 - k * 0.15))
+      love.graphics.setColor(0.92, 0.92, 0.97, fade)
+      love.graphics.polygon("fill", x - 4, w.y, x - 1, w.y, x - 1, w.y - h * (1 - k * 0.15) + 2)
+    end
+  end
+end
+
+local function drawGolemShotsGlow()
+  for _, s in ipairs(golemStones) do
+    love.graphics.setColor(1, 0.5, 0.8, 0.35)
+    love.graphics.rectangle("fill", math.floor(s.x) - 5, math.floor(s.y) - 5, 10, 10)
+  end
+  for _, w in ipairs(golemWaves) do
+    love.graphics.setColor(1, 0.55, 0.85, 0.35 * math.min(1, w.life * 2))
+    love.graphics.rectangle("fill", math.floor(w.x) - 5, math.floor(w.y) - 4, 10, 4)
+  end
+end
+
 local DRAW = {
+  golem = drawGolem,
+  minigolem = drawMiniGolem,
   piranha = drawPiranha,
   worm = drawWorm,
   miner = drawMiner,
@@ -4851,7 +5737,7 @@ local DRAW = {
   swarmbat = drawBat,
   dreadbat = drawDreadBat,
   queen = function(e)
-    drawSac(e)
+    drawQueenBlob(e)
     drawQueenCrown(e)
   end,
   spitter = drawSpitter,
@@ -4863,6 +5749,8 @@ local DRAW = {
   wisp = function() end,
 }
 local GLOW = {
+  golem = drawGolemGlow,
+  minigolem = drawMiniGolemGlow,
   piranha = drawPiranhaEye,
   worm = function() end,
   miner = drawMinerGlow,
@@ -4873,7 +5761,7 @@ local GLOW = {
   swarmbat = drawBatEyes,
   dreadbat = drawDreadBatGlow,
   queen = function(e)
-    drawSacGlow(e)
+    drawQueenFaceGlow(e)
     drawQueenGlow(e)
   end,
   spitter = drawSpitterGlow,
@@ -4937,6 +5825,7 @@ function enemies.draw(view)
     end
   end
   drawSticks()
+  drawGolemShots()
 end
 
 -- (for the art tests: the drawing functions by kind)
@@ -4951,6 +5840,7 @@ end
 -- After the lighting: eyes, glowing mouths and acid globs
 function enemies.drawEmissive(view)
   drawSticksGlow()
+  drawGolemShotsGlow()
   local t = love.timer.getTime()
   for _, e in ipairs(near) do
     if onScreen(e, view) then
@@ -5014,6 +5904,15 @@ function enemies.addLights(lighting, view)
         lighting.add(cx, cy, 50, 0.85, 0.3, 0.5, 0.3) -- so the dark bulk can be seen
       elseif e.kind == "queen" then
         lighting.add(cx, cy, 110, 0.8, 0.95, 0.3, 0.55)
+      elseif e.kind == "golem" then
+        lighting.add(cx, e.body.y + 10, 70, 0.85, 0.8, 0.95, 0.18) -- so the pale bulk can be seen
+        local ex, ey = golemEye(e)
+        lighting.add(ex, ey, e.sub == "act" and e.gs == "beam" and 90 or 40, e.invuln and 0.5 or 1, e.invuln and 0.85 or 0.35, e.invuln and 1 or 0.6, 0.8)
+        if e.beamEnd then
+          lighting.add(e.beamEnd[1], e.beamEnd[2], 70, 1, 0.4, 0.7, 0.9)
+        end
+      elseif e.kind == "minigolem" then
+        lighting.add(cx, cy - 6, 22, 1, 0.4, 0.65, 0.4)
       elseif e.kind == "bloater" or e.kind == "behemoth" then
         lighting.add(cx, cy, e.def.boss and 60 or 30, 0.7, 0.95, 0.3, 0.4)
       end

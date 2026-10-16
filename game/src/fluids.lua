@@ -46,6 +46,15 @@ local world
 local gas, water, fire, smoke = {}, {}, {}, {}
 local addJobs = {} -- areas' pools still being added (see fluids.add)
 local oil, oilActive, oilRows = {}, {}, {} -- lamp oil: cells (true), the ones that may move, and counts per row
+-- Lava (the `lava` set below) flows like water, a fifth as fast. Its state is
+-- one table: fluids.update already has as many upvalues as Lua allows.
+local lavaFlow = {
+  active = {}, -- the cells that may move
+  rows = {}, -- counts per row
+  every = 5, -- one lava step per this many water steps
+  tick = 0,
+  moved = false,
+}
 local dry = {} -- cells water may not enter (shop rooms in a flooded area)
 -- Flooded areas (and lakes) are not filled all at once: their water is kept
 -- as runs per grid row and becomes real water cells only near the hunter
@@ -79,6 +88,7 @@ fluids.exposure = 0
 function fluids.clear()
   gas, water, fire, smoke, vents, braziers, columns = {}, {}, {}, {}, {}, {}, {}
   oil, oilActive, oilRows = {}, {}, {}
+  lavaFlow.active, lavaFlow.rows, lavaFlow.tick, lavaFlow.moved = {}, {}, 0, false
   addJobs = {}
   lava, acid, lavaTop, acidTop = {}, {}, {}, {}
   dry, floodRows = {}, {}
@@ -140,6 +150,18 @@ local function setOil(k, v)
     oilRows[r] = oilRows[r] - 1
   end
   oil[k] = v or nil
+end
+
+local function setLava(k, v)
+  local had = lava[k] ~= nil
+  if v and not had then
+    local r = rowOf(k)
+    lavaFlow.rows[r] = (lavaFlow.rows[r] or 0) + 1
+  elseif not v and had then
+    local r = rowOf(k)
+    lavaFlow.rows[r] = lavaFlow.rows[r] - 1
+  end
+  lava[k] = v or nil
 end
 
 local function setGas(k, v)
@@ -234,7 +256,7 @@ addNow = function(info)
       end
     end
   end
-  addStatic(lava, info.lava, lavaTop)
+  addStatic(lava, info.lava, lavaTop, setLava)
   addStatic(acid, info.acid, acidTop)
   -- (pools start asleep: the periodic sweep wakes the water near the hunter
   -- that can move; marking every pool active made each water step walk all
@@ -256,7 +278,7 @@ addNow = function(info)
 end
 
 -- Fills a static liquid's cells from cavegen's pools and notes its surface spots
-addStatic = function(cells, pools, tops)
+addStatic = function(cells, pools, tops, setter)
   local sub = POOL_CELL / C
   local added = {} -- (only this area's new cells are looked at for surface spots)
   for _, p in ipairs(pools or {}) do
@@ -267,7 +289,11 @@ addStatic = function(cells, pools, tops)
         for ox = 0, sub - 1 do
           local k = key(gx + ox, gy + oy)
           if not solidAt(k) then
-            cells[k] = true
+            if setter then
+              setter(k, true)
+            else
+              cells[k] = true
+            end
             added[#added + 1] = k
           end
         end
@@ -586,7 +612,7 @@ end
 function fluids.wake(x0, y0, x1, y1)
   local gx0, gy0, gx1, gy1 = floor(x0 / C) - 2, floor(y0 / C) - 2, floor(x1 / C) + 2, floor(y1 / C) + 2
   for gy = gy0, gy1 do
-    if (waterRows[gy] or 0) > 0 then
+    if (waterRows[gy] or 0) + (oilRows[gy] or 0) + (lavaFlow.rows[gy] or 0) > 0 then
       for gx = gx0, gx1 do
         local k = gy * K + KOFF + gx
         if water[k] then
@@ -594,6 +620,9 @@ function fluids.wake(x0, y0, x1, y1)
         end
         if oil[k] then
           oilActive[k] = true
+        end
+        if lava[k] then
+          lavaFlow.active[k] = true
         end
       end
     end
@@ -880,6 +909,102 @@ local function stepOil(gx0, gy0, gx1, gy1)
   end
 end
 
+-- Lava flows the same way too (see lavaFlow.every), and likewise can't push into water
+function lavaFlow.step(gx0, gy0, gx1, gy1)
+  local r = love.math.random
+  local list = {}
+  for k in pairs(lavaFlow.active) do
+    local gx, gy = coords(k)
+    if gx >= gx0 and gx <= gx1 and gy >= gy0 and gy <= gy1 then
+      list[#list + 1] = k
+    else
+      lavaFlow.active[k] = nil
+    end
+  end
+  if #list == 0 then
+    return
+  end
+  table.sort(list, function(a, b)
+    return a > b
+  end)
+  local moved = {}
+  local function move(k, n)
+    setLava(k, nil)
+    setLava(n, true)
+    moved[n] = true
+    lavaFlow.active[k] = nil
+    lavaFlow.active[n] = true
+    lavaFlow.moved = true
+    if n % 4 == 0 and not lava[n - K] and not solidAt(n - K) and #lavaTop < 900 then
+      local ngx, ngy = coords(n)
+      lavaTop[#lavaTop + 1] = { ngx * C + HALF, ngy * C }
+    end
+    for _, d in ipairs(NEIGHBOURS) do
+      if lava[k + d] then
+        lavaFlow.active[k + d] = true
+      end
+    end
+  end
+  for _, k in ipairs(list) do
+    if lava[k] and not moved[k] then
+      local below = k + K
+      local done = false
+      if free(below) then
+        move(k, below)
+        done = true
+      else
+        local side = r() < 0.5 and -1 or 1
+        for _, d in ipairs({ side, -side }) do
+          if free(below + d) and free(k + d) then
+            move(k, below + d)
+            done = true
+            break
+          end
+        end
+        if not done then
+          for _, d in ipairs({ side, -side }) do
+            for i2 = 1, SPREAD do
+              local c = k + d * i2
+              if not free(c) then
+                break
+              end
+              if free(c + K) then
+                move(k, k + d)
+                done = true
+                break
+              end
+            end
+            if done then
+              break
+            end
+          end
+        end
+      end
+      if not done then
+        lavaFlow.active[k] = nil
+      end
+    elseif not lava[k] then
+      lavaFlow.active[k] = nil
+    end
+  end
+end
+
+-- Surface spots (for light and bubbles) that the lava has left are dropped
+function lavaFlow.prune()
+  local out = 0
+  for i = 1, #lavaTop do
+    local spot = lavaTop[i]
+    local k = cellOf(spot[1], spot[2])
+    if lava[k] and not lava[k - K] then
+      out = out + 1
+      lavaTop[out] = spot
+    end
+  end
+  for i = #lavaTop, out + 1, -1 do
+    lavaTop[i] = nil
+  end
+end
+
 local function stepWater(gx0, gy0, gx1, gy1)
   local r = love.math.random
   local list = {}
@@ -1138,6 +1263,14 @@ function fluids.update(dt, player, enemies)
           end
         end
       end
+      if (lavaFlow.rows[gy] or 0) > 0 then
+        for gx = gx0, gx1 do
+          local k = gy * K + KOFF + gx
+          if lava[k] and (not lava[k + K] or not lava[k - 1] or not lava[k + 1]) then
+            lavaFlow.active[k] = true
+          end
+        end
+      end
     end
   end
   accWater = accWater + dt
@@ -1148,6 +1281,13 @@ function fluids.update(dt, player, enemies)
     stepWater(gx0, gy0, gx1, gy1)
     if next(oilActive) then
       stepOil(gx0, gy0, gx1, gy1)
+    end
+    lavaFlow.tick = lavaFlow.tick + 1
+    if lavaFlow.tick >= lavaFlow.every then
+      lavaFlow.tick = 0
+      if next(lavaFlow.active) then
+        lavaFlow.step(gx0, gy0, gx1, gy1)
+      end
     end
   end
   accWater = math.min(accWater, WATER_STEP)
@@ -1160,6 +1300,10 @@ function fluids.update(dt, player, enemies)
   if accSlow >= 0.1 then
     local step = accSlow
     accSlow = 0
+    if lavaFlow.moved then
+      lavaFlow.moved = false
+      lavaFlow.prune()
+    end
     for _, br in ipairs(braziers) do
       local bx, by = coords(br.k)
       if bx >= gx0 and bx <= gx1 and by >= gy0 and by <= gy1 then
@@ -1444,12 +1588,12 @@ local function drawStatic(cells, view, gx0, gy0, gx1, gy1, t, isLava)
           love.graphics.setColor(1.0 - 0.28 * d, 0.62 - 0.4 * d + 0.08 * pulse, 0.12 - 0.07 * d)
           love.graphics.rectangle("fill", px, py, w, C)
           -- Crust: dark plates sliding across the surface rows
-          if depth < 3 then
+          if depth < 1 then
             local seg = 8
             for sx = px, px + w - 1, seg do
               local h = (floor_((sx + t * 6) / seg) * 73856093 + gy * 19349663) % 100
               if h < 38 then
-                love.graphics.setColor(0.32, 0.07, 0.04, 0.85)
+                love.graphics.setColor(0.5, 0.12, 0.05, 0.7)
                 love.graphics.rectangle("fill", sx, py, math.min(seg - 2, px + w - sx), C)
               end
             end

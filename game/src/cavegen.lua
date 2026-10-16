@@ -42,6 +42,7 @@ local SIZES = {
   worm = { 6, 6 },
   queen = { 84, 84 },
   warden = { 24, 38, true }, -- the bosses
+  golem = { 56, 84, true },
   matron = { 24, 18, true },
   behemoth = { 28, 28 },
   dreadbat = { 30, 21, false, true }, -- (the fourth entry: hangs from a ceiling)
@@ -676,6 +677,19 @@ function cavegen.generate(world, area, seed, tick)
       local hx = x0 + w - 28
       world:fillRect(hx - 19, floorY, hx + 19, floorY + 3, IRON)
       room.hatch = { x0 = hx - 19, x1 = hx + 19, y0 = floorY, y1 = floorY + 3, cx = hx, floorY = floorY, ceilY = y0 }
+    end
+    if arena then
+      -- After a boss: a small brick room under the shop's floor, between the
+      -- merchant and the hatch, reached down a narrow shaft (two one-way
+      -- ledges to climb back out by). A teleport pad stands in it that takes
+      -- the hunter home to camp, at a price (src.shop).
+      local rx = x0 + 600
+      world:fillRect(rx - 46, floorY, rx + 46, floorY + 52, BRICK)
+      world:fillRect(rx - 42, floorY + 6, rx + 42, floorY + 46, AIR)
+      world:fillRect(rx - 8, floorY, rx + 8, floorY + 5, AIR)
+      ladders[#ladders + 1] = { x0 = rx - 9, x1 = rx + 9, y = floorY + 31 }
+      ladders[#ladders + 1] = { x0 = rx - 9, x1 = rx + 9, y = floorY + 16 }
+      room.back = { cx = rx, floorY = floorY + 47, x0 = rx - 42, x1 = rx + 42, y0 = floorY + 6 }
     end
     return room
   end

@@ -234,6 +234,48 @@ local function bartenderStall(s)
   people.draw("bartender", x - 4, g - 11 + 11, s.near and (s.facing or 1) or 1, s.near and "stand" or "work", s.hammer)
 end
 
+-- The saloon's bottles that glow for the house rules switched on (each rule
+-- has its own two bottles on the back shelf, in its own colour)
+local RULE_BOTTLES = {
+  rotgut = { bottles = { 0, 1 }, color = { 0.55, 1, 0.3 } },
+  powderkeg = { bottles = { 3, 4 }, color = { 1, 0.4, 0.18 } },
+  lean = { bottles = { 6, 7 }, color = { 1, 0.85, 0.3 } },
+}
+
+-- Drawn after the lighting, so they shine in the dark
+function people.drawStallGlow(s, t)
+  if s.id ~= "bartender" then
+    return
+  end
+  local meta = require("src.meta")
+  local x, g = s.x, s.y
+  for rule, def in pairs(RULE_BOTTLES) do
+    if meta.ruleOn(rule) then
+      local pulse = 0.65 + 0.3 * math.sin(t * 3 + def.bottles[1])
+      local c = def.color
+      for _, i in ipairs(def.bottles) do
+        R(c, x - 19 + i * 5, g - 27, 4, 6, 0.35 * pulse) -- the halo
+        R(c, x - 18 + i * 5, g - 26, 2, 4, pulse)
+        R({ 1, 1, 1 }, x - 18 + i * 5, g - 27, 2, 1, 0.8 * pulse)
+      end
+    end
+  end
+end
+
+-- The glow's lights
+function people.addStallLights(s, lighting)
+  if s.id ~= "bartender" then
+    return
+  end
+  local meta = require("src.meta")
+  for rule, def in pairs(RULE_BOTTLES) do
+    if meta.ruleOn(rule) then
+      local c = def.color
+      lighting.add(s.x - 16 + (def.bottles[1] + 0.5) * 5, s.y - 24, 26, c[1], c[2], c[3], 0.7)
+    end
+  end
+end
+
 local STALLS = { apothecary = apothecaryStall, cartographer = cartographerStall, bartender = bartenderStall }
 
 function people.drawStall(s)
@@ -246,7 +288,7 @@ function people.drawStall(s)
 end
 
 -- Where each stall's lantern/glow is (for lights and the emissive pass): {dx, dy}
-local GLOW = { apothecary = { 14, -6, { 0.45, 1, 0.5 } }, cartographer = { -6, -18, { 1, 0.75, 0.4 } }, bartender = { 12, -20, { 1, 0.78, 0.38 } } }
+local GLOW = { apothecary = { 14, -6, { 0.45, 1, 0.5 } }, cartographer = { -6, -18, { 1, 0.75, 0.4 } }, bartender = { 12, -20, { 0.4, 0.65, 1 } } }
 
 function people.glow(id)
   return GLOW[id]

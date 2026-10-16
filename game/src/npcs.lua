@@ -241,7 +241,7 @@ local function nearestCamp(player)
 end
 
 local function nearBoard(player)
-  if not board then
+  if not board or not meta.boardOpen() then
     return false
   end
   local px, py = player:center()
@@ -766,7 +766,7 @@ function npcs.draw(view, player)
   for _, s in pairs(camp) do
     s.bare = bare
   end
-  if board and inView(view, board.x, board.y, 40) then
+  if board and meta.boardOpen() and inView(view, board.x, board.y, 40) then
     drawBoard(view)
   end
   for _, c in ipairs(cages) do
@@ -802,6 +802,7 @@ function npcs.drawEmissive(view)
   for id, s in pairs(camp) do
     if meta.atCamp(id) and inView(view, s.x, s.y, 60) then
       local fl = 0.8 + 0.2 * math.sin(t * 9 + 3)
+      people.drawStallGlow(s, t)
       if people.glow(id) then
         local gl = people.glow(id)
         R({ gl[3][1], gl[3][2], gl[3][3], 0.55 + 0.3 * fl }, s.x + gl[1], s.y + gl[2], 2, 2)
@@ -825,6 +826,7 @@ function npcs.addLights(lighting, view)
   end
   for id, s in pairs(camp) do
     if meta.atCamp(id) and inView(view, s.x, s.y, 120) then
+      people.addStallLights(s, lighting)
       if people.glow(id) then
         local gl = people.glow(id)
         lighting.add(s.x + gl[1], s.y + gl[2], 60, gl[3][1], gl[3][2], gl[3][3], 0.5)

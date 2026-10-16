@@ -120,7 +120,7 @@ end
 -- hall is built when all six have come)
 local function occupied(l, stage)
   if l.id == "board" then
-    return true
+    return meta.boardOpen()
   elseif l.id == "hall" then
     return stage >= 3
   end
@@ -422,19 +422,21 @@ function town.drawEmissive(view)
     if l.top and inView(view, l.x - 40, l.x + 40) and l.id ~= "board" and meta.atCamp(l.id) then
       local P, cx = l.top, l.x
       local fl = 0.8 + 0.2 * math.sin(t * 9 + l.x)
+      local lamp = l.id == "bartender" and { 0.45, 0.68, 1 } or { 1, 0.78, 0.38 } -- (blue at the saloon)
+      local glass = l.id == "bartender" and { 0.35, 0.6, 1 } or { 1, 0.74, 0.36 }
       if stage == 3 then
         for _, wx in ipairs({ cx - 21, cx + 9 }) do
-          R({ 1, 0.74, 0.36, 0.38 + 0.1 * fl }, wx + 1, P - 47, 4, 10)
-          R({ 1, 0.74, 0.36, 0.38 + 0.1 * fl }, wx + 6, P - 47, 3, 10)
+          R({ glass[1], glass[2], glass[3], 0.38 + 0.1 * fl }, wx + 1, P - 47, 4, 10)
+          R({ glass[1], glass[2], glass[3], 0.38 + 0.1 * fl }, wx + 6, P - 47, 3, 10)
         end
-        R({ 1, 0.78, 0.38, fl }, cx - 30, P - 22, 1, 3)
-        R({ 1, 0.78, 0.38, fl }, cx + 29, P - 22, 1, 3)
+        R({ lamp[1], lamp[2], lamp[3], fl }, cx - 30, P - 22, 1, 3)
+        R({ lamp[1], lamp[2], lamp[3], fl }, cx + 29, P - 22, 1, 3)
       else
         for _, wx in ipairs({ cx - 16, cx + 8 }) do
-          R({ 1, 0.74, 0.36, 0.5 + 0.15 * fl }, wx + 1, P - 36, 5, 3)
+          R({ glass[1], glass[2], glass[3], 0.5 + 0.15 * fl }, wx + 1, P - 36, 5, 3)
         end
-        R({ 1, 0.78, 0.38, fl }, cx - 28, P - 26, 1, 3)
-        R({ 1, 0.78, 0.38, fl }, cx + 27, P - 26, 1, 3)
+        R({ lamp[1], lamp[2], lamp[3], fl }, cx - 28, P - 26, 1, 3)
+        R({ lamp[1], lamp[2], lamp[3], fl }, cx + 27, P - 26, 1, 3)
       end
     end
   end
@@ -447,10 +449,14 @@ function town.addLights(lighting, view)
   end
   for _, l in ipairs(town.LOTS) do
     if l.top and inView(view, l.x - 100, l.x + 100) and l.id ~= "board" and meta.atCamp(l.id) then
-      lighting.add(l.x - 30, l.top - 24, 40, 1, 0.7, 0.36, 0.4)
-      lighting.add(l.x + 30, l.top - 24, 40, 1, 0.7, 0.36, 0.4)
+      -- (the saloon's lights are blue: the warm ones were lost in the camp's glow)
+      local blue = l.id == "bartender"
+      local c = blue and { 0.35, 0.6, 1 } or { 1, 0.7, 0.36 }
+      local k = blue and 0.7 or 0.4
+      lighting.add(l.x - 30, l.top - 24, blue and 52 or 40, c[1], c[2], c[3], k)
+      lighting.add(l.x + 30, l.top - 24, blue and 52 or 40, c[1], c[2], c[3], k)
       if stage == 3 then
-        lighting.add(l.x, l.top - 42, 60, 1, 0.74, 0.4, 0.4)
+        lighting.add(l.x, l.top - 42, blue and 76 or 60, c[1], blue and c[2] or 0.74, blue and c[3] or 0.4, k)
       end
     end
   end

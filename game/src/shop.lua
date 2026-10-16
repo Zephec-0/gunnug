@@ -127,6 +127,7 @@ function shop.populate(room, world, level, child)
     locked = false,
     entered = false,
     heal = { x = room.x + RANGE + 105 },
+    back = room.back, -- after a boss: the room under the floor with the way home (cavegen)
   }
   shops[#shops + 1] = s
   local function add(entry, x)
@@ -265,7 +266,43 @@ local function healAmount(player)
 end
 
 -- E: buys from the nearest pedestal. Returns true if it handled the key.
+-- The way home -----------------------------------------------------------------
+
+-- Set by src.game: takes the hunter back to camp (and charges him for it)
+shop.onReturn = nil
+shop.RETURN_GOLD, shop.RETURN_HEALTH = 0.8, 0.8 -- the share of his gold and of his max health the trip costs
+local returnArm = 0 -- seconds left to confirm a teleport (the first press only warns)
+
+-- Is the point in the room under the shop floor?
+local function inBack(s, px, py)
+  local b = s.back
+  return b ~= nil and px > b.x0 - 12 and px < b.x1 + 12 and py > b.y0 - 40 and py < b.floorY + 4
+end
+
+local function padNear(player)
+  local px, py = player:center()
+  for _, s in ipairs(shops) do
+    local b = s.back
+    if b and math.abs(px - b.cx) < 16 and math.abs(py - (b.floorY - 8)) < 16 then
+      return s
+    end
+  end
+  return nil
+end
+
 function shop.interact(player)
+  if padNear(player) then
+    local px, py = player:center()
+    if returnArm > 0 and shop.onReturn then
+      returnArm = 0
+      shop.onReturn(player)
+    else
+      returnArm = 4
+      effects.popup(px, py - 14, "Press again: home costs " .. math.floor(shop.RETURN_GOLD * 100) .. "% of your gold and " .. math.floor(shop.RETURN_HEALTH * 100) .. "% of your max health", { 0.7, 0.95, 1 })
+      audio.play("deny", 0.5)
+    end
+    return true
+  end
   local s, kind, e = nearest(player)
   if not s then
     return false
@@ -398,10 +435,12 @@ local function inside(room, px, py, margin)
   return px > room.x - margin and px < room.x + room.w + margin and py > room.y - margin and py < room.y + room.h + margin
 end
 
+
 -- The hatch plate drops a moment after the chain snaps, and leaving the shop
 -- locks it
 function shop.update(dt, player)
   local px, py = player:center()
+  returnArm = math.max(0, returnArm - dt)
   for _, s in ipairs(shops) do
     s.px = px
     for _, e in ipairs(s.stock) do
@@ -428,7 +467,7 @@ function shop.update(dt, player)
           offerPerks(s)
         end
         s.entered = true
-      elseif s.entered and not inside(s.room, px, py, 10) then
+      elseif s.entered and not inside(s.room, px, py, 10) and not inBack(s, px, py) then
         s.locked = true
         effects.popup(px, py - 14, "The shop closes behind you", { 0.8, 0.8, 0.88 })
       end
@@ -619,8 +658,27 @@ end
 
 -- Pedestals with the goods on top, the healing pedestal, and the hatch chain
 -- (before the lighting)
+-- The teleport pad in the room under the floor: a stone plate with a rune ring
+local function drawPad(s)
+  local b = s.back
+  love.graphics.setColor(0.30, 0.28, 0.34)
+  love.graphics.rectangle("fill", b.cx - 15, b.floorY - 3, 30, 3)
+  love.graphics.setColor(0.42, 0.40, 0.48)
+  love.graphics.rectangle("fill", b.cx - 15, b.floorY - 3, 30, 1)
+  love.graphics.setColor(0.20, 0.19, 0.24)
+  love.graphics.rectangle("fill", b.cx - 11, b.floorY - 5, 22, 2)
+end
+
+local function backOnScreen(s, view)
+  local b = s.back
+  return b and b.x1 > view.x and b.x0 < view.x + view.w and b.floorY > view.y - 10 and b.y0 < view.y + view.h + 10
+end
+
 function shop.draw(view)
   for _, s in ipairs(shops) do
+    if backOnScreen(s, view) then
+      drawPad(s)
+    end
     if roomOnScreen(s, view) then
       drawBanners(s)
       drawFloorDressing(s)
@@ -694,6 +752,18 @@ end
 function shop.drawEmissive(view)
   local t = love.timer.getTime()
   for _, s in ipairs(shops) do
+    if backOnScreen(s, view) then
+      -- the pad's ring of light, rising off it
+      local b = s.back
+      local pulse = 0.55 + 0.35 * math.sin(t * 2.4)
+      for i = 0, 11 do
+        local a = i / 12 * math.pi * 2 + t * 0.8
+        love.graphics.setColor(0.45, 0.9, 1, pulse)
+        love.graphics.rectangle("fill", math.floor(b.cx + math.cos(a) * 12), math.floor(b.floorY - 6 + math.sin(a) * 2.5), 1, 1)
+      end
+      love.graphics.setColor(0.5, 0.95, 1, 0.25 + 0.15 * pulse)
+      love.graphics.rectangle("fill", b.cx - 10, b.floorY - 22, 20, 17)
+    end
     if roomOnScreen(s, view) then
       drawMerchantEyes(s)
       -- Runes carved into each perk dais, glowing brighter as the hunter nears
@@ -753,6 +823,9 @@ end
 
 function shop.addLights(lighting, view)
   for _, s in ipairs(shops) do
+    if backOnScreen(s, view) then
+      lighting.add(s.back.cx, s.back.floorY - 12, 58, 0.4, 0.8, 1, 0.8)
+    end
     if roomOnScreen(s, view) and not s.locked then
       lighting.add(merchantX(s) + 14, s.floorY - 12, 70, 1, 0.78, 0.45, 0.8)
     end
@@ -781,6 +854,24 @@ function shop.drawScreen(toScreen, font, player)
   end
   local gold = player.inventory.gold
   local sw, sh = love.graphics.getDimensions()
+  if not player.dead then
+    local ps = padNear(player)
+    if ps then
+      local sx, sy = toScreen(ps.back.cx, ps.back.floorY - 24)
+      local armed = returnArm > 0
+      local line1 = "[" .. input.label("interact") .. "] " .. (armed and "Confirm: go home" or "Return to camp")
+      local line2 = "Costs " .. math.floor(shop.RETURN_GOLD * 100) .. "% of your gold and " .. math.floor(shop.RETURN_HEALTH * 100) .. "% of your max health (" .. math.ceil(player.maxHp * shop.RETURN_HEALTH) .. " HP)"
+      local function put(text, y, color)
+        local x = math.floor(sx - font:getWidth(text) / 2)
+        love.graphics.setColor(0, 0, 0, 0.85)
+        love.graphics.print(text, x + 2, y + 2)
+        love.graphics.setColor(color)
+        love.graphics.print(text, x, y)
+      end
+      put(line1, math.floor(sy - font:getHeight() * 2 - 4), armed and { 1, 0.85, 0.5 } or { 0.7, 0.95, 1 })
+      put(line2, math.floor(sy - font:getHeight()), (player.hp <= math.ceil(player.maxHp * shop.RETURN_HEALTH)) and { 1, 0.45, 0.4 } or { 0.85, 0.88, 0.95 })
+    end
+  end
 
   local function label(text, sx, sy, color, grade)
     if grade then

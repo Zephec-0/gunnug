@@ -14,7 +14,7 @@ local items = require("src.items")
 
 local fuser = {}
 
-fuser.NEED = 20 -- ether for one fusion
+fuser.NEED = 12 -- ether for one fusion
 local KILL_ETHER = 1 -- a monster's ether...
 local BOSS_ETHER = 10 -- ...and a boss's (a miniboss counts as ten kills)
 local SPARKS_PER_ETHER = 5

@@ -831,6 +831,30 @@ Each building's colour is the lot's `accent`, its lettering `sign`, so a new lot
 - **Controls page** rows shrink to fit above the buttons however many actions there are.
 - **Speech bubbles** never overlap (a later one goes above) and the camp's people greet one at a time. The HUD's right-hand column stacks gold, marks, then a row per carried item (dynamite, flasks, keys, bells), centred under the sack.
 
+### 11a-xvii. Progression pacing, the way home, and more (2026-10-15)
+
+- **Camp pacing** (`meta.lua`): the first run has nothing but the camp site: no elites, no cages. After one death elites spawn and the Gunsmith and Prospector can be found; after two the Apothecary and Cartographer. Slay an elite and die and the bounty board goes up (`p.board`) and the Taxidermist, now caged in the Cinder Warrens (area 4 left path), can be found. The Bartender still comes with the first boss. Cages are placed when an area's props are (`meta.canFind`).
+- **Taxidermist mounts have levels.** First mount 5 marks with 1 elite slain; each upgrade needs 5 more of that kind and costs 1.2x the last (5, 6, 7, 8, 9, 10...), up to level 8. Each level adds half the previous one's bonus (ghoul: +10, +15, +17, +19 health), so mounts taper off. Older saves' `true` counts as level 1.
+- **Gatling gun**: never a random or locked drop until a boss has been slain; the first boss ever slain always drops it. Boss weapons are never worse than grade A.
+- **Fuser** needs 12 ether (was 20). The Apothecary's flask and the Prospector's dynamite are given at the moment the upgrade is bought.
+- **Lava flows** like water at a fifth of the speed (`fluids.lua`, `lavaFlow`); the Cinder Warrens have no water pools. The vault no longer claims digging opens it.
+- **The way home**: under each post-boss shop is a brick room (reached by a shaft with two one-way ledges to climb out) holding a teleport pad. Two presses of interact take the hunter back to camp for 80% of his gold and 80% of his max health (he dies if he has no more than that).
+- **Saloon**: two bottles on the back shelf glow in a rule's colour for each house rule switched on.
+- **Crosshair** (Settings > Crosshair): style (plus, circle, dot, X), colour, opacity, line thickness, length, gap and outline, with a preview.
+
+### 11a-xviii. Boss arenas, the Queen and the Marble Colossus (2026-10-15)
+
+- **The pedestal.** An arena's boss is not there until the hunter presses interact at the pedestal in the middle of the floor. It reads "Defy the <X>" (the area's `defy`: Caverns for the Sulfur Queen, Stone for the Colossus, Depths for the Matron, Heights for the Dreadbat). Pressing it seals the tunnels into the arena with iron plugs (`a.plugs`, removed with the gates when the boss dies), clears out every other monster in the arena (`enemies.vanish`), and brings the boss. A boss area's boss is a `lv.boss` record in `scenes/catacombs.lua`.
+- **Camera.** During a fight the view pulls out to 1.35x (`render.setZoom`, in 0.05 steps: the virtual screen grows, the interface keeps its size) and looks between the hunter and the nearest piece of the boss (`camera.setFocus`).
+- **The Sulfur Queen** splits like a slime: below 33% health she splits in two, and each piece splits again below half of its own, three times over (up to eight pieces). She is drawn as a wobbling, breathing blob with eyes that follow the hunter and a mouth that gapes when she spits. Her gas no longer catches fire: no brazier fires in her arena and her minions are bloaters, never wisps.
+- **The Marble Colossus** (the Quarry's boss, `enemies.defs.golem`): lumbers slowly; swipe (close), thrown stones (1/2/3 by stage), a stomp that sends a stone wave along the floor (both ways from stage 2) and an eye beam that sweeps an arc. At two thirds and a third of its health it kneels in a crystal shell, invulnerable, while little golems (`minigolem`) walk in from both sides of the arena; once they are all dead the shell breaks and it is open to attack (x1.5 damage) for a moment.
+
+**Boss ideas still to build** (so we can come back to them):
+
+- *The Deep (Mire Matron's flooded hall, "Defy the Depths"):* an anglerfish-like leviathan or a drowned kraken in the arena's lake. Tentacles reach up through the water to grab and drag the hunter under (a drowning timer); a lure-light drifts through the dark and the true body only shows when it lunges; phases raise and drain the water level (platforms appear and sink), and it calls shoals of piranhas. Weak point: the lure's eye when it bites.
+- *The Summit (the Dreadbat's peak, "Defy the Heights"):* a storm roc / thunder drake at the mountain top. Dives, wing gusts that push the hunter toward the edge, lightning that strikes marked spots (telegraphed circles), and a phase where it lands on the summit's spire and calls a storm whose strikes are the only way to break its charged shield (lure a strike onto it).
+- *The Sky (above the gate, "Defy the Heavens"):* a clockwork or star warden on floating platforms. The arena is a ring of islands; it rotates a beam like a clock hand, drops gravity wells that pull the hunter's bullets, and splits into three constellations that must be shot in the order they light up.
+
 ### 11a-x. Performance notes (2026-10-15)
 
 Measured with a scripted profiler (8 ghouls, a burst of three shots every 5 frames): plain hits cost under 0.1 ms a frame; the lag around fights came from what hits set off.

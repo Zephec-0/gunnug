@@ -7,6 +7,7 @@
 local audio = require("src.audio")
 local config = require("src.config")
 local effects = require("src.effects")
+local materials = require("src.materials")
 
 local cfg = config.player
 
@@ -18,6 +19,7 @@ local UPPER_ARM, FOREARM = 3.8, 3.8
 local HIP_HEIGHT = 9.9 -- hip above the feet when standing
 local CROUCH_HIP = 5.6
 local SLIDE_HIP = 4.2
+local ROLL_HIP = 4.6 -- tucked into a ball for the dodge roll
 local TORSO = 6.4 -- hip to neck
 -- How each kind of gun (its def.model) is held:
 --   reach    how far in front of the shoulder the trigger hand holds the grip
@@ -31,6 +33,7 @@ local HOLDS = {
   pistol = { reach = 5.8, pull = 2.0, tip = 0.35 },
   shotgun = { reach = 3.4, support = 4.2, pull = 1.6, tip = 0.3 },
   automatic = { reach = 3.4, support = 4.0, pull = 1.4, tip = 0.22 },
+  gatling = { reach = 3.0, support = 5.5, pull = 1.0, tip = 0.1 }, -- heavy: hugged in close, barely kicks
 }
 local TAIL_LINKS, TAIL_LINK = 4, 2.2
 
@@ -52,6 +55,16 @@ end
 --          grip, b = down from it) or "belt" (a = in front of the hips, b = below them)
 --   carry  the hand is holding a fresh round / magazine
 -- Events fire once per reload as progress passes them.
+-- Each gun answers the reload's moments with its own sounds (see src.audio)
+local RELOAD_SOUND = {
+  revolver = { eject = "rev_eject", click = "rev_load", snap = "rev_close" }, -- shells dispensed, all rounds in, a click
+  shotgun = { eject = "sg_eject", click = "sg_shell", snap = "sg_close" },
+  automatic = { eject = "mg_eject", drum = "mg_eject", click = "mg_load", snap = "mg_click" }, -- clip out, loaded, click
+  gatling = { eject = "gat_rattle", drum = "gat_rattle", click = "gat_spin", snap = "gat_click" }, -- chain rattle, barrels spin, click
+  pistol = { eject = "pi_magdrop", click = "pi_magin", snap = "pi_click" }, -- mag drop, mag in, click
+  semiauto = { eject = "pi_magdrop", click = "pi_magin", snap = "pi_click" },
+}
+
 local RELOAD = {
   -- Tip the muzzle up, tap out the shells, fetch rounds from the belt, thumb
   -- them in and snap the cylinder shut
@@ -96,7 +109,7 @@ local RELOAD = {
       { p = 0.93, tilt = 0.0, reach = 0.3, kind = "gun", a = 1.0, b = 0 },
       { p = 1.00, tilt = 0.0, reach = 0.0, kind = "gun", a = -1.3, b = 0 },
     },
-    events = { { 0.74, "click" }, { 0.93, "snap" } },
+    events = { { 0.18, "eject" }, { 0.74, "click" }, { 0.93, "snap" } },
   },
   -- Drop the drum, a new one from the belt, slap it on, haul back the
   -- charging handle
@@ -115,6 +128,9 @@ local RELOAD = {
     events = { { 0.24, "drum" }, { 0.76, "click" }, { 0.93, "snap" } },
   },
 }
+
+-- The Gatling's hopper comes off and goes on like the machine gun's drum
+RELOAD.gatling = RELOAD.automatic
 
 local function smooth(t)
   return t * t * (3 - 2 * t)
@@ -137,7 +153,7 @@ local COLORS = {
   coat = { 0.15, 0.13, 0.17 },
   coatLight = { 0.27, 0.23, 0.30 },
   coatDark = { 0.09, 0.08, 0.11 },
-  lining = { 0.46, 0.07, 0.11 },
+  lining = { 0.20, 0.80, 0.66 }, -- the ether's teal (the fuser's colour)
   mantle = { 0.64, 0.63, 0.62 },
   mantleLight = { 0.78, 0.77, 0.75 },
   mantleDark = { 0.44, 0.43, 0.45 },
@@ -211,7 +227,12 @@ local function torso(player)
   end
   local lean = clamp(b.vx / cfg.walkSpeed, -1.2, 1.2) * 1.4
   local torsoLen = TORSO
-  if player.sliding then
+  if player.rollT then
+    -- Hunched right over, head tucked in
+    hip, dip = ROLL_HIP, 0
+    lean = player.rollDir * 3.8
+    torsoLen = TORSO - 2.8
+  elseif player.sliding then
     -- Lean back against the direction of travel
     lean = -(b.vx >= 0 and 1 or -1) * 3.2
     torsoLen = TORSO - 0.8
@@ -327,7 +348,7 @@ function anim.updateDeath(player, dt)
     for _ = 1, 34 do
       local ang = love.math.random() * math.pi * 2
       local s = 40 + love.math.random() * 130
-      local col = love.math.random() < 0.55 and { 0.55, 0.06, 0.09 } or (love.math.random() < 0.5 and COLORS.coat or COLORS.mantle)
+      local col = love.math.random() < 0.55 and COLORS.lining or (love.math.random() < 0.5 and COLORS.coat or COLORS.mantle)
       effects.particle(cx, fy - 6, math.cos(ang) * s, math.sin(ang) * s - 60, 0.8 + love.math.random() * 0.6, col, 480)
     end
   end
@@ -373,17 +394,47 @@ function anim.updateReload(player)
           )
         end
         gun.spent = 0
-        audio.play("reload_click", 0.8, 0.8)
+        audio.play(RELOAD_SOUND[model] and RELOAD_SOUND[model].eject or "reload_click", 0.8, RELOAD_SOUND[model] and 1 or 0.8)
       elseif what == "drum" then
         effects.casing(neckX + f * 4, neckY + 6, f * 12 + player.body.vx * 0.3, 10, 4, { 0.22, 0.22, 0.27 })
-        audio.play("reload_click", 0.9, 0.6)
+        audio.play(RELOAD_SOUND[model] and RELOAD_SOUND[model].drum or "reload_click", 0.9, RELOAD_SOUND[model] and 1 or 0.6)
       elseif what == "click" then
-        audio.play("reload_click")
+        audio.play(RELOAD_SOUND[model] and RELOAD_SOUND[model].click or "reload_click")
       elseif what == "snap" then
-        audio.play("reload_snap")
+        audio.play(RELOAD_SOUND[model] and RELOAD_SOUND[model].snap or "reload_snap")
         a.recoil = math.max(a.recoil, 0.25) -- a little jolt as it closes
       end
     end
+  end
+end
+
+local STEP_SOUND = {
+  [materials.DIRT] = "step_dirt", [materials.SAND] = "step_sand", [materials.SANDSTONE] = "step_rock", [materials.ROCK] = "step_rock",
+  [materials.BEDROCK] = "step_rock", [materials.WOOD] = "step_wood", [materials.BRICK] = "step_rock", [materials.STONEBRICK] = "step_rock",
+  [materials.GOLDORE] = "step_rock", [materials.IRON] = "step_metal", [materials.SLATE] = "step_rock", [materials.BLUECLAY] = "step_dirt",
+  [materials.SULFUR] = "step_dirt", [materials.BILECLAY] = "step_dirt", [materials.TAILINGS] = "step_dirt", [materials.BASALT] = "step_rock",
+  [materials.ASH] = "step_ash",
+}
+
+-- One footstep: the sound of what is underfoot, and a little puff of it
+function anim.footstep(player)
+  local b = player.body
+  local x, y = math.floor(b.x + b.w / 2), math.floor(b.y + b.h + 1)
+  local id = player.world:get(x, y)
+  local sound = STEP_SOUND[id]
+  if player.inWater then
+    sound = "step_water"
+  end
+  if not sound then
+    return
+  end
+  local k = player.crouched and 0.5 or 1
+  audio.play(sound, k * (0.8 + math.min(0.5, math.abs(b.vx) / 300)))
+  if not player.inWater and love.math.random() < 0.6 then
+    local def = materials.defs[id]
+    local c = def and def.color or { 0.4, 0.4, 0.4 }
+    local g = 0.7 + love.math.random() * 0.4
+    effects.particle(x + (love.math.random() - 0.5) * 4, y - 1, -player.facing * (6 + love.math.random() * 10), -8 - love.math.random() * 10, 0.3, { c[1] * g + 0.1, c[2] * g + 0.1, c[3] * g + 0.1 }, 120)
   end
 end
 
@@ -395,6 +446,12 @@ function anim.update(player, dt)
   end
   a.lastX = b.x
   a.walking = player.grounded and not player.sliding and math.abs(b.vx) > 13
+  -- A footfall each time a foot passes under the body
+  local stepNow = math.floor(a.phase / math.pi)
+  if a.walking and stepNow ~= a.lastStep then
+    anim.footstep(player)
+  end
+  a.lastStep = stepNow
 
   -- Ease the legs back together when standing still
   if not a.walking and player.grounded then
@@ -470,7 +527,13 @@ local function footTargets(player, cx, fy)
   local a, b, f = player.anim, player.body, player.facing
   local fx1, fy1, fx2, fy2
   local bend = f
-  if player.sliding then
+  if player.rollT then
+    -- Knees pulled up to the chest
+    local dir = player.rollDir
+    bend = dir
+    fx1, fy1 = cx + dir * 2.6, fy - 4.2
+    fx2, fy2 = cx + dir * 0.6, fy - 2.6
+  elseif player.sliding then
     -- Lead leg stretched out along the ground, trailing leg folded under
     local dir = b.vx >= 0 and 1 or -1
     bend = dir
@@ -550,7 +613,10 @@ local function drawCoat(player, fy, hipX, hipY, neckX, neckY)
   local flutter = math.sin(a.time * 11) * math.min(1, math.abs(player.body.vx) / 80) * 0.8
   local tailX = hipX - f * 2.8 + a.coatX
   local tailY = hemY + a.coatY + flutter
-  if player.crouched or player.sliding then
+  if player.rollT then
+    -- Wrapped round the ball, not trailing
+    tailX, tailY = hipX - f * 2.2, hipY + 2.5
+  elseif player.crouched or player.sliding then
     tailY = math.min(tailY, fy - 0.5) -- drapes on the ground
   end
   local outline = {
@@ -572,7 +638,7 @@ local function drawCoat(player, fy, hipX, hipY, neckX, neckY)
     outline = reversed
   end
   fillPolygon(outline, COLORS.coat)
-  -- Crimson lining glimpsed at the open front, and a lit leading edge
+  -- Teal lining (the ether's colour) glimpsed at the open front, and a lit leading edge
   segment(hipX + f * 1.6, hipY, hipX + f * 2.0 + a.coatX * 0.35, hemY - 1, COLORS.lining)
   segment(neckX + f * 1.2, neckY + 1, hipX + f * 1.4, hipY - 1, COLORS.coatLight)
   segment(hipX - f * 2.4, hipY, tailX, tailY, COLORS.coatDark)
@@ -615,19 +681,22 @@ end
 
 -- Mostly hat, riding low: a tall crown and a wide drooping brim pulled down
 -- to the eyes, the face lost in shadow except for the two glowing eyes
+-- The brim sits two pixels over the neck, so the hat comes right down to the
+-- shoulders with just the eyes showing between (a future hat swaps the crown
+-- and brim drawn below; the face column and collar stay)
 local function headOrigin(neckX, neckY, f)
-  return math.floor(neckX + f * 0.6), math.floor(neckY - 4)
+  return math.floor(neckX + f * 0.6), math.floor(neckY - 2)
 end
 
 local function drawHead(neckX, neckY, f, nohat)
   local hx, hy = headOrigin(neckX, neckY, f)
   local left = f > 0 and hx - 2 or hx -- 3-wide face column
   love.graphics.setColor(COLORS.shadow)
-  love.graphics.rectangle("fill", left, hy, 3, 3)
+  love.graphics.rectangle("fill", left, hy, 3, 2)
   -- High coat collar around the jaw
   love.graphics.setColor(COLORS.coat)
-  love.graphics.rectangle("fill", left - f, hy + 1, 1, 3)
-  love.graphics.rectangle("fill", f > 0 and left or left + 2, hy + 2, 1, 2)
+  love.graphics.rectangle("fill", left - f, hy + 1, 1, 2)
+  love.graphics.rectangle("fill", f > 0 and left or left + 2, hy + 1, 1, 2)
   -- Eyes just under the brim
   pixel(hx, hy + 1, COLORS.eye)
   pixel(hx - f * 2, hy + 1, COLORS.eye)
@@ -713,12 +782,32 @@ function GUN_DRAW.automatic(x, y, dx, dy, px, py, len)
   pixel(x + dx * len, y + dy * len, COLORS.silver)
 end
 
+local BRASS = { 0.86, 0.64, 0.24 }
+
+function GUN_DRAW.gatling(x, y, dx, dy, px, py, len, gun)
+  -- Stock back into the shoulder, a brass breech casing, the hopper on top
+  segment(x, y, x - dx * 3 + px * 1.4, y + py * 1.4 - dy * 3, COLORS.grip)
+  segment(x - dx, y - dy, x + dx * 4, y + dy * 4, BRASS)
+  segment(x - dx - px, y - dy - py, x + dx * 4 - px, y + dy * 4 - py, BRASS)
+  pixel(x + dx * 1.5 - px * 2, y + dy * 1.5 - py * 2, COLORS.gunMid)
+  pixel(x + dx * 2.5 - px * 2, y + dy * 2.5 - py * 2, COLORS.gunMid)
+  -- The barrel cluster: two rows whose shading swaps as the barrels turn
+  local turn = gun and math.floor(gun.spin or 0) % 2 == 1
+  segment(x + dx * 4, y + dy * 4, x + dx * len, y + dy * len, turn and COLORS.gunMid or COLORS.gun)
+  segment(x + dx * 4 - px, y + dy * 4 - py, x + dx * len - px, y + dy * len - py, turn and COLORS.gun or COLORS.gunMid)
+  -- Brass bands round the barrels and a bright muzzle
+  pixel(x + dx * 8, y + dy * 8, BRASS)
+  pixel(x + dx * 8 - px, y + dy * 8 - py, BRASS)
+  pixel(x + dx * len, y + dy * len, COLORS.silver)
+  pixel(x + dx * len - px, y + dy * len - py, COLORS.silver)
+end
+
 local function drawGun(gun, gripX, gripY, angle, f)
   local dx, dy = math.cos(angle), math.sin(angle)
   local px, py = -dy * f, dx * f
   local def = gun and gun.def
   local draw = GUN_DRAW[def and def.model or "revolver"] or GUN_DRAW.revolver
-  draw(gripX, gripY, dx, dy, px, py, def and def.length or 8.8)
+  draw(gripX, gripY, dx, dy, px, py, def and def.length or 8.8, gun)
 end
 
 -- Eye position under the brim (the lighting adds a faint glow there)
@@ -728,13 +817,54 @@ function anim.eyes(player)
   return hx + 0.5, hy + 1.5
 end
 
--- The eyes again, after the lighting, so they glow even in the dark
+-- How the whole figure is turned this frame: toppling over when dead, a
+-- twirl on a double jump, a forward somersault in a dodge roll.
+-- Returns the angle and the point it turns about.
+local function bodyTurn(player)
+  local a, b = player.anim, player.body
+  local cx, fy = b.x + b.w / 2, b.y + b.h
+  if player.dead and a.deathT then
+    local k = clamp(a.deathT / 0.75, 0, 1)
+    local theta = a.deathDir * (math.pi / 2) * k * k
+    -- A small bounce as he lands
+    if a.deathT > 0.75 then
+      theta = theta - a.deathDir * 0.1 * math.exp(-(a.deathT - 0.75) * 9) * math.abs(math.sin((a.deathT - 0.75) * 14))
+    end
+    return theta, cx, fy
+  elseif player.rollT then
+    -- One full turn, quick through the middle, about the middle of the ball
+    local k = clamp(player.rollT / cfg.rollTime, 0, 1)
+    return player.rollDir * math.pi * 2 * smooth(k), cx + player.rollDir * 1.5, fy - 7.5
+  elseif a.flip then
+    return player.facing * math.pi * 2 * smooth(a.flip), cx, fy - 9
+  end
+  return 0, cx, fy
+end
+
+local function turned(player, draw)
+  local theta, px, py = bodyTurn(player)
+  if theta == 0 then
+    draw()
+    return
+  end
+  love.graphics.push()
+  love.graphics.translate(px, py)
+  love.graphics.rotate(theta)
+  love.graphics.translate(-px, -py)
+  draw()
+  love.graphics.pop()
+end
+
+-- The eyes again, after the lighting, so they glow even in the dark (turned
+-- with the body, so they stay in the face through a roll or a twirl)
 function anim.drawEyes(player)
-  local _, _, _, _, neckX, neckY = torso(player)
-  local f = player.facing
-  local hx, hy = headOrigin(neckX, neckY, f)
-  pixel(hx, hy + 1, COLORS.eye)
-  pixel(hx - f * 2, hy + 1, COLORS.eye)
+  turned(player, function()
+    local _, _, _, _, neckX, neckY = torso(player)
+    local f = player.facing
+    local hx, hy = headOrigin(neckX, neckY, f)
+    pixel(hx, hy + 1, COLORS.eye)
+    pixel(hx - f * 2, hy + 1, COLORS.eye)
+  end)
 end
 
 local function drawFigure(player)
@@ -788,20 +918,26 @@ local function drawFigure(player)
     -- Arms hang limp (the gun is gone)
     gripX, gripY = sx + f * 1.5, sy + 6.5
     supX, supY = sx - f * 1.0, sy + 6.8
+  elseif player.rollT then
+    -- Arms wrapped round the knees, the gun tucked away for the moment
+    gripX, gripY = cx + f * 3.2, fy - 3.6
+    supX, supY = cx + f * 2.4, fy - 3.0
   end
 
   local fx1, fy1, fx2, fy2, bend = footTargets(player, cx, fy)
 
   -- Back to front: mantle tail, back arm, legs, coat over the thighs, mantle,
   -- head, gun, front arm
-  drawMantleTail(player)
+  if not player.rollT then
+    drawMantleTail(player) -- (its cloth trails in the world, so it would flail in a somersault)
+  end
   drawArm(sx - f * 0.6, sy, supX, supY, COLORS.coatDark)
   drawLeg(hipX - f * 0.6, hipY, fx2, fy2, bend, COLORS.trousersDark, COLORS.bootsDark)
   drawLeg(hipX + f * 0.6, hipY, fx1, fy1, bend, COLORS.trousers, COLORS.boots)
   drawCoat(player, fy, hipX, hipY, neckX, neckY)
   drawMantle(player, neckX, neckY)
   drawHead(neckX, neckY, f, dead)
-  if not dead then
+  if not dead and player.gun and not player.rollT then
     drawGun(player.gun, gripX, gripY, gunAngle, f)
   end
   drawArm(sx + f * 0.6, sy, gripX, gripY, COLORS.coat)
@@ -814,32 +950,11 @@ local function drawFigure(player)
 end
 
 -- Draws the hunter. A dying hunter topples over from the feet; a double
--- jump twirls him around his middle.
+-- jump twirls him around his middle; a dodge roll somersaults him forward.
 function anim.draw(player)
-  local a, b = player.anim, player.body
-  local cx, fy = b.x + b.w / 2, b.y + b.h
-  local theta, pivotY = 0, fy
-  if player.dead and a.deathT then
-    local k = clamp(a.deathT / 0.75, 0, 1)
-    theta = a.deathDir * (math.pi / 2) * k * k
-    -- A small bounce as he lands
-    if a.deathT > 0.75 then
-      theta = theta - a.deathDir * 0.1 * math.exp(-(a.deathT - 0.75) * 9) * math.abs(math.sin((a.deathT - 0.75) * 14))
-    end
-  elseif a.flip then
-    theta = player.facing * math.pi * 2 * smooth(a.flip)
-    pivotY = fy - 9
-  end
-  if theta == 0 then
+  turned(player, function()
     drawFigure(player)
-    return
-  end
-  love.graphics.push()
-  love.graphics.translate(cx, pivotY)
-  love.graphics.rotate(theta)
-  love.graphics.translate(-cx, -pivotY)
-  drawFigure(player)
-  love.graphics.pop()
+  end)
 end
 
 return anim

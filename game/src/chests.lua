@@ -3,9 +3,11 @@
 -- (80%) or a generated weapon (20%), never both, so the real prize is saved
 -- for playing well down to the shop. Deeper chests hold more gold and
 -- better-equipped weapons (more pre-fitted slots).
+local input = require("src.input")
 local audio = require("src.audio")
 local effects = require("src.effects")
 local guns = require("src.guns")
+local meta = require("src.meta")
 local pickups = require("src.pickups")
 
 local chests = {}
@@ -14,6 +16,7 @@ local list = {}
 
 local REACH = 20 -- how close the hunter must be to open one
 local GOLD_CHANCE = 0.8 -- a chest holds gold with this chance, otherwise a weapon
+local LOCKED_CHANCE = 0.3 -- and that weapon is a locked kind (src.meta) with this chance
 local W, H = 14, 9
 
 function chests.clear()
@@ -23,7 +26,9 @@ end
 -- x: centre, groundY: the first solid pixel under it. depth: 0 at the top of
 -- the cave, 1 at the bottom.
 function chests.spawn(x, groundY, depth)
-  list[#list + 1] = { x = x, y = groundY, depth = depth or 0, opened = false, open = 0 }
+  local c = { x = x, y = groundY, depth = depth or 0, opened = false, open = 0 }
+  list[#list + 1] = c
+  return c
 end
 
 local function distance(c, player)
@@ -53,11 +58,19 @@ function chests.interact(player)
   end
   c.opened = true
   audio.play("chest")
-  if love.math.random() < GOLD_CHANCE then
+  if c.vault then
+    -- A vault's chest: a fine weapon, something locked, and gold
+    local ix = c.x
+    pickups.dropWeapon(ix, c.y - H - 2, guns.generate(meta.lockedArchetype(), nil, 0.8), -30, -150)
+    pickups.dropItem(ix + 4, c.y - H - 2, meta.lockedItem() or require("src.items").random(), 30, -140)
+    pickups.dropGold(ix, c.y - H, math.floor(love.math.random(60, 110) * (1 + c.depth)))
+  elseif love.math.random() < GOLD_CHANCE then
     pickups.dropGold(c.x, c.y - H, math.floor(love.math.random(15, 40) * (1 + c.depth)))
   else
     local fit = 0.15 + 0.45 * c.depth
-    pickups.dropWeapon(c.x, c.y - H - 2, guns.generate(nil, nil, fit), (love.math.random() - 0.5) * 50, -150)
+    -- Now and then a gun the Gunsmith doesn't know yet: something to see
+    local locked = love.math.random() < LOCKED_CHANCE and meta.lockedArchetype() or nil
+    pickups.dropWeapon(c.x, c.y - H - 2, guns.generate(locked, nil, fit), (love.math.random() - 0.5) * 50, -150)
   end
   for _ = 1, 12 do
     effects.particle(c.x + (love.math.random() - 0.5) * 8, c.y - H, (love.math.random() - 0.5) * 70, -40 - love.math.random() * 70, 0.5, { 1, 0.85, 0.4 }, 300, true)
@@ -140,12 +153,12 @@ function chests.drawScreen(toScreen, font, player)
     return
   end
   local sx, sy = toScreen(c.x, c.y - H - 8)
-  local text = "[E] Open chest"
+  local text = "[" .. input.label("interact") .. "] Open chest"
   love.graphics.setFont(font)
   local x, y = math.floor(sx - font:getWidth(text) / 2), math.floor(sy - font:getHeight())
   love.graphics.setColor(0, 0, 0, 0.85)
   love.graphics.print(text, x + 2, y + 2)
-  love.graphics.setColor(1, 0.9, 0.6)
+  love.graphics.setColor(0.97, 0.98, 1)
   love.graphics.print(text, x, y)
 end
 

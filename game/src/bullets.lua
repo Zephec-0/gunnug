@@ -7,10 +7,15 @@
 local audio = require("src.audio")
 local destruction = require("src.destruction")
 local effects = require("src.effects")
+local gore = require("src.gore")
+local juice = require("src.juice")
+local fluids = require("src.fluids")
 local enemies = require("src.enemies")
 local materials = require("src.materials")
 local props = require("src.props")
 local shop = require("src.shop")
+local npcs = require("src.npcs")
+local minedecor = require("src.minedecor")
 local targets = require("src.targets")
 
 local bullets = {}
@@ -71,10 +76,16 @@ local function explode(b, w, x, y)
   -- explosives aren't a tunnelling tool)
   local radius = (26 + 6 * (count - 1)) * (scale < 1 and 0.75 or 1)
   local damage = (10 + 4 * (count - 1)) * scale
-  destruction.dig(w, x, y, math.max(3, radius * 0.25), 1.5, b.dx, b.dy)
+  local dug = b.blastDig or math.max(3, radius * 0.25)
+  destruction.dig(w, x, y, dug, b.blastPower or 1.5, b.dx, b.dy)
+  gore.scorch(w, x, y, dug + radius * 0.12)
   effects.explosion(x, y, radius)
+  fluids.explosion(x, y, radius) -- lights any gas it reaches
   audio.play("explosion")
+  juice.blast(x, y, radius)
   shop.explosion(x, y, radius)
+  npcs.explosion(x, y, radius)
+  minedecor.explosion(x, y, radius)
   -- The hunter is caught in it too
   local player = bullets.player
   if player and not player.dead then
@@ -82,7 +93,7 @@ local function explode(b, w, x, y)
     local dx, dy = px - x, py - y
     local dist = math.sqrt(dx * dx + dy * dy)
     if dist < radius + 6 then
-      player:hurt(math.max(1, math.floor(damage * (1 - 0.6 * dist / (radius + 6)) + 0.5)), x, y)
+      player:hurt(math.max(1, math.floor(damage * (1 - 0.6 * dist / (radius + 6)) + 0.5)), x, y, b.cause or "selfblast")
     end
   end
   enemies.damageArea(x, y, radius, math.max(1, math.floor(damage + 0.5)), 260 * scale)
@@ -100,9 +111,10 @@ local function explode(b, w, x, y)
 end
 
 -- A blast out of nowhere (Unstable Rounds going off in the barrel)
-function bullets.blast(x, y, count, scale)
+-- cause: what set it off, for the death recap (src.deaths): "dynamite", "keg"; default his own
+function bullets.blast(x, y, count, scale, dig, digPower, cause)
   if world then
-    explode({ explosive = { count = count, scale = scale }, dx = 0, dy = -1 }, world, x, y)
+    explode({ explosive = { count = count, scale = scale }, dx = 0, dy = -1, blastDig = dig, blastPower = digPower, cause = cause }, world, x, y)
   end
 end
 
@@ -189,6 +201,9 @@ local function trailFx(b, dt)
     local a = r() * math.pi * 2
     effects.particle(x + math.cos(a) * 7, y + math.sin(a) * 7, -math.cos(a) * 30, -math.sin(a) * 30, 0.22, { 0.6, 0.35, 0.95 }, 0, true) -- drawn inward
   end
+  if b.burn then
+    fluids.ignite(b.x, b.y, 0.6, true) -- incendiary rounds light gas as they pass through it
+  end
   if b.burn and r() < dt * 45 then
     effects.particle(x, y, (r() - 0.5) * 10, -10, 0.35, { 1, 0.55 + r() * 0.3, 0.15 }, -60, true) -- embers
   end
@@ -257,6 +272,7 @@ local function hurtEnemy(b, enemy)
   end
   enemies.hit(enemy, damage, b.dx, b.dy, b.impact, b.crit, fx)
   audio.play("hit")
+  juice.impact(damage, enemy.dead)
   if enemy.isGlob then
     return
   end
@@ -290,6 +306,15 @@ local function step(b, dt, w)
   for _ = 1, steps do
     local nx, ny = b.x + sx, b.y + sy
     local px, py = math.floor(nx), math.floor(ny)
+
+    -- A lamp in the mine: it spills oil, and breaks in a puff of fire
+    local lamp = minedecor.lampAt(nx, ny)
+    if lamp then
+      b.x, b.y = nx, ny
+      minedecor.hitLamp(lamp, b.damage)
+      effects.impact(b.x, b.y, b.dx, b.dy, nil)
+      return finish(b, w, b.x, b.y, true)
+    end
 
     local prop = props.hitTest(nx, ny)
     if prop then
@@ -327,6 +352,15 @@ local function step(b, dt, w)
     if chainOf then
       b.x, b.y = nx, ny
       shop.breakChain(chainOf)
+      effects.impact(b.x, b.y, b.dx, b.dy, nil)
+      return finish(b, w, b.x, b.y, true)
+    end
+
+    -- A prisoner's padlock: a shot breaks it
+    local cage = npcs.lockAt(px, py)
+    if cage then
+      b.x, b.y = nx, ny
+      npcs.breakLock(cage)
       effects.impact(b.x, b.y, b.dx, b.dy, nil)
       return finish(b, w, b.x, b.y, true)
     end

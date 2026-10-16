@@ -1,5 +1,7 @@
 # LÖVE Game Development & Automated Build System
 
+> **Play Gunnug on Windows:** download `Gunnug-windows.zip` from the [latest release](https://github.com/Zephec-0/gunnug/releases/latest), unzip it and run `Gunnug.exe`. To build it yourself: `python tools/build-windows.py` (needs LÖVE 11.5 installed); the output goes to `builds/`.
+
 Turn your [LÖVE](https://love2d.org/) game ideas into polished multi-platform releases with this powerful template! Featuring professional IDE integration, automated builds, and everything you need to go from prototype to published game. Built for LÖVE 💕
 
 - 🛑 **Don't fork this repository directly!**

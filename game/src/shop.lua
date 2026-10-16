@@ -1,5 +1,7 @@
 -- The shop rooms (design doc §9). At the end of each area the shop has:
---   * three perk pedestals at the far left (free: take one and the others
+--   * a DPS dummy at the far left end, a practice range for checking guns
+--     (an enemy of kind "dummy", spawned by the area; see src.enemies);
+--   * three perk pedestals to its right (free: take one and the others
 --     vanish; the perks are rolled when the hunter walks in);
 --   * a healing pedestal to their right (ivory, with a glowing heart): each E
 --     buys 10% of max health, priced by how much health is missing;
@@ -12,10 +14,13 @@
 --
 -- A weapon bought with all three weapon slots full opens the compare prompt
 -- first, and is only paid for once you pick which gun to replace.
+local input = require("src.input")
 local audio = require("src.audio")
+local fontFace = require("src.fonts")
 local compare = require("src.compare")
 local effects = require("src.effects")
 local guns = require("src.guns")
+local gunInfo = require("src.gunInfo")
 local inventory = require("src.inventory")
 local icons = require("src.icons")
 local itembar = require("src.itembar")
@@ -33,9 +38,15 @@ local SPACING = 20
 local ITEMS = 8
 local HEAL_FRACTION = 0.1 -- of max health per purchase
 local HATCH_DELAY = 0.7 -- seconds between the chain breaking and the plate dropping
+local RANGE = 80 -- the DPS dummy's range at the left end; the goods start after it
 
--- Set by the scene: called with the shop's area number when its hatch is about
--- to open, so the area below can be made sure to exist
+-- Where the DPS dummy stands in a shop room (x centre, floor y)
+function shop.dummySpot(room)
+  return room.x + 26, room.y + room.h
+end
+
+-- Set by the scene: called with the index of the area below when a shop's hatch
+-- is about to open, so that area can be made sure to exist
 shop.onHatchBreak = nil
 
 function shop.clear()
@@ -54,17 +65,69 @@ local function priceOf(entry)
   return math.max(5, roundTo5(entry.price * perks.prod("shopPrice")))
 end
 
--- Creates the shop for the room rectangle { x, y, w, h, hatch? } of area `level`
-function shop.populate(room, world, level)
+-- Fills a weapon stock entry with a freshly generated gun and its price
+local function rollWeapon(entry)
+  local gun = guns.generate(nil, nil, 0.3)
+  local fitted = 0
+  for slot = 1, gun.slotCount do
+    if gun.slots[slot] then
+      fitted = fitted + 1
+    end
+  end
+  entry.gun, entry.name = gun, gun.name
+  entry.price = roundTo5(45 + 25 * fitted + 8 * math.max(0, gun.slotCount - gun.def.slots) + 12 * (gunInfo.gradeIndex(gun) - 1) + love.math.random(0, 20))
+  return entry
+end
+
+-- Fills an item stock entry with a random item not already in `used`
+local function rollItem(entry, used)
+  local item
+  for _ = 1, 200 do
+    item = items.random()
+    if not used[item.id] then
+      break
+    end
+  end
+  used[item.id] = true
+  local range = items.rarities[item.rarity].price
+  entry.item, entry.name = item, item.name
+  entry.price = roundTo5(love.math.random(range[1], range[2]))
+  return entry
+end
+
+-- Rolls the goods again in every shop not yet visited. The world is built
+-- behind the title screen before a save file is chosen, so the stock is
+-- rolled again once one is, from that profile's unlocked pool.
+function shop.restock()
+  for _, s in ipairs(shops) do
+    if not s.entered then
+      local used = {}
+      for _, e in ipairs(s.stock) do
+        if not e.sold and e.kind == "weapon" then
+          rollWeapon(e)
+        elseif not e.sold and e.kind == "item" then
+          rollItem(e, used)
+        end
+      end
+    end
+  end
+end
+
+-- Creates the shop for the room rectangle { x, y, w, h, hatch? } of an area
+-- `level` deep (the heal price rises with it); child: the index of the area
+-- its hatch drops into
+function shop.populate(room, world, level, child)
   local s = {
     room = room,
     world = world,
     level = level,
+    child = child,
     floorY = room.y + room.h,
     stock = {},
     locked = false,
     entered = false,
-    heal = { x = room.x + 105 },
+    heal = { x = room.x + RANGE + 105 },
+    back = room.back, -- after a boss: the room under the floor with the way home (cavegen)
   }
   shops[#shops + 1] = s
   local function add(entry, x)
@@ -77,29 +140,16 @@ function shop.populate(room, world, level)
 
   -- Three perk pedestals at the far left; what they hold is rolled on entry
   for i = 1, 3 do
-    add({ kind = "perk", name = "", price = 0, hidden = true }, room.x + 30 + (i - 1) * 25)
+    add({ kind = "perk", name = "", price = 0, hidden = true }, room.x + RANGE + 30 + (i - 1) * 25)
   end
 
   -- Two weapons, then the ammo types and attachments to their right
   for w = 1, 2 do
-    local gun = guns.generate(nil, nil, 0.3)
-    local fitted = 0
-    for slot = 1, gun.slotCount do
-      if gun.slots[slot] then
-        fitted = fitted + 1
-      end
-    end
-    add({ kind = "weapon", gun = gun, name = gun.name, price = roundTo5(45 + 25 * fitted + 8 * math.max(0, gun.slotCount - gun.def.slots) + love.math.random(0, 20)) }, room.x + 155 + (w - 1) * 30)
+    add(rollWeapon({ kind = "weapon" }), room.x + RANGE + 155 + (w - 1) * 30)
   end
   local used = {}
   for i = 1, ITEMS do
-    local item
-    repeat
-      item = items.random()
-    until not used[item.id]
-    used[item.id] = true
-    local range = items.rarities[item.rarity].price
-    add({ kind = "item", item = item, name = item.name, price = roundTo5(love.math.random(range[1], range[2])) }, room.x + 235 + (i - 1) * SPACING)
+    add(rollItem({ kind = "item" }, used), room.x + RANGE + 235 + (i - 1) * SPACING)
   end
 
   local h = room.hatch
@@ -166,6 +216,18 @@ local function takePerk(s, e, player)
   end
 end
 
+-- The weapon on a pedestal under a world point (for the hover card)
+function shop.weaponAt(wx, wy)
+  for _, s in ipairs(shops) do
+    for _, e in ipairs(s.stock) do
+      if e.kind == "weapon" and not e.sold and math.abs(wx - e.x) <= 12 and wy >= s.floorY - 20 and wy <= s.floorY then
+        return e.gun, e.x, s.floorY - 22
+      end
+    end
+  end
+  return nil
+end
+
 -- What the hunter is next to: returns shop, kind ("stock" or "heal"), entry
 local function nearest(player)
   local px, py = player:center()
@@ -188,11 +250,15 @@ local function nearest(player)
   return bs, bk, be
 end
 
--- Healing is priced by how much health is missing: 5g when nearly full up to
--- 25g when nearly dead, for each 10% of max health
-local function healCost(player)
+-- Healing is priced by how much health is missing: 8g when nearly full up to
+-- 40g when nearly dead, for each 10% of max health, and 80% dearer with each
+-- area further down (shop s of area s.level)
+local HEAL_AREA_RISE = 0.8
+
+local function healCost(player, s)
   local missing = (player.maxHp - player.hp) / player.maxHp
-  return roundTo5((5 + 20 * missing) * perks.prod("healPrice"))
+  local area = 1 + (s.level - 1) * HEAL_AREA_RISE
+  return roundTo5((8 + 32 * missing) * area * perks.prod("healPrice"))
 end
 
 local function healAmount(player)
@@ -200,7 +266,43 @@ local function healAmount(player)
 end
 
 -- E: buys from the nearest pedestal. Returns true if it handled the key.
+-- The way home -----------------------------------------------------------------
+
+-- Set by src.game: takes the hunter back to camp (and charges him for it)
+shop.onReturn = nil
+shop.RETURN_GOLD, shop.RETURN_HEALTH = 0.8, 0.8 -- the share of his gold and of his max health the trip costs
+local returnArm = 0 -- seconds left to confirm a teleport (the first press only warns)
+
+-- Is the point in the room under the shop floor?
+local function inBack(s, px, py)
+  local b = s.back
+  return b ~= nil and px > b.x0 - 12 and px < b.x1 + 12 and py > b.y0 - 40 and py < b.floorY + 4
+end
+
+local function padNear(player)
+  local px, py = player:center()
+  for _, s in ipairs(shops) do
+    local b = s.back
+    if b and math.abs(px - b.cx) < 16 and math.abs(py - (b.floorY - 8)) < 16 then
+      return s
+    end
+  end
+  return nil
+end
+
 function shop.interact(player)
+  if padNear(player) then
+    local px, py = player:center()
+    if returnArm > 0 and shop.onReturn then
+      returnArm = 0
+      shop.onReturn(player)
+    else
+      returnArm = 4
+      effects.popup(px, py - 14, "Press again: home costs " .. math.floor(shop.RETURN_GOLD * 100) .. "% of your gold and " .. math.floor(shop.RETURN_HEALTH * 100) .. "% of your max health", { 0.7, 0.95, 1 })
+      audio.play("deny", 0.5)
+    end
+    return true
+  end
   local s, kind, e = nearest(player)
   if not s then
     return false
@@ -222,7 +324,7 @@ function shop.interact(player)
       audio.play("deny", 0.6)
       return true
     end
-    local cost = healCost(player)
+    local cost = healCost(player, s)
     if inv.gold < cost then
       say("Not enough gold", { 1, 0.45, 0.4 })
       audio.play("deny")
@@ -257,14 +359,12 @@ function shop.interact(player)
     audio.play("buy")
     say(e.name, e.item.color)
   else
-    for i = 1, inventory.WEAPON_SLOTS do
-      if not inv.weapons[i] then
-        inv.weapons[i] = e.gun
-        shop.take(e, inv)
-        audio.play("buy")
-        say(e.name, { 1, 0.9, 0.6 })
-        return true
-      end
+    local slot = inv:freeWeaponSlot()
+    if slot then
+      inv.weapons[slot] = e.gun
+      shop.take(e, inv)
+      audio.play("buy")
+      return true
     end
     compare.open(e.gun, e) -- paid for when a weapon to replace is chosen
   end
@@ -299,7 +399,7 @@ function shop.breakChain(s)
   end
   -- The area below must exist before the floor opens onto it
   if shop.onHatchBreak then
-    shop.onHatchBreak(s.level)
+    shop.onHatchBreak(s.child)
   end
 end
 
@@ -335,10 +435,12 @@ local function inside(room, px, py, margin)
   return px > room.x - margin and px < room.x + room.w + margin and py > room.y - margin and py < room.y + room.h + margin
 end
 
+
 -- The hatch plate drops a moment after the chain snaps, and leaving the shop
 -- locks it
 function shop.update(dt, player)
   local px, py = player:center()
+  returnArm = math.max(0, returnArm - dt)
   for _, s in ipairs(shops) do
     s.px = px
     for _, e in ipairs(s.stock) do
@@ -365,7 +467,7 @@ function shop.update(dt, player)
           offerPerks(s)
         end
         s.entered = true
-      elseif s.entered and not inside(s.room, px, py, 10) then
+      elseif s.entered and not inside(s.room, px, py, 10) and not inBack(s, px, py) then
         s.locked = true
         effects.popup(px, py - 14, "The shop closes behind you", { 0.8, 0.8, 0.88 })
       end
@@ -455,13 +557,18 @@ end
 local function drawFloorDressing(s)
   local r, f = s.room, s.floorY
   love.graphics.setColor(0.40, 0.09, 0.12)
-  rect(r.x + 14, f - 1, 415, 1)
+  rect(r.x + RANGE + 14, f - 1, 415, 1)
   love.graphics.setColor(0.80, 0.62, 0.24)
-  for x = r.x + 14, r.x + 428, 7 do
+  for x = r.x + RANGE + 14, r.x + RANGE + 428, 7 do
     rect(x, f - 1, 3, 1)
   end
-  -- Barrel against the left wall
-  local bx = r.x + 6
+  -- A chalk line marking the end of the dummy's range
+  love.graphics.setColor(0.62, 0.60, 0.56)
+  for x = r.x + RANGE - 30, r.x + RANGE - 26 do
+    rect(x, f - 1, 1, 1)
+  end
+  -- Barrel at the edge of the range
+  local bx = r.x + RANGE - 6
   love.graphics.setColor(0.36, 0.24, 0.14)
   rect(bx, f - 11, 9, 11)
   love.graphics.setColor(0.46, 0.32, 0.20)
@@ -470,7 +577,7 @@ local function drawFloorDressing(s)
   rect(bx, f - 9, 9, 1)
   rect(bx, f - 3, 9, 1)
   -- Crates stacked between the merchant and the hatch
-  local cx = r.x + 520
+  local cx = r.x + RANGE + 520
   for i = 0, 1 do
     local y = f - 10 - i * 10
     love.graphics.setColor(0.42, 0.30, 0.18)
@@ -486,7 +593,7 @@ end
 
 -- The merchant: a hooded figure behind a counter, breathing slowly
 local function merchantX(s)
-  return s.room.x + 455
+  return s.room.x + RANGE + 455
 end
 
 local function drawMerchant(s)
@@ -551,8 +658,27 @@ end
 
 -- Pedestals with the goods on top, the healing pedestal, and the hatch chain
 -- (before the lighting)
+-- The teleport pad in the room under the floor: a stone plate with a rune ring
+local function drawPad(s)
+  local b = s.back
+  love.graphics.setColor(0.30, 0.28, 0.34)
+  love.graphics.rectangle("fill", b.cx - 15, b.floorY - 3, 30, 3)
+  love.graphics.setColor(0.42, 0.40, 0.48)
+  love.graphics.rectangle("fill", b.cx - 15, b.floorY - 3, 30, 1)
+  love.graphics.setColor(0.20, 0.19, 0.24)
+  love.graphics.rectangle("fill", b.cx - 11, b.floorY - 5, 22, 2)
+end
+
+local function backOnScreen(s, view)
+  local b = s.back
+  return b and b.x1 > view.x and b.x0 < view.x + view.w and b.floorY > view.y - 10 and b.y0 < view.y + view.h + 10
+end
+
 function shop.draw(view)
   for _, s in ipairs(shops) do
+    if backOnScreen(s, view) then
+      drawPad(s)
+    end
     if roomOnScreen(s, view) then
       drawBanners(s)
       drawFloorDressing(s)
@@ -572,9 +698,9 @@ function shop.draw(view)
           if e.kind == "perk" then
             -- (the perk itself floats over its pedestal, drawn glowing)
           elseif e.kind == "weapon" then
-            local icon = itembar.weaponIcon(e.gun.def)
+            local icon = itembar.groundIcon(e.gun)
             love.graphics.setColor(dim, dim, dim)
-            love.graphics.draw(icon, e.x - 8, s.floorY - 5 - icon:getHeight())
+            love.graphics.draw(icon, math.floor(e.x - icon:getWidth() / 2), s.floorY - 5 - icon:getHeight())
           else
             local c = e.item.color
             local img = icons.get(e.item)
@@ -626,6 +752,18 @@ end
 function shop.drawEmissive(view)
   local t = love.timer.getTime()
   for _, s in ipairs(shops) do
+    if backOnScreen(s, view) then
+      -- the pad's ring of light, rising off it
+      local b = s.back
+      local pulse = 0.55 + 0.35 * math.sin(t * 2.4)
+      for i = 0, 11 do
+        local a = i / 12 * math.pi * 2 + t * 0.8
+        love.graphics.setColor(0.45, 0.9, 1, pulse)
+        love.graphics.rectangle("fill", math.floor(b.cx + math.cos(a) * 12), math.floor(b.floorY - 6 + math.sin(a) * 2.5), 1, 1)
+      end
+      love.graphics.setColor(0.5, 0.95, 1, 0.25 + 0.15 * pulse)
+      love.graphics.rectangle("fill", b.cx - 10, b.floorY - 22, 20, 17)
+    end
     if roomOnScreen(s, view) then
       drawMerchantEyes(s)
       -- Runes carved into each perk dais, glowing brighter as the hunter nears
@@ -685,6 +823,9 @@ end
 
 function shop.addLights(lighting, view)
   for _, s in ipairs(shops) do
+    if backOnScreen(s, view) then
+      lighting.add(s.back.cx, s.back.floorY - 12, 58, 0.4, 0.8, 1, 0.8)
+    end
     if roomOnScreen(s, view) and not s.locked then
       lighting.add(merchantX(s) + 14, s.floorY - 12, 70, 1, 0.78, 0.45, 0.8)
     end
@@ -713,8 +854,31 @@ function shop.drawScreen(toScreen, font, player)
   end
   local gold = player.inventory.gold
   local sw, sh = love.graphics.getDimensions()
+  if not player.dead then
+    local ps = padNear(player)
+    if ps then
+      local sx, sy = toScreen(ps.back.cx, ps.back.floorY - 24)
+      local armed = returnArm > 0
+      local line1 = "[" .. input.label("interact") .. "] " .. (armed and "Confirm: go home" or "Return to camp")
+      local line2 = "Costs " .. math.floor(shop.RETURN_GOLD * 100) .. "% of your gold and " .. math.floor(shop.RETURN_HEALTH * 100) .. "% of your max health (" .. math.ceil(player.maxHp * shop.RETURN_HEALTH) .. " HP)"
+      local function put(text, y, color)
+        local x = math.floor(sx - font:getWidth(text) / 2)
+        love.graphics.setColor(0, 0, 0, 0.85)
+        love.graphics.print(text, x + 2, y + 2)
+        love.graphics.setColor(color)
+        love.graphics.print(text, x, y)
+      end
+      put(line1, math.floor(sy - font:getHeight() * 2 - 4), armed and { 1, 0.85, 0.5 } or { 0.7, 0.95, 1 })
+      put(line2, math.floor(sy - font:getHeight()), (player.hp <= math.ceil(player.maxHp * shop.RETURN_HEALTH)) and { 1, 0.45, 0.4 } or { 0.85, 0.88, 0.95 })
+    end
+  end
 
-  local function label(text, sx, sy, color)
+  local function label(text, sx, sy, color, grade)
+    if grade then
+      local x, y = math.floor(sx - fontFace.gradedWidth(font, text, grade) / 2), math.floor(sy - font:getHeight())
+      fontFace.printGraded(font, text, grade, x, y, color, 2)
+      return y
+    end
     local x, y = math.floor(sx - font:getWidth(text) / 2), math.floor(sy - font:getHeight())
     love.graphics.setColor(0, 0, 0, 0.85)
     love.graphics.print(text, x + 2, y + 2)
@@ -731,13 +895,13 @@ function shop.drawScreen(toScreen, font, player)
         local amount = healAmount(player)
         local price
         if amount > 0 then
-          price = healCost(player)
-          label(price .. "g", hx, hy, gold >= price and { 1, 0.86, 0.45 } or { 0.85, 0.4, 0.38 })
+          price = healCost(player, s)
+          label(price .. "g", hx, hy, gold >= price and { 0.95, 0.97, 1 } or { 0.85, 0.4, 0.38 })
         else
           label("Full health", hx, hy, { 0.7, 0.85, 0.7 })
         end
         if ns == s and nkind == "heal" then
-          label("[E] Heal +" .. math.max(amount, 0) .. " HP", hx, hy - font:getHeight() - 4, { 1, 0.95, 0.75 })
+          label("[" .. input.label("interact") .. "] Heal +" .. math.max(amount, 0) .. " HP", hx, hy - font:getHeight() - 4, { 0.98, 0.99, 1 })
         end
       end
       for _, e in ipairs(s.stock) do
@@ -747,15 +911,15 @@ function shop.drawScreen(toScreen, font, player)
             local price = priceOf(e)
             local y = sy
             if e.kind ~= "perk" then
-              y = label(price .. "g", sx, sy, gold >= price and { 1, 0.86, 0.45 } or { 0.85, 0.4, 0.38 })
+              y = label(price .. "g", sx, sy, gold >= price and { 0.95, 0.97, 1 } or { 0.85, 0.4, 0.38 })
             end
             if e == nentry then
               local thing = e.perk or e.item
-              local title = (e.kind == "perk" and "[E] Take " or "[E] Buy ") .. e.name
+              local title = (e.kind == "perk" and ("[" .. input.label("interact") .. "] Take ") or ("[" .. input.label("interact") .. "] Buy ")) .. e.name
               if thing and thing.rarity ~= "common" then
                 title = title .. " (" .. items.rarities[thing.rarity].name .. ")"
               end
-              y = label(title, sx, y - 2, thing and thing.rarity == "cursed" and { 1, 0.55, 0.5 } or { 1, 0.95, 0.75 })
+              y = label(title, sx, y - 2, thing and thing.rarity == "cursed" and { 1, 0.55, 0.5 } or { 0.98, 0.99, 1 }, e.kind == "weapon" and gunInfo.grade(e.gun) or nil)
               if thing and thing.desc then
                 -- The effect, wrapped in a box above the prompt
                 local width = 460

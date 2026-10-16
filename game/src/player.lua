@@ -3,7 +3,9 @@ local Body = require("src.body")
 local audio = require("src.audio")
 local bullets = require("src.bullets")
 local config = require("src.config")
+local controls = require("src.input")
 local effects = require("src.effects")
+local juice = require("src.juice")
 local enemies = require("src.enemies")
 local perks = require("src.perks")
 local physics = require("src.physics")
@@ -45,6 +47,16 @@ function Player.new(x, y, world, inv)
     if prop then
       return true, prop
     end
+    -- One-way platforms: only landed on, falling or standing, and S drops through
+    local plats = self.world.platforms
+    if plats and self.body.vy >= 0 and not controls.down("down") then
+      local feet = cy + ch
+      for _, p in ipairs(plats) do
+        if feet == p.y + 1 and cx + cw > p.x0 and cx <= p.x1 then
+          return true
+        end
+      end
+    end
     return false
   end
 
@@ -82,6 +94,11 @@ function Player.new(x, y, world, inv)
   self.springBonus = 0 -- extra speed from a slide-jump, fading while airborne
   self.springDir = 1
   self.slideGrace = 0 -- a jump this soon after a slide still springs
+  self.rollT = nil -- seconds into the current dodge roll (nil when not rolling)
+  self.rollDir = 1
+  self.rollCooldown = 0
+  self.rollBuffer = 0
+  self.rollDodged = false -- something was dodged during this roll (shown once)
   self.anim = playeranim.new()
   self:updateMuzzle()
   return self
@@ -104,8 +121,52 @@ function Player:pressJump()
   self.jumpBufferTimer = cfg.jumpBufferTime
 end
 
+-- Shift: roll as soon as the hunter is on the ground (see Player:update)
+function Player:pressRoll()
+  self.rollBuffer = cfg.rollBuffer
+end
+
+-- Is he inside the invulnerable part of a dodge roll?
+function Player:isDodging()
+  return self.rollT ~= nil and self.rollT >= cfg.rollIFrameStart and self.rollT <= cfg.rollIFrameEnd
+end
+
+-- Something would have hit him mid-roll: a little "Dodge", once per roll
+function Player:dodged()
+  if self.rollDodged then
+    return
+  end
+  self.rollDodged = true
+  local cx = self:center()
+  effects.popup(cx, self.body.y - 6, "Dodge", { 0.7, 0.85, 1 })
+  audio.play("tick", 0.5, 1.4)
+end
+
+function Player:startRoll(dir)
+  local b = self.body
+  self.rollT = 0
+  self.rollDir = dir
+  self.rollCooldown = cfg.rollCooldown
+  self.rollBuffer = 0
+  self.rollDodged = false
+  self.sliding = false
+  self.springBonus = 0
+  self.kickTimer = 0
+  if not self.crouched then
+    -- Tucked into a ball: the crouching hitbox, so it fits under low gaps
+    self.crouched = true
+    self:setHeight(cfg.crouchHeight)
+  end
+  b.vx = dir * cfg.rollSpeed
+  audio.play("land", 0.8, 1.5)
+  for _ = 1, 8 do
+    local c = 0.4 + love.math.random() * 0.15
+    effects.particle(b.x + b.w / 2 - dir * 2 + (love.math.random() - 0.5) * 6, b.y + b.h - 1, -dir * (20 + love.math.random() * 40), -8 - love.math.random() * 30, 0.45, { c, c * 0.9, c * 0.85 }, 200)
+  end
+end
+
 function Player:kick()
-  if self.kickCooldown > 0 then
+  if self.kickCooldown > 0 or self.rollT then
     return
   end
   self.kickCooldown = cfg.kickCooldown
@@ -206,17 +267,16 @@ function Player:shoot()
     audio.play("reload", 0.8)
   end
   self:applyRecoil(self.aimAngle)
+  juice.shot(self.aimAngle, st.recoil, quiet)
   playeranim.onShoot(self)
 end
 
 -- Takes damage from something at (fromX, fromY): knocks the hunter away from
 -- it and makes him briefly invulnerable. Returns true if the hit landed.
-function Player:hurt(amount, fromX, fromY)
-  if self.dead or self.invuln > 0 then
-    return false
-  end
-  local b = self.body
-  local cx, cy = self:center()
+-- Takes amount off the hunter's health after his damage modifiers (perks,
+-- cursed items), with Second Wind and Adrenaline. Returns the damage dealt.
+function Player:loseHealth(amount)
+  local cx = self:center()
   local vulnerable = self.gun and self.gun:stats().vulnerable or 0
   amount = math.max(1, math.floor(amount * perks.prod("dmgTaken") * (1 + vulnerable) + 0.5))
   if self.hp - amount <= 0 and perks.has("second_wind") and not self.inventory.secondWindUsed then
@@ -224,14 +284,66 @@ function Player:hurt(amount, fromX, fromY)
     self.inventory.secondWindUsed = true
     amount = 0
     self.hp = math.ceil(self.maxHp * 0.3)
-    effects.popup(cx, b.y - 14, "Second Wind!", { 0.55, 0.9, 0.8 })
+    effects.popup(cx, self.body.y - 14, "Second Wind!", { 0.55, 0.9, 0.8 })
   else
     self.hp = math.max(0, self.hp - amount)
   end
   if perks.has("adrenaline") then
     self.haste = 3
   end
+  return amount
+end
+
+-- Takes health outright (no perks, no Second Wind): the price of the way
+-- home. Dies if it is all he has. Returns true if he is still alive.
+function Player:drainHealth(amount, source)
+  if self.dead then
+    return false
+  end
+  self.lastSource, self.lastEnemy = source, nil
+  self.hp = math.max(0, self.hp - amount)
+  if self.hp <= 0 then
+    audio.play("death")
+    self.dead = true
+    playeranim.onDeath(self, self.facing)
+    return false
+  end
+  return true
+end
+
+-- Damage that wears the hunter down rather than striking him (poison gas):
+-- no knockback or invulnerability, and the blink after a hit doesn't stop it
+-- source: what is doing it (an id for src.deaths: an enemy kind, "gas", "fire"...)
+function Player:hurtOverTime(amount, color, source)
+  if self.dead then
+    return
+  end
+  self.lastSource, self.lastEnemy = source, nil
+  amount = self:loseHealth(amount)
+  self.hurtFlash = math.max(self.hurtFlash, 0.35)
+  local cx = self:center()
+  effects.popup(cx, self.body.y - 4, "-" .. amount, color or { 1, 0.3, 0.3 })
+  if self.hp <= 0 then
+    audio.play("death")
+    self.dead = true
+    playeranim.onDeath(self, self.facing)
+  end
+end
+
+function Player:hurt(amount, fromX, fromY, source)
+  if self.dead or self.invuln > 0 then
+    return false
+  end
+  if self:isDodging() then
+    self:dodged()
+    return false
+  end
+  self.lastSource, self.lastEnemy = source, nil -- (the last thing to hurt him is what killed him; an enemy sets lastEnemy to itself)
+  local b = self.body
+  local cx, cy = self:center()
+  amount = self:loseHealth(amount)
   audio.play(self.hp <= 0 and "death" or "hurt")
+  juice.hurt(amount)
   self.invuln = cfg.hurtInvulnerability
   self.hurtFlash = 1
   effects.popup(cx, b.y - 4, "-" .. amount, { 1, 0.3, 0.3 })
@@ -408,18 +520,23 @@ end
 
 function Player:update(dt, aimX, aimY)
   local b = self.body
-  self.ignoreProps = props.overlapping(b.x, b.y, b.w, b.h)
+  self.ignoreProps = props.overlapping(b.x, b.y, b.w, b.h, self.ignoreProps)
 
   -- Aim
   local sx, sy = self:shoulder()
   self.aimAngle = math.atan2(aimY - sy, aimX - sx)
   self.facing = aimX >= sx and 1 or -1
+  if self.rollT then
+    self.facing = self.rollDir -- (tucked up, he faces the way he rolls)
+  end
   self:updateMuzzle()
 
   -- Timers
   self.kickCooldown = math.max(0, self.kickCooldown - dt)
   self.kickTimer = math.max(0, self.kickTimer - dt)
   self.jumpBufferTimer = math.max(0, self.jumpBufferTimer - dt)
+  self.rollCooldown = math.max(0, self.rollCooldown - dt)
+  self.rollBuffer = math.max(0, self.rollBuffer - dt)
   self:checkGround()
   self.coyoteTimer = self.grounded and cfg.coyoteTime or math.max(0, self.coyoteTimer - dt)
   if self.grounded then
@@ -430,18 +547,40 @@ function Player:update(dt, aimX, aimY)
   -- Horizontal movement. Momentum above walk speed (from recoil) is kept and
   -- only bled off by friction, so walking never cancels a recoil jump.
   local input = 0
-  if love.keyboard.isDown("a") then
+  if controls.down("left") then
     input = input - 1
   end
-  if love.keyboard.isDown("d") then
+  if controls.down("right") then
     input = input + 1
   end
-  self:updateCrouch(dt, love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl"))
 
-  local walk = cfg.walkSpeed * perks.prod("speed") * (self.haste > 0 and 1.35 or 1)
+  -- Dodge roll: starts on the ground (or just off it), runs its course, then
+  -- he stands back up (or stays crouched under a low ceiling)
+  if self.rollBuffer > 0 and not self.rollT and self.rollCooldown <= 0 and (self.grounded or self.coyoteTimer > 0) and not self.inWater and not self.dead then
+    self:startRoll(input ~= 0 and input or self.facing)
+  end
+  if self.rollT then
+    self.rollT = self.rollT + dt
+    if self.rollT >= cfg.rollTime then
+      self.rollT = nil
+    end
+  end
+  if not self.rollT then
+    self:updateCrouch(dt, controls.down("crouch"))
+  end
+
+  local walk = cfg.walkSpeed * perks.prod("speed") * (self.haste > 0 and 1.35 or 1) * (self.inWater and 0.6 or 1)
   local maxSpeed = (self.crouched and self.grounded) and cfg.crouchSpeed or walk
   local friction = self.grounded and cfg.groundFriction or cfg.airFriction
-  if self.sliding and self.grounded then
+  if self.rollT then
+    -- Rolling ignores steering: fast at first, easing off toward the end
+    local k = self.rollT / cfg.rollTime
+    b.vx = self.rollDir * (cfg.rollSpeed + (cfg.rollEndSpeed - cfg.rollSpeed) * k * k)
+    if self.grounded and love.math.random() < 0.35 then
+      local c = 0.38 + love.math.random() * 0.12
+      effects.particle(b.x + b.w / 2 - self.rollDir * 3, b.y + b.h - 1, -self.rollDir * 15, -6 - love.math.random() * 15, 0.35, { c, c * 0.9, c * 0.85 }, 150)
+    end
+  elseif self.sliding and self.grounded then
     -- Sliding ignores steering and coasts on its momentum. Gravity along the
     -- slope speeds it up going downhill and slows it going uphill.
     local slope = self:groundSlope()
@@ -468,6 +607,7 @@ function Player:update(dt, aimX, aimY)
   -- Jumping. Jumping out of a slide springs higher and further.
   local jumped = false
   if self.jumpBufferTimer > 0 and self.coyoteTimer > 0 then
+    self.rollT = nil -- jumping out of a roll keeps its speed
     if self.crouched and self:canStand() then
       self.crouched = false
       self:setHeight(cfg.height)
@@ -508,7 +648,7 @@ function Player:update(dt, aimX, aimY)
       effects.particle(b.x + b.w / 2 + (love.math.random() - 0.5) * 6, b.y + b.h, (love.math.random() - 0.5) * 60, 20 + love.math.random() * 30, 0.35, { 0.8, 0.92, 1 }, 60, true)
     end
   end
-  local jumpHeld = love.keyboard.isDown("w") or love.keyboard.isDown("space")
+  local jumpHeld = controls.down("jump")
   if self.jumping and not jumpHeld and b.vy < 0 then
     b.vy = b.vy * cfg.jumpCutMultiplier
     self.jumping = false
@@ -523,8 +663,16 @@ function Player:update(dt, aimX, aimY)
     end
   end
 
-  -- Gravity
-  b.vy = math.min(b.vy + config.gravity * cfg.gravityScale * dt, cfg.maxFallSpeed)
+  -- Gravity. In water he sinks slowly and swims up while jump is held.
+  if self.inWater then
+    b.vy = math.min(b.vy + config.gravity * cfg.gravityScale * 0.3 * dt, 90)
+    b.vx = b.vx * (1 - math.min(1, 1.5 * dt))
+    if jumpHeld then
+      b.vy = math.max(b.vy - 520 * dt, -95)
+    end
+  else
+    b.vy = math.min(b.vy + config.gravity * cfg.gravityScale * dt, cfg.maxFallSpeed)
+  end
 
   -- Gun
   self.inventory:update(dt)
@@ -536,7 +684,19 @@ function Player:update(dt, aimX, aimY)
     end
   end
   pickups.extraMagnet = self.gun and self.gun:stats().magnet or 0
-  if love.mouse.isDown(1) then
+  local trigger = love.mouse.isDown(1) and not self.rollT
+  if self.gun and self.gun.def.spoolTime then
+    -- Gatling: the barrels wind up while the trigger is held, ratcheting
+    -- faster and higher as they go
+    self.gun:spinUp(dt, trigger)
+    local spool = self.gun.spool
+    self.spinClick = (self.spinClick or 0) - dt
+    if spool > 0.02 and self.spinClick <= 0 then
+      self.spinClick = 0.16 - 0.12 * spool
+      audio.play("gatling_spin", 0.4 + 0.6 * spool, 0.7 + 0.9 * spool)
+    end
+  end
+  if trigger then
     self:shoot()
   end
 
@@ -551,7 +711,10 @@ function Player:update(dt, aimX, aimY)
   local wasGrounded = self.grounded
   local blocked, blocker = Body.moveX(b, self.collide, b.vx * dt, cfg.stepHeight)
   if blocked then
-    if blocker and input ~= 0 then
+    if blocker and self.rollT then
+      -- A roll bowls small things over
+      props.impulse(blocker, self.rollDir * 60, -25, blocker.body:getX(), b.y + b.h - 2)
+    elseif blocker and input ~= 0 then
       props.push(blocker, input * cfg.pushForce, 0)
     end
     b.vx = 0
@@ -616,7 +779,7 @@ end
 -- Light carried with the hunter, plus the faint glow of his eyes
 function Player:addLights(lighting)
   local cx, cy = self:center()
-  lighting.add(cx, cy, 150, 1, 0.86, 0.66, 0.75)
+  lighting.add(cx, cy, 180, 1, 0.86, 0.66, 1.0)
   local lamp = self.gun and self.gun:stats().lamp or 0
   if lamp > 0 then
     lighting.add(cx, cy, 150 + lamp, 1, 0.82, 0.55, 0.6) -- Muzzle Lantern

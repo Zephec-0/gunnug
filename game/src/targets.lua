@@ -36,7 +36,7 @@ end
 function targets.damage(t, amount)
   t.flash = 0.08
   t.total = t.total + amount
-  effects.popup(t.x + t.w / 2, t.y - 2, tostring(amount), { 1, 0.9, 0.3 })
+  effects.popup(t.x + t.w / 2, t.y - 2, tostring(amount), { 1, 0.27, 0.24 })
 end
 
 function targets.kick(x, y, w, h, damage)

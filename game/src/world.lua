@@ -1,10 +1,19 @@
 -- Pixel terrain: a grid of material ids rendered through an ImageData.
 -- Each terrain pixel is one game pixel.
+--
+-- The world may be any size and its coordinates may be negative: it covers
+-- x from `left` to `right - 1` and y from `top` to `bottom - 1` (World.new).
+-- Cells are kept per tile (256x256 px) and a tile only gets cell storage when
+-- something is written in it; a tile that was filled as a whole (unexplored
+-- rock) is just one material id. So a very big world costs only what has
+-- actually been generated, dug or built.
 local materials = require("src.materials")
 
 local AIR = materials.AIR
+local BEDROCK = materials.BEDROCK
 local solid = materials.solid
 local defs = materials.defs
+local floor = math.floor
 
 local World = {}
 World.__index = World
@@ -15,85 +24,194 @@ local function noise(x, y)
   return n - math.floor(n)
 end
 
--- Cells live in a compact byte array when LuaJIT's FFI is available (the
--- unified world is millions of pixels), else in a plain table.
+-- A tile's cells live in a compact byte array when LuaJIT's FFI is available,
+-- else in a plain table.
 local hasFFI, ffi = pcall(require, "ffi")
-
-local function newCells(n)
-  if hasFFI then
-    return ffi.new("uint8_t[?]", n + 1) -- zero-filled = AIR; indices 1..n used
-  end
-  local cells = {}
-  for i = 1, n do
-    cells[i] = AIR
-  end
-  return cells
-end
 
 -- The terrain image is split into tiles so changing a few pixels only
 -- re-uploads their tile, and drawing only touches tiles on screen.
 local TILE = 256
 
-function World.new(width, height)
+-- left, top: the world's top-left corner (default 0, 0); coordinates may be negative
+function World.new(width, height, left, top)
   local self = setmetatable({}, World)
   self.width = width
   self.height = height
-  self.cells = newCells(width * height)
+  self.left = left or 0
+  self.top = top or 0
+  self.right = self.left + width -- (exclusive)
+  self.bottom = self.top + height
   self.tilesX = math.ceil(width / TILE)
   self.tilesY = math.ceil(height / TILE)
   self.tiles = {}
+  self.lazy = {} -- regions painted from the cells when a tile is first needed (see markLazy)
   for ty = 0, self.tilesY - 1 do
     for tx = 0, self.tilesX - 1 do
-      local x0, y0 = tx * TILE, ty * TILE
-      local w, h = math.min(TILE, width - x0), math.min(TILE, height - y0)
+      local x0, y0 = self.left + tx * TILE, self.top + ty * TILE
+      local w, h = math.min(TILE, self.right - x0), math.min(TILE, self.bottom - y0)
       self.tiles[ty * self.tilesX + tx + 1] = {
+        world = self,
         x = x0,
         y = y0,
+        x1 = x0 + w, -- (exclusive)
+        y1 = y0 + h,
         w = w,
         h = h,
+        cells = nil, -- byte array, allocated when first written (see allocCells)
+        uniform = AIR, -- what every cell is while there is no array
         data = nil, -- ImageData, allocated when first written or drawn (see tileData)
         image = nil, -- created when first drawn
         dirty = true,
       }
     end
   end
+  self.ct = self.tiles[1] -- the tile last looked up (a cache: neighbouring lookups are near each other)
   return self
+end
+
+-- The tile covering (x, y), which must be inside the world
+function World:locate(x, y)
+  local t = self.tiles[floor((y - self.top) / TILE) * self.tilesX + floor((x - self.left) / TILE) + 1]
+  self.ct = t
+  return t
+end
+
+local function allocCells(tile)
+  local n = tile.w * tile.h
+  local c
+  if hasFFI then
+    c = ffi.new("uint8_t[?]", n + 1) -- (indices 1..n used)
+    if tile.uniform ~= AIR then
+      ffi.fill(c, n + 1, tile.uniform)
+    end
+  else
+    c = {}
+    for i = 1, n do
+      c[i] = tile.uniform
+    end
+  end
+  tile.cells = c
+  return c
 end
 
 -- A tile's pixels are only allocated once something paints or draws there,
 -- which saves memory in the big, mostly not-yet-generated world
+-- Paints a tile's lazy parts (from the cells) from where it got to down to row `upTo`
+local readyTile -- (below)
+local function paintLazy(tile, upTo)
+  local w = tile.world
+  local from = tile.lazyY or tile.y
+  local to = math.min(tile.y1, upTo)
+  if to <= from then
+    return
+  end
+  tile.painting = true -- (painting writes pixels into this tile: tileData must not start over)
+  for _, r in ipairs(w.lazy) do
+    local x0, y0 = math.max(r[1], tile.x), math.max(r[2], from)
+    local x1, y1 = math.min(r[3], tile.x1 - 1), math.min(r[4], to - 1)
+    if x0 <= x1 and y0 <= y1 then
+      w:repaintRect(x0, y0, x1, y1)
+    end
+  end
+  tile.lazyY = to
+  tile.painting = false
+end
+
 local function tileData(tile)
   if not tile.data then
     tile.data = love.image.newImageData(tile.w, tile.h)
+    tile.lazyY = tile.y
+  end
+  -- Parts of the world marked lazy are painted only now, from the cells
+  -- (whatever World:prewarm hasn't already done)
+  if tile.lazyY < tile.y1 and not tile.painting then
+    paintLazy(tile, tile.y1)
   end
   return tile.data
 end
 
+-- Paints all of a tile's lazy parts, a strip at a time with tick() (a
+-- generator's yield) between strips
+local READY_ROWS = 16
+readyTile = function(tile, tick)
+  if not tile.data then
+    tile.data = love.image.newImageData(tile.w, tile.h)
+    tile.lazyY = tile.y
+  end
+  while tile.lazyY < tile.y1 and not tile.painting do
+    paintLazy(tile, tile.lazyY + READY_ROWS)
+    tick()
+  end
+end
+
+-- Gets the tiles just outside the view ready before they are seen: their
+-- lazy parts painted a strip at a time, then their texture made. A tile of
+-- unexplored ground painted all at once the moment it came into view was a
+-- ~30 ms hitch. Call once a frame; it does one small piece of work.
+local PREWARM_ROWS = 24
+function World:prewarm(viewX, viewY, viewW, viewH)
+  local m = TILE
+  local tx0 = math.max(0, floor((viewX - m - self.left) / TILE))
+  local tx1 = math.min(self.tilesX - 1, floor((viewX + viewW + m - self.left) / TILE))
+  local ty0 = math.max(0, floor((viewY - m - self.top) / TILE))
+  local ty1 = math.min(self.tilesY - 1, floor((viewY + viewH + m - self.top) / TILE))
+  for ty = ty0, ty1 do
+    for tx = tx0, tx1 do
+      local tile = self.tiles[ty * self.tilesX + tx + 1]
+      if not tile.image then
+        if not tile.data then
+          tile.data = love.image.newImageData(tile.w, tile.h)
+          tile.lazyY = tile.y
+          return
+        elseif tile.lazyY < tile.y1 then
+          paintLazy(tile, tile.lazyY + PREWARM_ROWS)
+          return
+        else
+          tile.image = love.graphics.newImage(tile.data)
+          tile.image:setWrap("clamp", "clamp")
+          tile.dirty = false
+          return
+        end
+      end
+    end
+  end
+end
+
 -- Writes a colour into the tile image covering (x, y)
 function World:writePixel(x, y, r, g, b, a)
-  local tx, ty = math.floor(x / TILE), math.floor(y / TILE)
-  local tile = self.tiles[ty * self.tilesX + tx + 1]
+  local tile = self.ct
+  if x < tile.x or x >= tile.x1 or y < tile.y or y >= tile.y1 then
+    tile = self:locate(x, y)
+  end
   tileData(tile):setPixel(x - tile.x, y - tile.y, r, g, b, a)
   tile.dirty = true
 end
 
 -- The colour currently shown for a terrain pixel
 function World:pixelColor(x, y)
-  local tx, ty = math.floor(x / TILE), math.floor(y / TILE)
-  local tile = self.tiles[ty * self.tilesX + tx + 1]
+  local tile = self:locate(x, y)
   return tileData(tile):getPixel(x - tile.x, y - tile.y)
 end
 
 function World:inBounds(x, y)
-  return x >= 0 and y >= 0 and x < self.width and y < self.height
+  return x >= self.left and y >= self.top and x < self.right and y < self.bottom
 end
 
 -- Outside the world counts as bedrock so nothing escapes
 function World:get(x, y)
-  if x < 0 or y < 0 or x >= self.width or y >= self.height then
-    return materials.BEDROCK
+  x, y = x - x % 1, y - y % 1 -- (the pixel the point is in, whatever fraction it has)
+  if x < self.left or y < self.top or x >= self.right or y >= self.bottom then
+    return BEDROCK
   end
-  return self.cells[y * self.width + x + 1]
+  local t = self.ct
+  if x < t.x or x >= t.x1 or y < t.y or y >= t.y1 then
+    t = self:locate(x, y)
+  end
+  local c = t.cells
+  if c then
+    return c[(y - t.y) * t.w + (x - t.x) + 1]
+  end
+  return t.uniform
 end
 
 function World:isSolid(x, y)
@@ -102,9 +220,111 @@ end
 
 -- Raw write without recolouring; use for bulk generation, then call repaintAll()
 function World:setRaw(x, y, id)
+  x, y = x - x % 1, y - y % 1
   if self:inBounds(x, y) then
-    self.cells[y * self.width + x + 1] = id
+    local t = self.ct
+    if x < t.x or x >= t.x1 or y < t.y or y >= t.y1 then
+      t = self:locate(x, y)
+    end
+    local c = t.cells
+    if not c then
+      if t.uniform == id then
+        return
+      end
+      c = allocCells(t)
+    end
+    c[(y - t.y) * t.w + (x - t.x) + 1] = id
   end
+end
+
+-- fillRect for big, plain regions: whole rows at once, and a tile the region
+-- covers entirely becomes a single id with no storage (needs the FFI for the
+-- partly covered tiles, falling back to fillRect without it)
+function World:fillFast(x0, y0, x1, y1, id)
+  x0, y0 = math.max(self.left, x0), math.max(self.top, y0)
+  x1, y1 = math.min(self.right - 1, x1), math.min(self.bottom - 1, y1)
+  if x0 > x1 or y0 > y1 then
+    return
+  end
+  for ty = floor((y0 - self.top) / TILE), floor((y1 - self.top) / TILE) do
+    for tx = floor((x0 - self.left) / TILE), floor((x1 - self.left) / TILE) do
+      local t = self.tiles[ty * self.tilesX + tx + 1]
+      local rx0, ry0 = math.max(x0, t.x), math.max(y0, t.y)
+      local rx1, ry1 = math.min(x1, t.x1 - 1), math.min(y1, t.y1 - 1)
+      if rx0 == t.x and ry0 == t.y and rx1 == t.x1 - 1 and ry1 == t.y1 - 1 then
+        t.cells = nil
+        t.uniform = id
+      elseif hasFFI then
+        local c = t.cells or allocCells(t)
+        local n = rx1 - rx0 + 1
+        for y = ry0, ry1 do
+          ffi.fill(c + ((y - t.y) * t.w + (rx0 - t.x) + 1), n, id)
+        end
+      else
+        for y = ry0, ry1 do
+          for x = rx0, rx1 do
+            self:setRaw(x, y, id)
+          end
+        end
+      end
+    end
+  end
+end
+
+-- Marks a region as painted on demand: its tiles are painted from the cells
+-- the first time they are drawn or touched, instead of all at once. (A world
+-- several times bigger than a screen would spend seconds painting ground
+-- nobody sees.) Mark after the cells are in place.
+function World:markLazy(x0, y0, x1, y1)
+  self.lazy[#self.lazy + 1] = { x0, y0, x1, y1 }
+end
+
+-- Is the pixel's colour already in its tile? (Not when it is in a part painted
+-- on demand that hasn't been painted yet: reading or writing it would paint
+-- the whole tile there and then. A stain there can just be skipped.)
+function World:shownAt(x, y)
+  local tile = self:locate(x, y)
+  if tile.painting or (tile.data and (tile.lazyY or tile.y1) >= tile.y1) then
+    return true
+  end
+  return not (y >= (tile.data and tile.lazyY or tile.y) and self:lazyAt(x, y))
+end
+
+-- Is the pixel in a region painted on demand?
+function World:lazyAt(x, y)
+  for _, r in ipairs(self.lazy) do
+    if x >= r[1] and x <= r[3] and y >= r[2] and y <= r[4] then
+      return true
+    end
+  end
+  return false
+end
+
+-- Takes a region out of the lazy ones: whoever builds it paints it themselves
+-- (an area being generated claims its rectangle first)
+function World:claim(x0, y0, x1, y1)
+  local out = {}
+  for _, r in ipairs(self.lazy) do
+    if x1 < r[1] or x0 > r[3] or y1 < r[2] or y0 > r[4] then
+      out[#out + 1] = r
+    else
+      -- what is left of r round the claimed box
+      if y0 > r[2] then
+        out[#out + 1] = { r[1], r[2], r[3], y0 - 1 }
+      end
+      if y1 < r[4] then
+        out[#out + 1] = { r[1], y1 + 1, r[3], r[4] }
+      end
+      local top, bottom = math.max(r[2], y0), math.min(r[4], y1)
+      if x0 > r[1] then
+        out[#out + 1] = { r[1], top, x0 - 1, bottom }
+      end
+      if x1 < r[3] then
+        out[#out + 1] = { x1 + 1, top, r[3], bottom }
+      end
+    end
+  end
+  self.lazy = out
 end
 
 function World:fillRect(x0, y0, x1, y1, id)
@@ -141,18 +361,49 @@ function World:set(x, y, id)
   if not self:inBounds(x, y) then
     return
   end
-  self.cells[y * self.width + x + 1] = id
+  self:setRaw(x, y, id)
   self:repaintRegion(x, y, x, y)
 end
 
 -- Recolours the box plus the margin whose shading the box can influence.
 -- Use after changing terrain with setRaw.
+-- (With the sweeps of repaintRect: re-shading pixel by pixel searched up to
+-- 56 neighbours for each, and a dynamite crater took 20-50 ms.)
 function World:repaintRegion(x0, y0, x1, y1)
   local m = SHADE_DEPTH + 1
-  for y = math.max(0, y0 - m), math.min(self.height - 1, y1 + m) do
-    for x = math.max(0, x0 - m), math.min(self.width - 1, x1 + m) do
-      self:repaint(x, y)
+  self:repaintRect(x0 - m, y0 - m, x1 + m, y1 + m)
+end
+
+-- Queues a repaintRegion for the end of the frame's update (World:flushRepaints).
+-- A volley of rounds or a burrowing worm digs many overlapping holes in a
+-- frame: each repainted on its own re-shaded the same ground several times.
+-- Boxes that overlap (or come within the shading's reach) are merged.
+function World:repaintLater(x0, y0, x1, y1)
+  local q = self.repaintQueue
+  if not q then
+    q = {}
+    self.repaintQueue = q
+  end
+  local m = SHADE_DEPTH + 1
+  for _, r in ipairs(q) do
+    if x0 <= r[3] + m and x1 >= r[1] - m and y0 <= r[4] + m and y1 >= r[2] - m then
+      r[1], r[2] = math.min(r[1], x0), math.min(r[2], y0)
+      r[3], r[4] = math.max(r[3], x1), math.max(r[4], y1)
+      return
     end
+  end
+  q[#q + 1] = { x0, y0, x1, y1 }
+end
+
+function World:flushRepaints()
+  local q = self.repaintQueue
+  if not q then
+    return
+  end
+  for i = 1, #q do
+    local r = q[i]
+    q[i] = nil
+    self:repaintRegion(r[1], r[2], r[3], r[4])
   end
 end
 
@@ -199,22 +450,42 @@ end
 -- at its edges are still exact. tick (optional) is called once per row, so a
 -- caller running this in a coroutine can yield.
 local BAND = 128
+-- The depth table is kept and reused (a band of a whole area is ~370,000
+-- entries: making it afresh for every call, and growing it, was a 10-20 ms
+-- hitch each time). Generation, which yields part-way (tick), has its own,
+-- so a crater repainted meanwhile can't overwrite it.
+-- They are byte arrays when the FFI is there: as Lua tables of ~460,000
+-- numbers each, the collector went through every entry on every cycle.
+local depthBuf, depthBufGen = {}, {}
+local function depthBuffer(gen, n)
+  if not hasFFI then
+    return gen and depthBufGen or depthBuf
+  end
+  local cur = gen and depthBufGen or depthBuf
+  if type(cur) == "table" or cur.n < n then
+    local size = math.max(n, 65536)
+    cur = { buf = ffi.new("uint8_t[?]", size), n = size }
+    if gen then
+      depthBufGen = cur
+    else
+      depthBuf = cur
+    end
+  end
+  return cur.buf
+end
 
 function World:repaintRect(x0, y0, x1, y1, tick)
-  local w, h, cells = self.width, self.height, self.cells
   local cap = SHADE_DEPTH + 1
-  x0, y0 = math.max(0, x0), math.max(0, y0)
-  x1, y1 = math.min(w - 1, x1), math.min(h - 1, y1)
+  x0, y0 = math.max(self.left, x0), math.max(self.top, y0)
+  x1, y1 = math.min(self.right - 1, x1), math.min(self.bottom - 1, y1)
   -- Extended area the sweeps run over
   local ex0, ex1 = x0 - cap, x1 + cap
   local ew = ex1 - ex0 + 1
+  local get = self.get
   local function isSolidAt(x, y)
-    if x < 0 or y < 0 or x >= w or y >= h then
-      return true -- outside the level counts as solid
-    end
-    return solid[cells[y * w + x + 1]]
+    return solid[get(self, x, y)] -- (outside the level counts as solid: bedrock)
   end
-  local depth = {}
+  local depth = depthBuffer(tick ~= nil, (math.min(BAND, y1 - y0 + 1) + 2 * cap) * ew + 1)
   for by0 = y0, y1, BAND do
     local by1 = math.min(y1, by0 + BAND - 1)
     local ey0, ey1 = by0 - cap, by1 + cap
@@ -255,8 +526,46 @@ function World:repaintRect(x0, y0, x1, y1, tick)
           depth[row + x] = run
         end
       end
-      for x = x0, x1 do
-        self:writePixel(x, y, self:colorAt(x, y, depth[row + x]))
+      if tick then
+        -- tiles this row reaches into that still have unpainted lazy rock
+        -- (round the edge of an area) are painted a strip at a time first:
+        -- writing the first pixel would otherwise paint all of it at once,
+        -- 5-15 ms without a yield
+        for tx = x0, x1 + TILE - 1, TILE do
+          local tile = self:locate(math.min(tx, x1), y)
+          readyTile(tile, tick)
+        end
+      end
+      if tick then
+        for x = x0, x1 do
+          self:writePixel(x, y, self:colorAt(x, y, depth[row + x]))
+          if x % 256 == 0 then
+            tick() -- (a whole area's row took longer than a frame's budget)
+          end
+        end
+      else
+        -- A crater (or anything else repainted during play) in a tile whose
+        -- lazy rock isn't painted yet leaves those pixels alone: they will be
+        -- painted from the cells anyway, and writing one would paint the
+        -- whole tile there and then (5-25 ms, for a stray round far off)
+        local x = x0
+        while x <= x1 do
+          local tile = self:locate(x, y)
+          local runEnd = math.min(x1, tile.x1 - 1)
+          if tile.painting or (tile.data and (tile.lazyY or tile.y1) >= tile.y1) then
+            for rx = x, runEnd do
+              self:writePixel(rx, y, self:colorAt(rx, y, depth[row + rx]))
+            end
+          else
+            local from = tile.data and tile.lazyY or tile.y
+            for rx = x, runEnd do
+              if not (y >= from and self:lazyAt(rx, y)) then
+                self:writePixel(rx, y, self:colorAt(rx, y, depth[row + rx]))
+              end
+            end
+          end
+          x = runEnd + 1
+        end
       end
       if tick then
         tick()
@@ -266,23 +575,23 @@ function World:repaintRect(x0, y0, x1, y1, tick)
 end
 
 function World:repaintAll(tick)
-  self:repaintRect(0, 0, self.width - 1, self.height - 1, tick)
+  self:repaintRect(self.left, self.top, self.right - 1, self.bottom - 1, tick)
 end
 
--- First solid pixel at or below fromY in column x
+-- First solid pixel at or below fromY in column x (the world's bottom edge if none)
 function World:findGround(x, fromY)
-  for y = fromY, self.height - 1 do
+  for y = fromY, self.bottom - 1 do
     if self:isSolid(x, y) then
       return y
     end
   end
-  return self.height
+  return self.bottom
 end
 
 -- Highest ground under a span of columns (x .. x + w - 1): where something
 -- of that width can stand without overlapping the terrain
 function World:findGroundUnder(x, w, fromY)
-  local best = self.height
+  local best = self.bottom
   for cx = x, x + w - 1 do
     best = math.min(best, self:findGround(cx, fromY))
   end
@@ -306,32 +615,48 @@ end
 local EDGE_MARGIN = 480
 
 -- Draws the tiles overlapping the view rectangle (world coordinates)
-function World:draw(viewX, viewY, viewW, viewH)
+function World:draw(viewX, viewY, viewW, viewH, shader)
   love.graphics.setColor(1, 1, 1)
-  for _, tile in ipairs(self.tiles) do
-    local left = tile.x == 0 and EDGE_MARGIN or 0
-    local top = tile.y == 0 and EDGE_MARGIN or 0
-    local right = tile.x + tile.w == self.width and EDGE_MARGIN or 0
-    local bottom = tile.y + tile.h == self.height and EDGE_MARGIN or 0
-    local dx0, dy0 = tile.x - left, tile.y - top
-    local dx1, dy1 = tile.x + tile.w + right, tile.y + tile.h + bottom
-    if dx1 > viewX and dx0 < viewX + viewW and dy1 > viewY and dy0 < viewY + viewH then
-      if not tile.image then
-        tile.image = love.graphics.newImage(tileData(tile))
-        tile.image:setWrap("clamp", "clamp")
-        tile.dirty = false
-      elseif tile.dirty then
-        tile.image:replacePixels(tile.data)
-        tile.dirty = false
-      end
-      if left + top + right + bottom == 0 then
-        love.graphics.draw(tile.image, tile.x, tile.y)
-      else
-        tile.quad = tile.quad
-          or love.graphics.newQuad(-left, -top, tile.w + left + right, tile.h + top + bottom, tile.w, tile.h)
-        love.graphics.draw(tile.image, tile.quad, dx0, dy0)
+  if shader then
+    love.graphics.setShader(shader)
+  end
+  -- (the tiles at the world's edge also cover the margin beyond it)
+  local tx0 = math.max(0, floor((viewX - EDGE_MARGIN - self.left) / TILE))
+  local tx1 = math.min(self.tilesX - 1, floor((viewX + viewW + EDGE_MARGIN - self.left) / TILE))
+  local ty0 = math.max(0, floor((viewY - EDGE_MARGIN - self.top) / TILE))
+  local ty1 = math.min(self.tilesY - 1, floor((viewY + viewH + EDGE_MARGIN - self.top) / TILE))
+  for ty = ty0, ty1 do
+    for tx = tx0, tx1 do
+      local tile = self.tiles[ty * self.tilesX + tx + 1]
+      local left = tile.x == self.left and EDGE_MARGIN or 0
+      local top = tile.y == self.top and EDGE_MARGIN or 0
+      local right = tile.x1 == self.right and EDGE_MARGIN or 0
+      local bottom = tile.y1 == self.bottom and EDGE_MARGIN or 0
+      local dx0, dy0 = tile.x - left, tile.y - top
+      local dx1, dy1 = tile.x1 + right, tile.y1 + bottom
+      if dx1 > viewX and dx0 < viewX + viewW and dy1 > viewY and dy0 < viewY + viewH then
+        if not tile.image then
+          tile.image = love.graphics.newImage(tileData(tile))
+          tile.image:setWrap("clamp", "clamp")
+          tile.dirty = false
+        elseif tile.dirty then
+          tile.image:replacePixels(tile.data)
+          tile.dirty = false
+        end
+        if shader then
+          shader:send("texel", { 1 / tile.w, 1 / tile.h })
+        end
+        if left + top + right + bottom == 0 then
+          love.graphics.draw(tile.image, tile.x, tile.y)
+        else
+          tile.quad = tile.quad or love.graphics.newQuad(-left, -top, tile.w + left + right, tile.h + top + bottom, tile.w, tile.h)
+          love.graphics.draw(tile.image, tile.quad, dx0, dy0)
+        end
       end
     end
+  end
+  if shader then
+    love.graphics.setShader()
   end
 end
 

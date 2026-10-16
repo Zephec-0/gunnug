@@ -30,6 +30,18 @@ function love.keypressed(key)
   end
 end
 
+function love.quit()
+  game.quit()
+end
+
+function love.focus(focused)
+  game.focus(focused)
+end
+
+function love.textinput(text)
+  game.textinput(text)
+end
+
 function love.mousepressed(x, y, button)
   game.mousepressed(x, y, button)
 end

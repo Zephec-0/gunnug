@@ -10,6 +10,7 @@ local physics = {}
 local CHUNK = config.physics.chunkSize
 
 local terrain -- src.world instance the outlines are traced from
+local bodies, cullTimer = {}, 0 -- (see physics.update)
 local chunks = {} -- chunk key -> static body with that chunk's outlines, or false if traced and empty
 
 -- Marching squares. Corners: a = top-left, b = top-right, c = bottom-right,
@@ -92,76 +93,87 @@ local function simplify(pts, epsilon)
 end
 
 -- Traces the terrain inside one chunk into polylines (in pixel coordinates).
-local function traceChunk(cx, cy)
-  local x0, y0 = cx * CHUNK, cy * CHUNK
-  local x1 = math.min(x0 + CHUNK, terrain.width) - 1
-  local y1 = math.min(y0 + CHUNK, terrain.height) - 1
+-- Tracing is done often (every blast re-traces the chunks it touched), so
+-- it works in tables kept from one trace to the next, and reads each pixel
+-- once (two rows of samples) rather than four times. Every outline point has
+-- at most two links (one per square it is shared by), kept as linkA/linkB.
+local ptX, ptY, linkA, linkB, visited = {}, {}, {}, {}, {}
+local rowTop, rowBottom = {}, {}
 
-  local points = {} -- key -> { hx, hy }
-  local links = {} -- key -> list of linked keys
-  local function link(k1, k2)
-    links[k1] = links[k1] or {}
-    links[k2] = links[k2] or {}
-    table.insert(links[k1], k2)
-    table.insert(links[k2], k1)
+local function addLink(k, other)
+  if linkA[k] == nil then
+    linkA[k] = other
+  else
+    linkB[k] = other
   end
+end
 
+local function traceChunk(cx, cy)
+  local x0, y0 = math.max(cx * CHUNK, terrain.left), math.max(cy * CHUNK, terrain.top)
+  local x1 = math.min(cx * CHUNK + CHUNK, terrain.right) - 1
+  local y1 = math.min(cy * CHUNK + CHUNK, terrain.bottom) - 1
+
+  for k in pairs(ptX) do
+    ptX[k], ptY[k], linkA[k], linkB[k], visited[k] = nil, nil, nil, nil, nil
+  end
+  local isSolid = terrain.isSolid
+  local top, bottom = rowTop, rowBottom
+  for x = x0, x1 + 1 do
+    top[x - x0] = isSolid(terrain, x, y0)
+  end
   for y = y0, y1 do
+    for x = x0, x1 + 1 do
+      bottom[x - x0] = isSolid(terrain, x, y + 1)
+    end
     for x = x0, x1 do
-      local case = (terrain:isSolid(x, y) and 8 or 0)
-        + (terrain:isSolid(x + 1, y) and 4 or 0)
-        + (terrain:isSolid(x + 1, y + 1) and 2 or 0)
-        + (terrain:isSolid(x, y + 1) and 1 or 0)
+      local i = x - x0
+      local case = (top[i] and 8 or 0) + (top[i + 1] and 4 or 0) + (bottom[i + 1] and 2 or 0) + (bottom[i] and 1 or 0)
       local segs = CASES[case]
       if segs then
         for _, seg in ipairs(segs) do
           local ax, ay = edgePoint(x, y, seg[1])
           local bx, by = edgePoint(x, y, seg[2])
           local ka, kb = pointKey(ax, ay), pointKey(bx, by)
-          points[ka] = points[ka] or { ax, ay }
-          points[kb] = points[kb] or { bx, by }
-          link(ka, kb)
+          ptX[ka], ptY[ka] = ax, ay
+          ptX[kb], ptY[kb] = bx, by
+          addLink(ka, kb)
+          addLink(kb, ka)
         end
       end
     end
+    top, bottom = bottom, top
   end
 
   -- Walk the links into polylines: open chains first (they start at a point
   -- with a single link, on the chunk border), then closed loops.
-  local visited = {}
   local polylines = {}
   local function walk(start)
     local coords, loop = {}, false
     local prev, cur = nil, start
     while cur do
       visited[cur] = true
-      local p = points[cur]
-      coords[#coords + 1] = p[1] / 2
-      coords[#coords + 1] = p[2] / 2
+      coords[#coords + 1] = ptX[cur] / 2
+      coords[#coords + 1] = ptY[cur] / 2
+      local a, b = linkA[cur], linkB[cur]
       local nextKey
-      for _, k in ipairs(links[cur]) do
-        if k ~= prev and not visited[k] then
-          nextKey = k
-          break
-        end
+      if a and a ~= prev and not visited[a] then
+        nextKey = a
+      elseif b and b ~= prev and not visited[b] then
+        nextKey = b
       end
-      if not nextKey then
-        for _, k in ipairs(links[cur]) do
-          if k == start and prev ~= nil and #coords > 4 then
-            loop = true
-          end
-        end
+      if not nextKey and (a == start or b == start) and prev ~= nil and #coords > 4 then
+        loop = true
       end
       prev, cur = cur, nextKey
     end
     polylines[#polylines + 1] = { coords = coords, loop = loop }
   end
-  for key, l in pairs(links) do
-    if #l == 1 and not visited[key] then
+  for key in pairs(linkA) do
+    if linkB[key] == nil and not visited[key] then
       walk(key)
     end
   end
-  for key in pairs(links) do
+  for key in pairs(linkA) do
     if not visited[key] then
       walk(key)
     end
@@ -220,14 +232,16 @@ function physics.init(world)
   physics.world = love.physics.newWorld(0, config.gravity, true)
   terrain = world
   chunks = {}
+  pendingChunks, pendingWake = {}, {}
+  bodies, cullTimer = {}, 0
 end
 
 -- Traces any not-yet-traced chunks overlapping the pixel rectangle
 local function ensureChunks(x0, y0, x1, y1)
-  local maxX = math.ceil(terrain.width / CHUNK) - 1
-  local maxY = math.ceil(terrain.height / CHUNK) - 1
-  for cy = math.max(0, math.floor(y0 / CHUNK)), math.min(maxY, math.floor(y1 / CHUNK)) do
-    for cx = math.max(0, math.floor(x0 / CHUNK)), math.min(maxX, math.floor(x1 / CHUNK)) do
+  local minX, minY = math.floor(terrain.left / CHUNK), math.floor(terrain.top / CHUNK)
+  local maxX, maxY = math.floor((terrain.right - 1) / CHUNK), math.floor((terrain.bottom - 1) / CHUNK)
+  for cy = math.max(minY, math.floor(y0 / CHUNK)), math.min(maxY, math.floor(y1 / CHUNK)) do
+    for cx = math.max(minX, math.floor(x0 / CHUNK)), math.min(maxX, math.floor(x1 / CHUNK)) do
       if chunks[chunkKey(cx, cy)] == nil then
         rebuildChunk(cx, cy)
       end
@@ -237,31 +251,83 @@ end
 
 -- Re-traces the already-traced chunks touching the pixel rectangle (for
 -- destructible terrain); untraced ones pick up the change when first traced.
+-- The work is queued and done once per frame, just before the physics step
+-- (physics.flush): a volley of explosive rounds digs the same chunks many
+-- times over in one frame, and tracing a chunk is the dearest part of a blast.
+local pendingChunks = {} -- chunk key -> { cx, cy }
+local pendingWake = {} -- { x0, y0, x1, y1 } boxes whose sleeping objects must wake
+
 function physics.rebuildRegion(x0, y0, x1, y1)
   -- Squares reach one pixel left/up into neighbouring chunks
   for cy = math.floor((y0 - 1) / CHUNK), math.floor(y1 / CHUNK) do
     for cx = math.floor((x0 - 1) / CHUNK), math.floor(x1 / CHUNK) do
-      if cx >= 0 and cy >= 0 and chunks[chunkKey(cx, cy)] ~= nil then
-        rebuildChunk(cx, cy)
+      local key = chunkKey(cx, cy)
+      if chunks[key] ~= nil and not pendingChunks[key] then
+        pendingChunks[key] = { cx, cy }
       end
     end
   end
+  pendingWake[#pendingWake + 1] = { x0, y0, x1, y1 }
+end
+
+-- Does the queued rebuilds and wakes the sleeping objects near them
+function physics.flush()
+  if #pendingWake == 0 then
+    return
+  end
+  for key, c in pairs(pendingChunks) do
+    if chunks[key] ~= nil then
+      rebuildChunk(c[1], c[2])
+    end
+  end
+  pendingChunks = {}
   -- Wake nearby sleeping objects so they notice terrain vanishing beneath them
+  -- (from the list physics.update keeps: one new from Box2D for every blast
+  -- was a big table of every body each time; anything newer is awake anyway)
   local m = REACH
-  for _, body in ipairs(physics.world:getBodies()) do
-    if body:getType() == "dynamic" and not body:isAwake() then
+  for _, body in ipairs(bodies) do
+    if not body:isDestroyed() and body:getType() == "dynamic" and not body:isAwake() then
       local x, y = body:getPosition()
-      if x > x0 - m and x < x1 + m and y > y0 - m and y < y1 + m then
-        body:setAwake(true)
+      for _, r in ipairs(pendingWake) do
+        if x > r[1] - m and x < r[3] + m and y > r[2] - m and y < r[4] + m then
+          body:setAwake(true)
+          break
+        end
       end
     end
   end
+  pendingWake = {}
 end
 
 -- Every moving object gets outlines traced around it before stepping
-function physics.update(dt)
-  for _, body in ipairs(physics.world:getBodies()) do
-    if body:getType() == "dynamic" and body:isAwake() then
+-- Objects far from the hunter are taken out of the simulation (setActive
+-- false) and put back as he comes near: a crate knocked loose in an area he
+-- left kept being simulated, and the terrain outlines around it kept being
+-- traced, all over the world (30-50 ms frames). Only objects near him get
+-- outlines traced. The list of bodies is refreshed a few times a second
+-- (asking Box2D for it every frame made a new table each time).
+local FAR_X, FAR_Y = 900, 700
+
+function physics.update(dt, px, py)
+  physics.flush()
+  cullTimer = cullTimer - dt
+  if cullTimer <= 0 or not px then
+    cullTimer = 0.2
+    bodies = physics.world:getBodies()
+    if px then
+      for _, body in ipairs(bodies) do
+        if body:getType() == "dynamic" then
+          local x, y = body:getPosition()
+          local near = math.abs(x - px) < FAR_X and math.abs(y - py) < FAR_Y
+          if near ~= body:isActive() then
+            body:setActive(near)
+          end
+        end
+      end
+    end
+  end
+  for _, body in ipairs(bodies) do
+    if not body:isDestroyed() and body:getType() == "dynamic" and body:isActive() and body:isAwake() then
       local x, y = body:getPosition()
       ensureChunks(x - REACH, y - REACH, x + REACH, y + REACH)
     end

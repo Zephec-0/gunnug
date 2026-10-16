@@ -4,6 +4,7 @@
 -- the hunter picks which to replace (click it, or press 1-3). The replaced gun
 -- is dropped on the ground. Escape / E / Tab cancels and leaves the found
 -- weapon where it lay. The game is paused while it is open.
+local input = require("src.input")
 local inventory = require("src.inventory")
 local itembar = require("src.itembar")
 
@@ -45,7 +46,7 @@ function compare.keypressed(key)
   local n = tonumber(key)
   if n and n >= 1 and n <= inventory.WEAPON_SLOTS then
     choose(n)
-  elseif key == "escape" or key == "e" or key == "tab" or key == "backspace" then
+  elseif key == "escape" or input.is("interact", key) or input.is("inventory", key) or key == "backspace" then
     compare.close()
   end
 end
@@ -86,7 +87,7 @@ local function card(gun, x, y, w, h, u, borderColor, tag)
 
   itembar.drawThing(gun, x + 2 * u, y + 3 * u, 22 * u, u)
   local tx = x + 27 * u
-  itembar.shadowPrint(gun.name, tx, y + 2 * u, itembar.font(3.8 * u), { 1, 0.9, 0.6 })
+  require("src.fonts").printGraded(itembar.font(3.8 * u), gun.name, require("src.gunInfo").grade(gun), tx, y + 2 * u, { 0.98, 0.99, 1 }, 2)
   itembar.shadowPrint(itembar.statLine(gun), tx, y + 8 * u, itembar.font(3.1 * u), { 0.88, 0.86, 0.82 })
 
   -- Fitted ammo and attachments, in a row along the bottom
@@ -121,9 +122,9 @@ function compare.draw(inv, u)
   local y = 10 * u
   local title, small = itembar.font(5 * u), itembar.font(3.4 * u)
 
-  itembar.shadowPrint("Found a weapon", x, y, title, { 1, 0.86, 0.45 })
+  itembar.shadowPrint("Found a weapon", x, y, title, { 0.95, 0.97, 1 })
   y = y + 9 * u
-  card(found, x, y, cardW, cardH, u, { 1, 0.82, 0.35 }, "FOUND")
+  card(found, x, y, cardW, cardH, u, { 0.55, 0.75, 1 }, "FOUND")
   y = y + cardH + 5 * u
   local hint = "Click a carried weapon (or press 1-3) to replace it - the old one drops.   Esc: leave it"
   itembar.shadowPrint(hint, math.floor((ww - small:getWidth(hint)) / 2), y, small, { 1, 1, 1, 0.8 })

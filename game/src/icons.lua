@@ -83,6 +83,24 @@ local ITEMS = {
   holsterloader = { ".bbbbbb.", ".bsssbb.", ".bs.sbb.", ".bsssbb.", ".bbbbbb.", "..c.c...", ".ccccc..", "..c.c..." },
   deadmans = { "..cccc..", ".cddddc.", "cddwwddc", "cdddwddc", "cddwwddc", ".cddddc.", "..cddc..", "...cc..." },
   reckless = { "...rr...", "...rr...", "...rr...", "...rr...", "...rr...", "........", "...rr...", "...rr..." },
+  -- Fused (made in the fuser) ------------------------------------------------
+  thermal = { "...o.u..", "..oo.uu.", ".ooy.uwu", "oyyo.wwu", "oyyo.wwu", ".ooy.uwu", "..oo.uu.", "...o.u.." },
+  hellfume = { "...o....", "..oyo...", "..oyo.n.", ".ooyo.n.", "..o..nnn", "....nnln", "....nnnn", ".....nn." },
+  blight = { "..nnnn..", ".nlnnnn.", "nnkknkkn", "nnkknkkn", "nnnnnnnn", ".nnkknn.", "..n..n..", ".n.nn.n." },
+  sledge = { ".cccccc.", "clllcccd", "clccccdd", ".cccccd.", "...cd...", "...cd...", "..gggg..", "..gddg.." },
+  shrapnel = { "c..c...c", ".c.cc.c.", "..clcc..", "cclllcc.", "..cclc..", ".c.cc.c.", "c...c..c", "...c...." },
+  birdshot = { "......cc", ".c...ccc", "....ccc.", "..cccc..", ".clcd.c.", "cdd..c..", "d..c...c", "........" },
+  sungold = { "y..y..y.", ".yggggy.", "yggyygg.", ".gyywgy.", "ygyyygy.", ".gggggy.", "y.ggg..y", "...y...." },
+  corkscrew = { "...cc...", "..cddc..", ".cd..dc.", "...cdc..", "..cd....", ".cdddc..", "...cd...", "....d..." },
+  marksman = { "..SSS...", ".SuuS...", "SSSSSSSS", "sssssssS", "SSSSSSSS", ".bb.....", ".bbb....", "........" },
+  drumloader = { "..SSSS..", ".SggggS.", "SggSSggS", "SgS..SgS", "SgS..SgS", "SggSSggS", ".SggggS.", "..SSSS.." },
+  braced = { "........", "SSSSSS..", "SbbbbS..", "bbddbbbb", "bddddddb", "bbbbbbbb", "...S..S.", "...S..S." },
+  ripper = { "r.r.r...", "r.r.r...", "o.o.o...", ".SSSS...", "S....S..", "S....S..", ".SSSSrr.", "....rr.." },
+  prospectlamp = { "...ss...", "..ssss..", ".syyyys.", ".syyyys.", "..ssss..", "g..ss..g", ".g....g.", "gyg..gyg" },
+  deadeye = { "...rr...", "..r..r..", ".r....r.", "rr.rr.rr", "rr.rr.rr", ".r....r.", "..r..r..", "...rr..." },
+  duelist = { "ss....ss", ".ss..ss.", "..ssss..", "...bb...", "..ssss..", ".ss..ss.", "bb....bb", "bb....bb" },
+  assassin = { "......ss", ".....ss.", "....ss..", "kkkss...", "kwkwk...", "kkkkk...", ".bkk....", "b......." },
+  twinblast = { "o......o", "oo....oo", "ooooyooo", "oyyyyyyo", "oyyyyyyo", "ooooyooo", "oo....oo", "o......o" },
 }
 
 local PERKS = {
@@ -160,6 +178,35 @@ function icons.get(thing)
     end
   end
   return cache[key] or nil
+end
+
+-- A levelled item's "+N" (src.items): N light teal plus signs in a row along
+-- the bottom of a box of `size` at (x, y), one per level. (The small square pip
+-- in the top corner is something else: it means the item could be fused.)
+local PLUS = { { 1, 0 }, { 0, 1 }, { 1, 1 }, { 2, 1 }, { 1, 2 } }
+function icons.drawLevel(level, x, y, size, alpha)
+  alpha = alpha or 1
+  local c = math.max(1, math.floor(size / 20)) -- one plus-sign pixel
+  local w = 3 * c
+  local gap = c
+  local shadow = math.max(1, math.floor(c / 2))
+  local x0 = math.floor(x + c * 1.5)
+  local y0 = math.floor(y + size - w - c * 1.5)
+  for pass = 1, 2 do
+    for i = 1, level do
+      local px = x0 + (i - 1) * (w + gap)
+      for _, cell in ipairs(PLUS) do
+        if pass == 1 then
+          love.graphics.setColor(0.02, 0.06, 0.06, 0.9 * alpha)
+          love.graphics.rectangle("fill", px + cell[1] * c + shadow, y0 + cell[2] * c + shadow, c, c)
+        else
+          love.graphics.setColor(0.62, 1.0, 0.92, alpha)
+          love.graphics.rectangle("fill", px + cell[1] * c, y0 + cell[2] * c, c, c)
+        end
+      end
+    end
+  end
+  love.graphics.setColor(1, 1, 1, alpha)
 end
 
 -- For tests: every id that has an icon grid

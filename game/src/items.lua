@@ -29,6 +29,8 @@ items.rarities = {
   common = { name = "Common", weight = 70, price = { 20, 35 }, border = { 0.55, 0.52, 0.50 } },
   rare = { name = "Rare", weight = 24, price = { 45, 70 }, border = { 0.35, 0.65, 1.0 } },
   cursed = { name = "Cursed", weight = 6, price = { 35, 55 }, border = { 0.85, 0.15, 0.20 } },
+  -- Made only in the fuser (src.fuser), never found: weight 0
+  fused = { name = "Fused", weight = 0, price = { 80, 110 }, border = { 0.25, 1.0, 0.82 } },
 }
 
 items.defs = {
@@ -527,7 +529,150 @@ items.defs = {
   },
 }
 
--- Stable order, for generating and listing
+-- Fused items (design doc §5.7c): each is made in the fuser from two common
+-- ones (see items.fusions below), keeping the best of both with the worst
+-- of their downsides trimmed away. Never found or sold.
+local FUSED = {
+  -- Ammo from two ammo types ---------------------------------------------------
+  thermal = {
+    kind = "ammo", name = "Thermal Shock Rounds", short = "TH", color = { 0.95, 0.55, 0.85 },
+    desc = "Fire and frost at once: burns and chills every enemy hit. +10% damage.",
+    mods = { incendiary = 1, freeze = 1, damage = 1.1 },
+  },
+  hellfume = {
+    kind = "ammo", name = "Hellfume Rounds", short = "HF", color = { 0.85, 0.75, 0.2 },
+    desc = "Burning venom: sets enemies alight and poisons them, with no loss of damage.",
+    mods = { incendiary = 1, poison = 1 },
+  },
+  blight = {
+    kind = "ammo", name = "Blight Rounds", short = "BL", color = { 0.55, 0.95, 0.35 },
+    desc = "Poisons and corrodes: enemies take 30% more damage while the venom eats at them. Eats rock a little.",
+    mods = { poison = 1, acid = 1, digRadius = 1 },
+  },
+  sledge = {
+    kind = "ammo", name = "Sledge Rounds", short = "SD", color = { 0.75, 0.72, 0.85 },
+    desc = "A heavy, stunning shot: +60% damage, a huge impact and a stun. Kicks hard and fires a little slower.",
+    mods = { damage = 1.6, impactForce = 4, concussive = 1, recoil = 1.3, fireDelay = 1.15 },
+  },
+  shrapnel = {
+    kind = "ammo", name = "Shrapnel Rounds", short = "SR", color = { 0.7, 0.9, 0.95 },
+    desc = "Bullets bounce twice and burst into two more on impact. -10% damage.",
+    mods = { bounces = 2, split = 1, damage = 0.9 },
+  },
+  birdshot = {
+    kind = "ammo", name = "Birdshot", short = "BS", color = { 0.95, 0.9, 0.65 },
+    desc = "+3 light, fast pellets per shot: +30% bullet speed and 30% less recoil, each pellet 35% weaker.",
+    mods = { pellets = 3, damage = 0.65, spread = 1.4, bulletSpeed = 1.3, recoil = 0.7 },
+  },
+  sungold = {
+    kind = "ammo", name = "Sungold Rounds", short = "SG", color = { 1.0, 0.85, 0.3 },
+    desc = "Blazing gold: bullets light the dark and kills spill 75% more gold, with no loss of damage.",
+    mods = { greed = 0.75, glow = 1 },
+  },
+  corkscrew = {
+    kind = "ammo", name = "Corkscrew Rounds", short = "CK", color = { 0.8, 0.6, 0.4 },
+    desc = "Bullets bore big holes through hard rock, then come back and bore again. -10% damage.",
+    mods = { digRadius = 3, digPower = 2, boomerang = 1, damage = 0.9 },
+  },
+  -- Attachments from two attachments ------------------------------------------
+  marksman = {
+    kind = "attachment", name = "Marksman Barrel", short = "MB", color = { 0.7, 0.8, 0.95 },
+    desc = "+35% bullet speed, 65% tighter spread, +20% damage.",
+    mods = { bulletSpeed = 1.35, spread = 0.35, damage = 1.2 },
+  },
+  drumloader = {
+    kind = "attachment", name = "Drum Loader", short = "DL", color = { 0.85, 0.7, 0.35 },
+    desc = "+50% chambers and 30% faster reloads.",
+    mods = { chambers = 1.5, reloadTime = 0.7 },
+  },
+  braced = {
+    kind = "attachment", name = "Braced Frame", short = "BF", color = { 0.6, 0.45, 0.3 },
+    desc = "60% less recoil and 45% tighter spread, with no loss of fire rate.",
+    mods = { recoil = 0.4, spread = 0.55 },
+  },
+  ripper = {
+    kind = "attachment", name = "Ripper Trigger", short = "RT", color = { 0.95, 0.4, 0.35 },
+    desc = "Fires in rapid bursts of three, 25% faster, with no spread penalty.",
+    mods = { burst = 1, fireDelay = 0.75 },
+  },
+  prospectlamp = {
+    kind = "attachment", name = "Prospector's Lamp", short = "PL", color = { 1.0, 0.8, 0.45 },
+    desc = "While this gun is held: a wide light around you, and gold within 140 pixels flies to you.",
+    mods = { magnet = 140, lamp = 150 },
+  },
+  deadeye = {
+    kind = "attachment", name = "Deadeye Rig", short = "DE", color = { 1.0, 0.35, 0.35 },
+    desc = "A laser sight and a steadying grip: half the spread, and standing still makes shots almost perfectly accurate.",
+    mods = { laser = 1, steady = 1, spread = 0.5 },
+  },
+  duelist = {
+    kind = "attachment", name = "Duelist's Kit", short = "DK", color = { 0.9, 0.75, 0.55 },
+    desc = "The first shot after a reload and the first after switching to this gun both deal double damage. +10% damage.",
+    mods = { opener = 1, quickdraw = 1, damage = 1.1 },
+  },
+  assassin = {
+    kind = "attachment", name = "Assassin's Edge", short = "AE", color = { 0.55, 0.6, 0.75 },
+    desc = "Shots deal triple damage to sleeping enemies, and your kick hits three times as hard. Quiet, with no loss of damage.",
+    mods = { sneak = 1, bayonet = 1 },
+  },
+  twinblast = {
+    kind = "attachment", name = "Twin Blast", short = "TB", color = { 1.0, 0.6, 0.25 },
+    desc = "A hot load that also fires out the back: +20% damage, +30% impact and +50% recoil for bigger recoil jumps.",
+    mods = { rear = 1, recoil = 1.5, damage = 1.2, impactForce = 1.3 },
+  },
+}
+items.fusedOrder = {
+  "thermal", "hellfume", "blight", "sledge", "shrapnel", "birdshot", "sungold", "corkscrew",
+  "marksman", "drumloader", "braced", "ripper", "prospectlamp", "deadeye", "duelist", "assassin", "twinblast",
+}
+for id, def in pairs(FUSED) do
+  def.rarity = "fused"
+  items.defs[id] = def
+end
+
+-- What fuses into what: two common items (in either order) -> a fused one
+items.fusions = {
+  { "incendiary", "frost", "thermal" },
+  { "incendiary", "poison", "hellfume" },
+  { "poison", "acid", "blight" },
+  { "slug", "concussive", "sledge" },
+  { "ricochet", "splitting", "shrapnel" },
+  { "scatter", "feather", "birdshot" },
+  { "gilded", "glowing", "sungold" },
+  { "auger", "boomerang", "corkscrew" },
+  { "longbarrel", "choke", "marksman" },
+  { "extmag", "speedloader", "drumloader" },
+  { "compensator", "stock", "braced" },
+  { "hairtrigger", "burst", "ripper" },
+  { "magnet", "lantern", "prospectlamp" },
+  { "laser", "stabilizer", "deadeye" },
+  { "primer", "quickdraw", "duelist" },
+  { "suppressor", "bayonet", "assassin" },
+  { "charge", "backblast", "twinblast" },
+}
+
+-- The fused item two items make (an id), or nil if they don't fuse
+function items.fuse(a, b)
+  for _, f in ipairs(items.fusions) do
+    if (f[1] == a and f[2] == b) or (f[1] == b and f[2] == a) then
+      return f[3]
+    end
+  end
+  return nil
+end
+
+-- The two items a fused one is made from (ids), or nil
+function items.recipe(id)
+  for _, f in ipairs(items.fusions) do
+    if f[3] == id then
+      return f[1], f[2]
+    end
+  end
+  return nil
+end
+
+-- Stable order, for generating and listing (fused items are listed in
+-- items.fusedOrder and never generated)
 items.order = {
   -- ammo
   "slug", "piercing", "ricochet", "explosive", "incendiary", "scatter",
@@ -541,11 +686,47 @@ items.order = {
   "stabilizer", "holsterloader", "deadmans", "reckless",
 }
 
-function items.new(id)
+-- Levels (design doc §5.7c): two of the same common item fuse into one a
+-- level up, "+1" to "+4". An item at +N works as N+1 copies fitted together
+-- (fusing a +a with a +b makes +(a+b+1)), so its multiplied stats are raised
+-- to the power N+1 and its added effects multiplied by N+1.
+items.MAX_LEVEL = 4
+items.MULTIPLIED = { "damage", "spread", "recoil", "fireDelay", "reloadTime", "bulletSpeed", "impactForce", "chambers" }
+local isMultiplied = {}
+for _, k in ipairs(items.MULTIPLIED) do
+  isMultiplied[k] = true
+end
+
+-- Whether an item can be levelled up by fusing it with itself
+function items.levelable(id)
+  local def = items.defs[id]
+  return def ~= nil and def.rarity == "common"
+end
+
+-- The id a levelled item is recorded under ("slug+2"); plain ids for level 0
+function items.key(id, level)
+  if level and level > 0 then
+    return id .. "+" .. level
+  end
+  return id
+end
+
+local function levelMods(mods, copies)
+  local out = {}
+  for k, v in pairs(mods) do
+    out[k] = isMultiplied[k] and v ^ copies or v * copies
+  end
+  return out
+end
+
+-- A fresh item; level (0-4, default 0) for a fused-up common one
+function items.new(id, level)
   local def = assert(items.defs[id], "unknown item: " .. tostring(id))
-  return {
+  level = level or 0
+  local item = {
     kind = def.kind,
     id = id,
+    level = level,
     name = def.name,
     short = def.short,
     color = def.color,
@@ -553,24 +734,41 @@ function items.new(id)
     desc = def.desc,
     mods = def.mods,
   }
+  if level > 0 then
+    item.name = def.name .. " +" .. level
+    item.desc = def.desc .. " Fused +" .. level .. ": as strong as " .. (level + 1) .. " of them fitted together."
+    item.mods = levelMods(def.mods, level + 1)
+  end
+  return item
 end
 
 -- A random item: common ones turn up most, cursed ones rarely. `rng` is an
 -- optional function(m, n) like love.math.random.
+--
+-- Only items in the profile's pool are rolled (items.isAvailable, set by
+-- src.meta: locked ones never drop or sit in shops)
+items.isAvailable = nil
+
 function items.random(random)
   random = random or love.math.random
-  local total = 0
+  local pool, total = {}, 0
   for _, id in ipairs(items.order) do
-    total = total + items.rarities[items.defs[id].rarity].weight
+    if not items.isAvailable or items.isAvailable(id) then
+      pool[#pool + 1] = id
+      total = total + items.rarities[items.defs[id].rarity].weight
+    end
+  end
+  if #pool == 0 then
+    pool, total = { items.order[1] }, 1
   end
   local roll = random() * total
-  for _, id in ipairs(items.order) do
+  for _, id in ipairs(pool) do
     roll = roll - items.rarities[items.defs[id].rarity].weight
     if roll <= 0 then
       return items.new(id)
     end
   end
-  return items.new(items.order[#items.order])
+  return items.new(pool[#pool])
 end
 
 return items

@@ -11,6 +11,17 @@
 -- objects land on them. Bullets and kicks hurt them; touching them or their
 -- globs hurts the hunter (Player:hurt).
 local audio = require("src.audio")
+
+-- Sounds made while an enemy updates come from where it is (quieter and
+-- panned by distance); anything else plays flat
+local sndX, sndY
+local function sfx(name, volume, pitch)
+  if sndX then
+    audio.playAt(name, sndX, sndY, volume, pitch)
+  else
+    audio.play(name, volume, pitch)
+  end
+end
 local Body = require("src.body")
 local config = require("src.config")
 local destruction = require("src.destruction")
@@ -126,13 +137,13 @@ enemies.defs.bloater = {
   w = 14,
   h = 14,
   hp = 26,
-  speed = 24,
-  accel = 70,
+  speed = 36,
+  accel = 90,
   sight = 260,
   forget = 420,
   damage = 6,
   gold = { 3, 6 },
-  knockback = 0.5,
+  knockback = 0.1,
   weight = 0.8,
 }
 
@@ -417,6 +428,10 @@ local ACTIVE_RANGE = 520 -- enemies further than this from the hunter are frozen
 -- frame): testing every monster in the world at every pixel a bullet moved
 -- made heavy fire slow
 local HIT_RANGE = 1000
+-- Monsters this far from the hunter go dormant: they leave the live list (so no
+-- per-frame update, draw, light or physics cost) but keep all their state, and
+-- come back once he is within WAKE_RANGE. Bosses and their summons never do.
+local dorm = { range = 760, wake = 640, every = 0.25, list = {}, t = 0 } -- (one table: the file is near Lua's local-variable limit)
 local near = {}
 local GLOB_LIFE = 4
 
@@ -433,7 +448,7 @@ local clock = 0 -- game time (stops while paused), for the DPS meter
 enemies.onKill = nil
 
 function enemies.clear()
-  list, globs, sticks, near = {}, {}, {}, {}
+  list, globs, sticks, near, dorm.list = {}, {}, {}, {}, {}
   golemStones, golemWaves = {}, {}
 end
 
@@ -470,6 +485,54 @@ end
 
 function enemies.all()
   return list
+end
+
+-- Every monster in the world, dormant ones included (a fresh table each call:
+-- for the rare whole-world lookups, not per-frame work)
+function enemies.every()
+  local t = {}
+  for _, e in ipairs(list) do
+    t[#t + 1] = e
+  end
+  for _, e in ipairs(dorm.list) do
+    t[#t + 1] = e
+  end
+  return t
+end
+
+function enemies.dormantCount()
+  return #dorm.list
+end
+
+function dorm.canSleep(e)
+  return not e.dead and not e.def.boss and not e.def.alwaysActive and not e.fromBoss and e.kind ~= "queen" and not e.def.dummy
+end
+
+-- Moves far monsters out of the live list and wakes the ones the hunter nears
+function dorm.sweep(px, py)
+  local dormant = dorm.list
+  for i = #list, 1, -1 do
+    local e = list[i]
+    local b = e.body
+    if dorm.canSleep(e) and (math.abs(b.x - px) > dorm.range or math.abs(b.y - py) > dorm.range) then
+      if e.phys then
+        e.phys:destroy()
+        e.phys = nil
+      end
+      table.remove(list, i)
+      dormant[#dormant + 1] = e
+    end
+  end
+  for i = #dormant, 1, -1 do
+    local e = dormant[i]
+    local b = e.body
+    if e.dead then
+      table.remove(dormant, i)
+    elseif math.abs(b.x - px) < dorm.wake and math.abs(b.y - py) < dorm.wake then
+      table.remove(dormant, i)
+      list[#list + 1] = e
+    end
+  end
 end
 
 
@@ -727,18 +790,27 @@ end
 
 -- Picks `count` of an area's monsters (a list) to be elite; tier is the
 -- area's depth. From the second tier on, some get two affixes.
-function enemies.rollElites(monsters, tier, random)
+function enemies.rollElites(monsters, tier, random, mul)
   random = random or love.math.random
   if not require("src.meta").elitesOn() then
     return {} -- (the first run has none)
   end
+  -- Never one the hunter can see right now (the screen is 640x360 world px)
+  local px, py
+  local game = package.loaded["src.game"]
+  local hunter = game and game.player and game.player()
+  if hunter then
+    px, py = hunter:center()
+  end
   local pool = {}
   for _, e in ipairs(monsters) do
-    if ELITE_KINDS[e.kind] and not e.def.boss and not e.swarm and not e.elite then
+    local cx, cy = center(e)
+    local onScreen = px and math.abs(cx - px) < 400 and math.abs(cy - py) < 240
+    if ELITE_KINDS[e.kind] and not e.def.boss and not e.swarm and not e.elite and not onScreen then
       pool[#pool + 1] = e
     end
   end
-  local count = ELITES_PER_TIER[math.max(1, math.min(#ELITES_PER_TIER, tier or 1))]
+  local count = ELITES_PER_TIER[math.max(1, math.min(#ELITES_PER_TIER, tier or 1))] * (mul or 1)
   local made = {}
   for _ = 1, math.min(count, #pool) do
     local e = table.remove(pool, random(1, #pool))
@@ -821,7 +893,10 @@ local function die(e)
     end
     golemStones, golemWaves = {}, {}
   end
-  audio.play("enemy_die")
+  audio.playAt("enemy_die", e.body.x + e.body.w / 2, e.body.y + e.body.h / 2)
+  if e.def.onDeath then
+    e.def.onDeath(e)
+  end
   removePhysics(e)
   local cx, cy = center(e)
   gore.burst(cx, cy, gore.color(e), math.min(2.5, (e.body.w * e.body.h) / 160))
@@ -833,7 +908,6 @@ local function die(e)
   if e.elite then
     eliteDies(e, cx, cy)
   end
-  local firstBoss = e.def.boss and require("src.meta").firstBoss() -- (before the kill is counted)
   if enemies.onKill then
     enemies.onKill(e, e.lastFx)
   end
@@ -864,10 +938,10 @@ local function die(e)
         pickups.maybeDropItem(cx + (r() - 0.5) * 10, cy, 1)
       end
     end
-    -- The weapon is never worse than an A. The first boss ever slain always
-    -- gives the Gatling gun (it turns up nowhere before that).
+    -- The weapon is never worse than an A. The Queen gives the Gatling gun
+    -- until the Gunsmith has crafted it (it turns up nowhere else before that).
     local lockedGun = r() < 0.4 and meta.lockedArchetype() or nil
-    if firstBoss and not meta.isUnlocked("weapon", "gatling") then
+    if meta.SPECIAL_GUNS.gatling == e.kind and not meta.isUnlocked("weapon", "gatling") then
       lockedGun = "gatling"
     end
     local guns, gunInfo = require("src.guns"), require("src.gunInfo")
@@ -1027,6 +1101,14 @@ function enemies.damage(e, amount, dx, dy, force, crit, fx)
   if e.dead then
     return
   end
+  amount = require("src.dev").damage(amount)
+  if e.def.filter then
+    -- (a monster that decides what a hit does: armour, weak points, gates)
+    amount = e.def.filter(e, amount)
+    if amount <= 0 then
+      return
+    end
+  end
   if e.invuln then
     -- The Colossus in its shell: everything glances off
     audio.playAt("clank", e.body.x, e.body.y, 0.4, 1.7)
@@ -1049,7 +1131,7 @@ function enemies.damage(e, amount, dx, dy, force, crit, fx)
     -- A curled roller turns most of it aside in a shower of sparks
     amount = math.max(1, math.floor(amount * e.def.armor + 0.5))
     e.armorHit = 0.12
-    audio.play("clank", 0.3, 1.8)
+    sfx("clank", 0.3, 1.8)
     local ax, ay = center(e)
     for _ = 1, 3 do
       effects.particle(ax, ay, (love.math.random() - 0.5) * 120, -love.math.random() * 70, 0.18, { 1, 0.9, 0.55 }, 200, true)
@@ -1063,7 +1145,7 @@ function enemies.damage(e, amount, dx, dy, force, crit, fx)
     elseif dx and dx * e.facing < 0 then
       -- Struck from the front: the plates turn most of it aside
       amount = math.max(1, math.floor(amount * ELITE_FRONT + 0.5))
-      audio.play("clank", 0.25, 1.5)
+      sfx("clank", 0.25, 1.5)
       local ax, ay = center(e)
       for _ = 1, 2 do
         effects.particle(ax + e.facing * e.body.w / 2, ay, e.facing * (30 + love.math.random() * 60), -love.math.random() * 60, 0.15, { 0.8, 0.88, 1 }, 200, true)
@@ -1327,6 +1409,39 @@ end
 -- bubbles up, acid drips and sizzles, a shock crackles with sparks, concussion
 -- circles its head with stars (drawn in drawDazed). The sprite itself is washed
 -- in the status colour by the tint shader in enemies.draw.
+-- Monsters make noise while they hunt: sound, first and last gap in seconds
+-- (the first right after it notices the hunter), and a pitch (lower for giants)
+local VOICES = {
+  ghoul = { "ghoul_growl", 3.5, 8, 1 },
+  warden = { "ghoul_growl", 3, 6, 0.6 },
+  miner = { "miner_yap", 3.5, 8, 1 },
+  spitter = { "spitter_gurgle", 4, 10, 1 },
+  bloater = { "bloater_wheeze", 4, 9, 1 },
+  behemoth = { "bloater_wheeze", 3, 6, 0.6 },
+  hopper = { "croak", 4, 9, 1 },
+  wisp = { "wisp_crackle", 3, 7, 1 },
+}
+
+local function updateVoice(e, dt)
+  local voice = VOICES[e.kind]
+  if not voice then
+    return
+  end
+  local hunting = e.state == "chase" and e.stun <= 0
+  if hunting and e.prevState ~= "chase" then
+    e.voiceT = 0.1 + love.math.random() * 0.4 -- (it has just noticed the hunter)
+  end
+  e.prevState = e.state
+  if hunting then
+    e.voiceT = (e.voiceT or voice[2]) - dt
+    if e.voiceT <= 0 then
+      e.voiceT = voice[2] + love.math.random() * (voice[3] - voice[2])
+      local vx, vy = center(e)
+      audio.playAt(voice[1], vx, vy, e.elite and 1.1 or 0.9, voice[4] * (0.9 + love.math.random() * 0.25) * (e.elite and 0.88 or 1))
+    end
+  end
+end
+
 local function updateStatusFx(e, dt)
   local b = e.body
   local rnd = love.math.random
@@ -1462,7 +1577,12 @@ end
 function enemies.hitTest(px, py)
   for _, e in ipairs(near) do
     local b = e.body
+    if not e.dead and e.def.extraHit and e.def.extraHit(e, px, py) then
+      e.hitX, e.hitY = px, py -- (a weak point standing outside its body)
+      return e
+    end
     if not e.dead and px >= b.x and px < b.x + b.w and py >= b.y and py < b.y + b.h then
+      e.hitX, e.hitY = px, py -- (where it was struck: see def.filter)
       return e
     end
     -- A worm can be hit anywhere along its length
@@ -1570,6 +1690,37 @@ local function updateGhoul(e, dt, world, player, px, py)
     e.rakes = 0
     clawDig(e, world, true)
   end
+  -- Locked on but walled off: it digs at the rock toward the hunter in bursts
+  -- (a couple of seconds of hacking, then a breather)
+  if e.state == "chase" and e.stun <= 0 then
+    e.burstCd = math.max(0, (e.burstCd or 0) - dt)
+    if (e.burstT or 0) > 0 then
+      e.burstT = e.burstT - dt
+      e.digTick = (e.digTick or 0) - dt
+      if e.digTick <= 0 then
+        e.digTick = 0.2
+        local d = math.max(1, dist)
+        local nx, ny = (px - cx) / d, (py - cy) / d
+        local k = def.scale or 1
+        destruction.dig(world, cx + nx * (b.w / 2 + 4 * k), cy + ny * (b.h / 2 + 3 * k), def.clawDig * 1.5 * k, def.clawPower + 1, nx, ny)
+        sfx("hit", 0.35, 0.5 + love.math.random() * 0.2)
+        effects.particle(cx + nx * 8, cy + ny * 8, nx * 40 + (love.math.random() - 0.5) * 40, ny * 40 - 20, 0.3, { 0.5, 0.45, 0.4 }, 200, true)
+        if ny < -0.5 and e.grounded then
+          b.vy = -def.jump * 0.8 -- (clawing upward, it hauls itself up)
+        end
+      end
+      if e.burstT <= 0 then
+        e.burstCd = 2.5
+      end
+      if e.seesPlayer then
+        e.burstT = 0
+        e.burstCd = 0.5
+      end
+    elseif not e.seesPlayer and e.burstCd <= 0 and dist < def.forget then
+      e.burstT = 2.2
+      e.digTick = 0
+    end
+  end
   local want = 0
   if e.stun > 0 then
     want = nil -- knocked back: no control
@@ -1588,13 +1739,29 @@ local function updateGhoul(e, dt, world, player, px, py)
         b.vx = e.facing * def.lungeSpeed
         b.vy = -def.lungeLift
         e.grounded = false
-        audio.play("hit", 0.5, 0.6)
+        sfx("hit", 0.5, 0.6)
         clawDig(e, world, false)
         e.rakes = 1
+        if e.digVert and e.digVert ~= 0 then
+          -- Stuck below or above the hunter: the claws tear up or down through the rock too
+          local k = def.scale or 1
+          local dy = e.digVert
+          destruction.dig(world, cx, dy < 0 and b.y - 3 or b.y + b.h + 2, def.clawDig * 1.3 * k, def.clawPower, 0, dy)
+          if dy < 0 then
+            b.vy = -def.lungeLift * 0.6
+          end
+        end
+        e.digVert = nil
       end
     elseif e.grounded and e.cooldown <= 0 and dist < def.lungeRange and math.abs(py - cy) < 24 then
       e.windT = def.windup
       e.cooldown = def.lungeCooldown + def.windup
+    elseif e.grounded and e.cooldown <= 0 and (e.stuckT or 0) > 0.8 then
+      -- Can't get at the hunter: dig toward him with the claws
+      e.stuckT = 0
+      e.windT = def.windup
+      e.cooldown = def.lungeCooldown + def.windup
+      e.digVert = py < cy - 20 and -1 or (py > cy + 20 and 1 or 0)
     end
   else
     -- Idle: shuffle a few steps now and then
@@ -1620,6 +1787,12 @@ local function updateGhoul(e, dt, world, player, px, py)
   b.vy = math.min(b.vy + config.gravity * dt, 450)
 
   local blocked, blocker = Body.moveX(b, collide, b.vx * dt, 4)
+  -- Stuck: pressing on into a wall (or standing under/over the hunter) for a while
+  if e.state == "chase" and e.stun <= 0 and want and not e.windT and ((blocked and want ~= 0 and not blocker) or (want == 0 and math.abs(py - cy) > 20)) then
+    e.stuckT = (e.stuckT or 0) + dt
+  else
+    e.stuckT = math.max(0, (e.stuckT or 0) - dt * 2)
+  end
   if blocked and (e.rakes or 0) > 0 and not blocker then
     -- Lunged into a wall: the claws tear into it there and then
     e.rakes = 0
@@ -1685,7 +1858,7 @@ local function updateBat(e, dt, world, player, px, py)
     if e.seesPlayer and dist < def.chargeRange and e.attackCd <= 0 and e.stun <= 0 then
       e.state = "lock"
       e.timer = def.lockTime
-      audio.play("bat_screech")
+      sfx("bat_screech")
     end
   elseif e.state == "lock" then
     -- Hangs in the air, wings wide, eyes on the hunter
@@ -1785,7 +1958,7 @@ local function updateHopper(e, dt, world, player, px, py)
           e.grounded = false
           e.cooldown = def.leapCooldown
           e.leaps = (e.leaps or 0) + 1
-          audio.play("hit", 0.4, 0.5)
+          sfx("hit", 0.4, 0.5)
           if def.kids and e.leaps % 3 == 0 then
             e.kids = e.kids or {}
             local alive = {}
@@ -1830,7 +2003,68 @@ local function updateHopper(e, dt, world, player, px, py)
 end
 
 -- Bloater: drifts toward the hunter, leaking poison gas as it goes
+-- The ordinary bloater is nearly passive: it drifts about, a lot, leaving a
+-- train of gas behind it. Hurt it and it lets out a burst, runs from the
+-- hunter and leaks much more for a while, so the paths it floats through are
+-- walled off by gas the hunter has to cross.
+local function updateWanderingBloater(e, dt, world, player, px, py)
+  local def, b = e.def, e.body
+  local cx, cy = center(e)
+  local dist = math.sqrt((px - cx) ^ 2 + (py - cy) ^ 2)
+  e.phase = e.phase + dt * 2
+  if e.lastHp and e.hp < e.lastHp then
+    -- Struck: a burst of gas, then away
+    e.fleeT = 5
+    e.gasUp = 9
+    fluids.addGas(cx, cy, 0.8, 16)
+    local d = math.max(1, dist)
+    e.dirX, e.dirY = (cx - px) / d, (cy - py) / d
+    e.wanderT = 1.5
+  end
+  e.lastHp = e.hp
+  e.fleeT = math.max(0, (e.fleeT or 0) - dt)
+  e.gasUp = math.max(0, (e.gasUp or 0) - dt)
+  local fleeing = e.fleeT > 0
+  e.puffT = (e.puffT or 0.4) - dt
+  if e.puffT <= 0 then
+    if e.gasUp > 0 then
+      e.puffT = 0.3
+      fluids.addGas(cx, cy + 3, 0.5, 11)
+    else
+      e.puffT = 0.55 + love.math.random() * 0.2
+      fluids.addGas(cx, cy + 3, 0.3, 7)
+    end
+  end
+  e.state = fleeing and "chase" or "wander" -- (chase: the wheeze of a frightened bloater)
+  e.wanderT = (e.wanderT or 0) - dt
+  if e.wanderT <= 0 or not e.dirX then
+    local a = love.math.random() * math.pi * 2
+    e.dirX, e.dirY = math.cos(a), math.sin(a) * 0.6
+    e.wanderT = 1.2 + love.math.random() * 2.2
+  end
+  local speed = def.speed * (fleeing and 2.2 or 1.1)
+  local tx, ty = e.dirX * speed, e.dirY * speed + math.sin(e.phase) * 8
+  if e.stun <= 0 then
+    local step = def.accel * dt * 1.5
+    b.vx = b.vx < tx and math.min(b.vx + step, tx) or math.max(b.vx - step, tx)
+    b.vy = b.vy < ty and math.min(b.vy + step, ty) or math.max(b.vy - step, ty)
+    e.facing = b.vx >= 0 and 1 or -1
+  end
+  local collide = collider(e, world)
+  if Body.moveX(b, collide, b.vx * dt, 0) then
+    b.vx = -b.vx * 0.5
+    e.dirX = -e.dirX
+  end
+  if Body.moveY(b, collide, b.vy * dt) then
+    b.vy = -b.vy * 0.5
+    e.dirY = -e.dirY
+  end
+end
+
 local function updateBloater(e, dt, world, player, px, py)
+  if e.kind == "bloater" and not e.def.boss then
+    return updateWanderingBloater(e, dt, world, player, px, py)
+  end
   local def, b = e.def, e.body
   local cx, cy = center(e)
   local dist = math.sqrt((px - cx) ^ 2 + (py - cy) ^ 2)
@@ -1917,7 +2151,7 @@ local function updateDreadBat(e, dt, world, player, px, py)
   if e.state == "sleep" then
     if dist < def.sight then
       e.state = "chase"
-      audio.play("bat_screech", 1, 0.5)
+      sfx("bat_screech", 1, 0.5)
     else
       return
     end
@@ -1939,7 +2173,7 @@ local function updateDreadBat(e, dt, world, player, px, py)
     if e.attackCd <= 0 and dist < def.chargeRange and e.stun <= 0 then
       e.state = "lock"
       e.timer = def.lockTime
-      audio.play("bat_screech", 1, 0.5)
+      sfx("bat_screech", 1, 0.5)
     end
   elseif e.state == "lock" then
     -- Hangs in the air, wings wide, shaking, eyes on the hunter
@@ -1951,7 +2185,7 @@ local function updateDreadBat(e, dt, world, player, px, py)
       e.timer = def.chargeTime
       e.digged = 0
       b.vx, b.vy = (px - cx) / d * def.chargeSpeed, (py - 2 - cy) / d * def.chargeSpeed
-      audio.play("explosion", 0.5, 0.6)
+      sfx("explosion", 0.5, 0.6)
     end
   elseif e.state == "charge" then
     e.timer = e.timer - dt
@@ -2183,7 +2417,7 @@ local function splitQueen(e)
     removePhysics(q) -- (rebuilt at its new size next frame)
     brood[i] = q
   end
-  audio.play("bat_screech", 1, 0.5)
+  sfx("bat_screech", 1, 0.5)
   effects.ring(cx, cy, 60, { 0.85, 0.95, 0.35 })
   fluids.addGas(cx, cy, 1, 30)
   for _ = 1, 16 do
@@ -2227,10 +2461,10 @@ local function queenAttack(e, px, py, aimAng, stage, gen, sf)
     e.fanT = 0
   elseif atk == "dash" then
     e.dashT = 0.9
-    audio.play("bat_screech", 0.9, 0.7)
+    sfx("bat_screech", 0.9, 0.7)
     effects.ring(cx, cy, 40 * sf + 14, { 0.9, 0.95, 0.4 })
   elseif atk == "bloom" then
-    audio.play("explosion", 0.7, 0.5)
+    sfx("explosion", 0.7, 0.5)
     effects.ring(cx, cy, 110 * sf, { 0.85, 0.95, 0.35 })
     fluids.addGas(cx, cy, 1, 70 * sf)
     local n = 14
@@ -2251,7 +2485,7 @@ local function queenAttack(e, px, py, aimAng, stage, gen, sf)
         local x = lo + (k - 0.5 + (love.math.random() - 0.5) * 0.7) * seg
         fluids.addColumn(x, 64, a.top + 12, a.floorY - 2, 1.4, 7)
       end
-      audio.play("explosion", 0.5, 0.5)
+      sfx("explosion", 0.5, 0.5)
     end
     e.qs = "recover"
     e.qt = 0.1
@@ -2294,7 +2528,7 @@ local function updateQueen(e, dt, world, player, px, py)
       e.stage = 1
       e.group = e.group or { alive = 1 }
       e.qs, e.qt = "hover", 2.5
-      audio.play("bat_screech", 1, 0.4)
+      sfx("bat_screech", 1, 0.4)
     else
       b.vx, b.vy = 0, math.sin(e.phase) * 4
       return
@@ -2306,7 +2540,7 @@ local function updateQueen(e, dt, world, player, px, py)
   end
   if stage > (e.stage or 1) then
     -- A new stage: a roar and a burst of gas
-    audio.play("bat_screech", 1, 0.4)
+    sfx("bat_screech", 1, 0.4)
     effects.ring(cx, cy, 70 * sf, { 0.8, 0.92, 0.3 })
     fluids.addGas(cx, cy, 1, 40 * sf)
   end
@@ -2344,7 +2578,7 @@ local function updateQueen(e, dt, world, player, px, py)
       e.qt = QUEEN_WIND[e.atk] * timeScale
       e.qtTotal = e.qt
       e.dashAng = aimAng
-      audio.play("bat_screech", 0.6, 0.55)
+      sfx("bat_screech", 0.6, 0.55)
     end
   elseif e.qs == "windup" then
     -- The telegraph: she stops and swells, glowing; a dash shows its line, which
@@ -2378,7 +2612,7 @@ local function updateQueen(e, dt, world, player, px, py)
             fireGlob(e, aimAng + (i - (n + 1) / 2) / (n - 1) * arc, def.globSpeed)
           end
         end
-        audio.play("shot_pistol", 0.5, 0.45)
+        sfx("shot_pistol", 0.5, 0.45)
       end
       if e.fanLeft <= 0 and e.fanT <= 0 then
         e.qs = "recover"
@@ -2498,11 +2732,13 @@ local function updateSpitter(e, dt, world, player, px, py)
       e.windup = nil
       if e.seesPlayer then
         spit(e, px, py)
+        sfx("spitter_spit", 1, 0.95 + love.math.random() * 0.1)
       end
       e.cooldown = def.reload
     end
   elseif e.cooldown <= 0 and e.seesPlayer then
     e.windup = def.windup
+    sfx("spitter_charge", 1, 0.95 + love.math.random() * 0.1)
   end
 end
 
@@ -2600,7 +2836,7 @@ local function updateWorm(e, dt, world, player, px, py)
   local function wormSound(name, volume)
     local near = math.max(0, 1 - dist / 260)
     if near > 0.03 then
-      audio.play(name, volume * near ^ 1.5)
+      sfx(name, volume * near ^ 1.5)
     end
   end
   e.phase = e.phase + dt * 9
@@ -2753,7 +2989,7 @@ local function throwDynamite(e, px, py)
     spin = 0,
     mul = e.dmgMul * def.blast,
   }
-  audio.play("worm_lunge", 0.5, 1.6)
+  sfx("worm_lunge", 0.5, 1.6)
 end
 
 -- The hunter's own dynamite (the Prospector's): thrown from (x, y) toward
@@ -2775,11 +3011,11 @@ function enemies.throwStick(x, y, tx, ty)
     fuse = 1.4,
     spin = 0,
     mul = 1.6,
-    dig = 11,
+    dig = 33, -- (3x the bite out of the ground; the blast hurting things is unchanged)
     digPower = 3.5,
     cause = "selfblast",
   }
-  audio.play("worm_lunge", 0.5, 1.6)
+  sfx("worm_lunge", 0.5, 1.6)
 end
 
 local function updateMiner(e, dt, world, player, px, py)
@@ -2819,7 +3055,7 @@ local function updateMiner(e, dt, world, player, px, py)
       if e.cooldown <= 0 and e.seesPlayer and dist < def.throwRange and e.grounded then
         e.windT = def.windup
         e.cooldown = def.throwCooldown + def.windup
-        audio.play("miner_light", 0.7)
+        sfx("miner_light", 0.7)
       end
     end
   else
@@ -2893,7 +3129,7 @@ local function updateRoller(e, dt, world, player, px, py)
     if e.grounded and e.cooldown <= 0 and e.seesPlayer and dist < def.rollRange then
       e.state = "curl"
       e.timer = def.curlTime
-      audio.play("roller_curl", 0.8)
+      sfx("roller_curl", 0.8)
     end
   elseif e.state == "curl" then
     e.facing = px >= cx and 1 or -1
@@ -2905,7 +3141,7 @@ local function updateRoller(e, dt, world, player, px, py)
       b.vx = e.facing * def.rollSpeed
       b.vy = -80
       e.grounded = false
-      audio.play("roller_roll", 0.8)
+      sfx("roller_roll", 0.8)
     end
   elseif e.state == "roll" then
     e.timer = e.timer - dt
@@ -2971,7 +3207,7 @@ local function updateRoller(e, dt, world, player, px, py)
       end
       b.vx = e.facing * def.rollSpeed * 0.9
       b.vy = -70
-      audio.play("clank", 0.35, 1.5)
+      sfx("clank", 0.35, 1.5)
       for _ = 1, 4 do
         effects.particle(cx, cy, (love.math.random() - 0.5) * 90, -love.math.random() * 50, 0.2, { 1, 0.9, 0.55 }, 200, true)
       end
@@ -3039,7 +3275,7 @@ local function updatePiranha(e, dt, world, player, px, py)
         e.aggro = true
         b.vx, b.vy = dx / dist * def.dashSpeed, dy / dist * def.dashSpeed
         e.cooldown = def.dashCooldown * (0.8 + r() * 0.4)
-        audio.play("hit", 0.25, 1.7)
+        sfx("hit", 0.25, 1.7)
       elseif hunting then
         tx, ty = dx / dist * def.speed, dy / dist * def.speed
       else
@@ -3064,7 +3300,7 @@ local function updatePiranha(e, dt, world, player, px, py)
           local dir = dx < 0 and -1 or 1
           b.vx = dir * math.min(def.dashSpeed * 0.6, math.abs(dx) * 3 + 40)
           b.vy = -def.flopLift * 1.7
-          audio.play("hit", 0.25, 1.4)
+          sfx("hit", 0.25, 1.4)
         end
       end
       -- Otherwise it never swims out of the water on its own: turn back at the edge
@@ -3163,7 +3399,7 @@ local function golemStartShell(e, world, n)
   e.gs, e.sub, e.gt = "shell", nil, 0
   e.invuln, e.vulnerable = true, false
   e.body.vx = 0
-  audio.play("explosion", 0.8, 0.45)
+  sfx("explosion", 0.8, 0.45)
   effects.ring(center(e), e.body.y + e.body.h / 2, 90, { 0.6, 0.85, 1 })
   effects.popup(center(e), e.body.y - 10, "SHELL", { 0.6, 0.85, 1 })
   require("src.camera").shake(0.5)
@@ -3184,9 +3420,9 @@ local function golemBeginAttack(e, name, px, py)
     local s = love.math.random() < 0.5 and -1 or 1
     e.beamA0, e.beamA1 = base - s * 0.95, base + s * 0.95
     e.beamAng = e.beamA0
-    audio.play("bat_screech", 0.5, 0.35)
+    sfx("bat_screech", 0.5, 0.35)
   elseif name == "stomp" then
-    audio.play("explosion", 0.3, 0.4)
+    sfx("explosion", 0.3, 0.4)
   end
 end
 
@@ -3197,7 +3433,7 @@ local function golemAct(e, world, player, px, py, stage)
   local cx, cy = center(e)
   local def = e.def
   if e.gs == "swipe" then
-    audio.play("hit", 0.9, 0.4)
+    sfx("hit", 0.9, 0.4)
     b.vx = f * 50
     local x0, x1 = cx + f * 8, cx + f * (b.w / 2 + 62)
     local rx, rw = math.min(x0, x1), math.abs(x1 - x0)
@@ -3212,7 +3448,7 @@ local function golemAct(e, world, player, px, py, stage)
       effects.particle(cx + f * (20 + i * 6), b.y + b.h - 6, f * 40, -20 - love.math.random() * 40, 0.5, { 0.7, 0.68, 0.74 }, 300)
     end
   elseif e.gs == "throw" then
-    audio.play("hit", 0.7, 0.5)
+    sfx("hit", 0.7, 0.5)
     local n = stage
     local sx, sy = cx + f * 16, b.y + 4
     local T = math.max(0.6, math.min(1.2, math.abs(px - sx) / 260))
@@ -3223,7 +3459,7 @@ local function golemAct(e, world, player, px, py, stage)
       golemStones[#golemStones + 1] = { x = sx, y = sy, vx = vx, vy = vy, life = 4, spin = love.math.random() * 6, dmg = def.damage * 0.75 }
     end
   elseif e.gs == "stomp" then
-    audio.play("explosion", 0.8, 0.4)
+    sfx("explosion", 0.8, 0.4)
     require("src.camera").shake(0.55)
     local dirs = { (px < cx) and -1 or 1 }
     if stage >= 2 then
@@ -3236,7 +3472,7 @@ local function golemAct(e, world, player, px, py, stage)
       effects.particle(cx + (love.math.random() - 0.5) * 50, b.y + b.h - 2, (love.math.random() - 0.5) * 120, -40 - love.math.random() * 80, 0.6, { 0.7, 0.68, 0.74 }, 400)
     end
   elseif e.gs == "beam" then
-    audio.play("explosion", 0.4, 1.6)
+    sfx("explosion", 0.4, 1.6)
   end
 end
 
@@ -3290,7 +3526,7 @@ local function updateGolem(e, dt, world, player, px, py)
         m.seesPlayer = true
         e.minis[#e.minis + 1] = m
         effects.ring(x, m.body.y + 10, 16, { 0.6, 0.85, 1 })
-        audio.play("clank", 0.6, 0.7)
+        sfx("clank", 0.6, 0.7)
       end
     end
     local alive = 0
@@ -3303,7 +3539,7 @@ local function updateGolem(e, dt, world, player, px, py)
       e.invuln = false
       e.gs, e.gt = "rest", 2.2
       e.vulnerable = true
-      audio.play("explosion", 0.9, 0.55)
+      sfx("explosion", 0.9, 0.55)
       require("src.camera").shake(0.5)
       effects.ring(cx, cy, 80, { 0.6, 0.85, 1 })
       effects.popup(cx, b.y - 10, "SHELL BROKEN", { 1, 0.9, 0.6 })
@@ -3417,7 +3653,7 @@ local function updateGolem(e, dt, world, player, px, py)
   local step = math.floor(e.phase / math.pi)
   e.phase = e.phase + dt * (math.abs(b.vx) / 14 + 0.5)
   if e.grounded and math.abs(b.vx) > 8 and math.floor(e.phase / math.pi) ~= step then
-    audio.play("hit", 0.25, 0.3)
+    sfx("hit", 0.25, 0.3)
     require("src.camera").shake(0.06)
     effects.particle(cx + (love.math.random() - 0.5) * 30, b.y + b.h - 1, 0, -10 - love.math.random() * 14, 0.4, { 0.6, 0.58, 0.64 }, 100)
   end
@@ -3527,6 +3763,11 @@ function enemies.update(dt, world, player)
   clock = clock + dt
   local px, py = player:center()
   local pb = player.body
+  dorm.t = dorm.t - dt
+  if dorm.t <= 0 then
+    dorm.t = dorm.every
+    dorm.sweep(px, py)
+  end
   for i = #near, 1, -1 do
     near[i] = nil
   end
@@ -3543,7 +3784,7 @@ function enemies.update(dt, world, player)
     else
       local cx, cy = center(e)
       -- (An awake Queen is never frozen: she dashes back to the hunter from anywhere in her arena)
-      if (math.abs(cx - px) < ACTIVE_RANGE and math.abs(cy - py) < ACTIVE_RANGE) or (e.kind == "queen" and e.state ~= "sleep") then
+      if (math.abs(cx - px) < ACTIVE_RANGE and math.abs(cy - py) < ACTIVE_RANGE) or (e.kind == "queen" and e.state ~= "sleep") or (e.def.alwaysActive and e.state ~= "sleep") then
         e.flash = math.max(0, e.flash - dt)
         e.stagger = math.max(0, (e.stagger or 0) - dt)
         e.spitT = math.max(0, (e.spitT or 0) - dt)
@@ -3566,11 +3807,14 @@ function enemies.update(dt, world, player)
         if e.acid and e.acid > 0 then
           e.acid = e.acid - dt
         end
+        sndX, sndY = cx, cy
         UPDATE[e.kind](e, (e.slow and e.slow > 0) and dt * 0.45 or dt, world, player, px, py)
         propImpacts(e, dt)
         updateBurn(e, dt)
         updatePoison(e, dt)
         updateStatusFx(e, dt)
+        updateVoice(e, dt)
+        sndX, sndY = nil, nil
         if e.elite then
           updateElite(e, dt)
         end
@@ -3609,6 +3853,10 @@ function enemies.update(dt, world, player)
         removePhysics(e)
       end
     end
+  end
+
+  if enemies.afterUpdate then
+    enemies.afterUpdate(dt, world, player, px, py)
   end
 
   -- Dynamite: arcs, bounces, and goes off when the fuse runs out (or when shot)
@@ -5826,10 +6074,15 @@ function enemies.draw(view)
   end
   drawSticks()
   drawGolemShots()
+  if enemies.afterDraw then
+    enemies.afterDraw(view)
+  end
 end
 
 -- (for the art tests: the drawing functions by kind)
 enemies.DRAW, enemies.GLOW = DRAW, GLOW
+enemies.UPDATE, enemies.VOICES = UPDATE, VOICES
+enemies.helpers = { center = center, collider = collider, removePhysics = removePhysics, sfx = sfx, lineOfSight = lineOfSight }
 for k, f in pairs(DRAW) do
   DRAW_REF[k] = f
 end
@@ -5873,6 +6126,9 @@ function enemies.drawEmissive(view)
     love.graphics.setColor(0.8, 1, 0.6)
     px(g.x, g.y)
   end
+  if enemies.afterEmissive then
+    enemies.afterEmissive(view) -- (bosses in modules of their own: their shots and beams)
+  end
 end
 
 -- Globs and spitters' mouths give off a faint sickly light
@@ -5894,6 +6150,18 @@ function enemies.addLights(lighting, view)
         local c = enemies.AFFIXES[e.elite.affixes[1]].color
         lighting.add(cx, cy, e.elite.has.burning and 44 or 26, c[1], c[2], c[3], e.elite.has.burning and 0.45 or 0.2)
       end
+      if e.def.light then
+        local l = e.def.light(e)
+        if l then
+          if type(l[1]) == "table" then
+            for _, one in ipairs(l) do
+              lighting.add(one[1], one[2], one[3], one[4], one[5], one[6], one[7])
+            end
+          else
+            lighting.add(l[1], l[2], l[3], l[4], l[5], l[6], l[7])
+          end
+        end
+      end
       if e.kind == "spitter" then
         lighting.add(cx, cy + 4, e.windup and 30 or 16, 0.5, 1, 0.35, 0.5)
       elseif e.kind == "miner" then
@@ -5904,14 +6172,14 @@ function enemies.addLights(lighting, view)
         lighting.add(cx, cy, 50, 0.85, 0.3, 0.5, 0.3) -- so the dark bulk can be seen
       elseif e.kind == "queen" then
         lighting.add(cx, cy, 110, 0.8, 0.95, 0.3, 0.55)
-      elseif e.kind == "golem" then
+      elseif e.kind == "golem_old" then
         lighting.add(cx, e.body.y + 10, 70, 0.85, 0.8, 0.95, 0.18) -- so the pale bulk can be seen
         local ex, ey = golemEye(e)
         lighting.add(ex, ey, e.sub == "act" and e.gs == "beam" and 90 or 40, e.invuln and 0.5 or 1, e.invuln and 0.85 or 0.35, e.invuln and 1 or 0.6, 0.8)
         if e.beamEnd then
           lighting.add(e.beamEnd[1], e.beamEnd[2], 70, 1, 0.4, 0.7, 0.9)
         end
-      elseif e.kind == "minigolem" then
+      elseif e.kind == "minigolem_old" then
         lighting.add(cx, cy - 6, 22, 1, 0.4, 0.65, 0.4)
       elseif e.kind == "bloater" or e.kind == "behemoth" then
         lighting.add(cx, cy, e.def.boss and 60 or 30, 0.7, 0.95, 0.3, 0.4)
@@ -5984,6 +6252,8 @@ function enemies.drawScreen(toScreen, font)
         local sx, sy = toScreen(b.x + b.w / 2, b.y - 8)
         sy = math.max(sy, 44 + unit * 2.4) -- (kept on screen when her head is above it)
         local w, h = math.max(b.w * unit * 1.2, (e.gen or 0) > 0 and 48 or 140), math.max(10, unit * 2.4)
+        w = math.min(w, sw * 0.55) -- (a boss as big as the screen keeps a bar that fits)
+        sx = math.max(w / 2 + 8, math.min(sw - w / 2 - 8, sx))
         local x, y = math.floor(sx - w / 2), math.floor(sy - h)
         -- Flat: a plain dark trough and a red gradient fill, no glass shading
         love.graphics.setColor(0.10, 0.02, 0.04, 0.75)
@@ -5991,6 +6261,13 @@ function enemies.drawScreen(toScreen, font)
         local frac = math.max(0, e.hp) / e.maxHp
         if frac > 0 then
           hud.gradRect(x, y, w * frac, h, { 0.95, 0.22, 0.26 }, { 0.62, 0.07, 0.13 })
+        end
+        if e.bossName then
+          local nx, ny = math.floor(sx - font:getWidth(e.bossName) / 2), math.floor(y - font:getHeight() - 2)
+          love.graphics.setColor(0, 0, 0, 0.85)
+          love.graphics.print(e.bossName, nx + 2, ny + 2)
+          love.graphics.setColor(1, 0.85, 0.8)
+          love.graphics.print(e.bossName, nx, ny)
         end
       end
     end
@@ -6047,6 +6324,22 @@ function enemies.drawScreen(toScreen, font)
       end
     end
   end
+end
+
+-- The water's creatures and the fish boss (src.aquatic) register themselves here
+package.loaded["src.enemies"] = enemies
+require("src.aquatic")
+require("src.colossus")
+require("src.darkhunter")
+require("src.needlemobs")
+
+-- The bosses and creatures in the modules above add their drawing functions after the
+-- table was copied for the bestiary's portraits: copy again, or they come out blank
+for k, f in pairs(DRAW) do
+  DRAW_REF[k] = f
+end
+for k, f in pairs(GLOW) do
+  GLOW_REF[k] = f
 end
 
 return enemies

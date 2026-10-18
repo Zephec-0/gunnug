@@ -26,7 +26,9 @@ function love.keypressed(key)
   if key == "escape" and love.system.getOS() ~= "Web" then
     love.event.quit()
   else
-    overlayStats.handleKeyboard(key) -- Should always be called last
+    if not love.filesystem.isFused() then -- (the F-key debug tools are for source checkouts only)
+      overlayStats.handleKeyboard(key) -- Should always be called last
+    end
   end
 end
 

@@ -25,6 +25,8 @@ local materials = {
   TAILINGS = 15,
   BASALT = 16,
   ASH = 17,
+  DIAMONDORE = 18,
+  ICE = 19,
 }
 
 materials.defs = {
@@ -197,6 +199,84 @@ materials.defs = {
     topColor = { 0.46, 0.41, 0.38 },
     variation = 0.08,
   },
+  -- Rock veined with diamond: rarer than gold and worth ten times as much a speck
+  [18] = {
+    name = "diamond ore",
+    solid = true,
+    hardness = 3,
+    density = 2.8,
+    color = { 0.26, 0.30, 0.40 },
+    topColor = { 0.42, 0.48, 0.62 },
+    variation = 0.06,
+    flecks = { 0.80, 0.95, 1.0 }, -- silver-blue glints, thicker and brighter than gold's
+    fleckMin = 0.46,
+    gold = { 10, 20 },
+  },
+  -- A skin of ice on frozen water (frost rounds)
+  [19] = {
+    name = "ice",
+    solid = true,
+    hardness = 1,
+    density = 0.9,
+    color = { 0.55, 0.74, 0.86 },
+    topColor = { 0.78, 0.92, 1.0 },
+    variation = 0.05,
+  },
+}
+
+-- Hardpan: sand packed solid under the camp's streets (never breaks)
+materials.HARDPAN = 20
+materials.defs[20] = {}
+for k, v in pairs(materials.defs[4]) do
+  materials.defs[20][k] = v
+end
+materials.defs[20].name = "hardpan"
+materials.defs[20].hardness = math.huge
+
+-- Camp timber: the planks under each person's stall and building never break
+materials.HARDWOOD = 22
+materials.defs[22] = {}
+for k, v in pairs(materials.defs[6]) do
+  materials.defs[22][k] = v
+end
+materials.defs[22].name = "camp timber"
+materials.defs[22].hardness = math.huge
+
+-- Sealed rock: the rock around a boss's arena, unbreakable until the boss dies
+materials.SEALED = 21
+materials.defs[21] = {}
+for k, v in pairs(materials.defs[2]) do
+  materials.defs[21][k] = v
+end
+materials.defs[21].name = "sealed rock"
+materials.defs[21].hardness = math.huge
+
+-- The sky's ground: banks of cloud, soft and white on top, blue in the shadowed
+-- billows below (World:colorAt shades it in puffs rather than flat by depth)
+materials.CLOUD = 23
+materials.defs[23] = {
+  name = "cloud",
+  solid = true,
+  hardness = 1,
+  density = 0.6,
+  color = { 0.80, 0.86, 0.97 },
+  topColor = { 0.97, 0.98, 1.0 },
+  shadow = { 0.46, 0.56, 0.80 }, -- the blue of a cloud's underside
+  variation = 0.02,
+  cloud = true,
+}
+-- Denser, greyer cloud: the islands' cores and the spires
+materials.CLOUDBANK = 24
+materials.defs[24] = {
+  name = "cloudbank",
+  solid = true,
+  hardness = 2,
+  density = 0.9,
+  color = { 0.79, 0.85, 0.97 }, -- (all but the same look as cloud, so the two meet without a seam)
+  topColor = { 0.96, 0.97, 1.0 },
+  shadow = { 0.45, 0.55, 0.80 },
+  variation = 0.02,
+  cloud = true,
 }
 
 -- Flat lookups for hot paths

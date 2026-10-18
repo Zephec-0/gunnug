@@ -25,6 +25,11 @@ local ADJECTIVES = {
   miner = { "Rattling", "Dynamite-Happy", "Hard-Working" },
   roller = { "Rolling", "Armour-Plated", "Ornery" },
   piranha = { "Toothy", "Ornery", "Hungry" },
+  crow = { "Spiteful", "Black-Winged", "Carrion-Hungry" },
+  cragram = { "Hard-Headed", "Stubborn", "Charging" },
+  dustdevil = { "Whirling", "Gritty", "Howling" },
+  gargoyle = { "Stone-Faced", "Brooding", "Unforgiving" },
+  darkhunter = { "Shadowed", "Twin-Gunned", "Uncanny" },
 }
 local BOSS_ADJECTIVES = { "Mighty", "Merciless", "Terrible", "Dreaded" }
 local GENERAL_ADJECTIVES = { "Wicked", "Ornery", "Cussed" }

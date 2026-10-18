@@ -18,6 +18,16 @@ local START_ITEM_CHANCE = 0.5
 local Inventory = {}
 Inventory.__index = Inventory
 
+-- How many weapon slots the hunter has now: Akimbo (an Epic perk) takes the
+-- third away, and the guns in the first two are held and fired together
+function inventory.weaponSlots()
+  return perks.has("akimbo") and 2 or inventory.WEAPON_SLOTS
+end
+
+function inventory.akimbo()
+  return perks.has("akimbo")
+end
+
 function inventory.reloadsHolstered(gun)
   return perks.sum("bgReload") > 0 or gun:stats().bgReload > 0
 end
@@ -61,19 +71,50 @@ inventory.startDynamite = nil
 inventory.startFlasks = nil
 
 function Inventory:selectedGun()
+  if inventory.akimbo() then
+    return self.weapons[1] or self.weapons[2] -- (both are held: the first fires as the main gun)
+  end
   return self.weapons[self.selected]
+end
+
+-- Akimbo: the gun in the other hand (nil without the perk or a second gun)
+function Inventory:offhandGun()
+  if inventory.akimbo() and self.weapons[1] then
+    return self.weapons[2]
+  end
+  return nil
+end
+
+-- Akimbo taken: the third slot is gone. Its gun moves to an empty slot if
+-- there is one; otherwise it is returned, for the caller to drop.
+function Inventory:foldThirdSlot()
+  local gun = self.weapons[3]
+  self.weapons[3] = nil
+  if self.selected > 2 then
+    self.selected = 1
+  end
+  if gun then
+    for i = 1, 2 do
+      if not self.weapons[i] then
+        self.weapons[i] = gun
+        return nil
+      end
+    end
+  end
+  return gun
 end
 
 -- Selects a weapon slot, empty or not: an empty slot means bare hands
 function Inventory:select(index)
-  if index >= 1 and index <= inventory.WEAPON_SLOTS then
+  if index >= 1 and index <= inventory.weaponSlots() then
     self.selected = index
   end
 end
 
 -- Steps to the next/previous weapon slot (mouse wheel), empty ones included
 function Inventory:cycle(dir)
-  self.selected = (self.selected - 1 + dir) % inventory.WEAPON_SLOTS + 1
+  local n = inventory.weaponSlots()
+  self.selected = (math.min(self.selected, n) - 1 + dir) % n + 1
 end
 
 -- Where a picked-up weapon goes: the selected slot if it is empty, else the
@@ -82,7 +123,7 @@ function Inventory:freeWeaponSlot()
   if not self.weapons[self.selected] then
     return self.selected
   end
-  for i = 1, inventory.WEAPON_SLOTS do
+  for i = 1, inventory.weaponSlots() do
     if not self.weapons[i] then
       return i
     end
@@ -94,7 +135,8 @@ end
 -- over when you switch back), unless the gun can reload holstered (the Holster
 -- Loader attachment) or you have the Juggler perk.
 function Inventory:update(dt)
-  local held = self.weapons[self.selected]
+  local held = self:selectedGun()
+  local held2 = self:offhandGun()
   if self.lastHeld and self.lastHeld ~= held then
     if not inventory.reloadsHolstered(self.lastHeld) then
       self.lastHeld:cancelReload()
@@ -104,7 +146,7 @@ function Inventory:update(dt)
   for i = 1, inventory.WEAPON_SLOTS do
     local gun = self.weapons[i]
     if gun then
-      if gun == held or inventory.reloadsHolstered(gun) then
+      if gun == held or gun == held2 or inventory.reloadsHolstered(gun) then
         gun:update(dt)
       else
         gun:updateHolstered(dt)

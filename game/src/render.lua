@@ -91,6 +91,11 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
 }
 ]]
 
+render.DITHER_NAMES = { "Off", "Bayer", "Gradient", "Noise", "Grain", "Bayer+" }
+render.dither = 0
+-- The visuals panel's adjustments (src.visuals): multipliers on the area's mood
+render.adj = { ditherAmt = 1, bright = 1, gamma = 1, contrast = 0, sat = 1, vig = 1, aberr = 1 }
+
 local FINAL = [[
 uniform Image bloomNear;
 uniform float time;
@@ -102,6 +107,10 @@ uniform float lowhp;     // 0..1 how close to death: drained, pulsing red edges
 uniform float dead;      // 0..1 fade to grey
 uniform vec3 shadowTint;
 uniform vec3 lightTint;
+uniform float ditherAmt;
+uniform float exposure;
+uniform float gammaAdj;
+uniform float ditherMode; // 0 off, 1 Bayer, 2 gradient noise, 3 white noise, 4 animated grain, 5 strong Bayer
 uniform vec2 sunPos;     // uv
 uniform vec2 lampPos[4];  // uv of the strongest lamps in view
 uniform vec3 lampCol[4];
@@ -151,6 +160,29 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
   float edge = smoothstep(0.3, 0.95, length(q * vec2(1.0, 1.1)));
   c *= 1.0 - edge * (vig + lowhp * 0.35 * pulse);
   c.r += edge * lowhp * 0.12 * pulse;
+  c = pow(max(c, vec3(0.0)), vec3(1.0 / gammaAdj)) * exposure;
+
+  // Dither: noise of about one colour step added before the 8-bit rounding
+  // breaks the bands of slow gradients (light falloff, fog, the vignette)
+  if (ditherMode > 0.5) {
+    vec2 p = floor(sc);
+    float n;
+    float amp = 1.0;
+    if (ditherMode < 1.5 || ditherMode > 4.5) {
+      vec2 lo = mod(p, 2.0);
+      vec2 hi = mod(floor(p * 0.5), 2.0);
+      float idx = 4.0 * mod(lo.x * 2.0 + lo.y * 3.0, 4.0) + mod(hi.x * 2.0 + hi.y * 3.0, 4.0);
+      n = (idx + 0.5) / 16.0 - 0.5; // (the ordered 4x4 Bayer pattern)
+      amp = ditherMode > 4.5 ? 2.0 : 1.0;
+    } else if (ditherMode < 2.5) {
+      n = fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))) - 0.5;
+    } else if (ditherMode < 3.5) {
+      n = fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+    } else {
+      n = fract(sin(dot(p + floor(time * 30.0) * 17.0, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+    }
+    c += n * amp * ditherAmt * (1.0 / 255.0);
+  }
   return vec4(c, 1.0) * color;
 }
 ]]
@@ -175,9 +207,27 @@ end
 
 -- Sets this frame's look: the area's mood (a table like DEFAULT_FX, may be
 -- nil) and the hunter's state (hurt flash 0..1, low health 0..1, dead 0..1)
+local warpNow = 0
+
 function render.setMood(area, hurt, lowhp, dead)
   render.mixFx(fx, area, area, 0)
+  if warpNow > 0 then
+    fx.aberr = (fx.aberr or 0) + 3.2 * warpNow
+    fx.vig = (fx.vig or 0) + 0.25 * warpNow
+    warpNow = 0
+  end
   mood.hurt, mood.lowhp, mood.dead = hurt or 0, lowhp or 0, dead or 0
+end
+
+-- A burst of warping (the Colossus's beam): call every frame it lasts
+function render.warpFrame(k)
+  warpNow = math.max(warpNow, k)
+end
+
+-- One eye gone: the vignette closes in and the colours smear at the edges
+function render.eyeBlur()
+  fx.vig = (fx.vig or 0) + 1.65
+  fx.aberr = (fx.aberr or 0) + 3.0
 end
 
 -- The lights light shafts stream from this frame
@@ -298,9 +348,13 @@ function render.endWorld()
     local f = finalShader
     f:send("bloomNear", bloomA)
     f:send("time", love.timer.getTime())
-    f:send("vig", fx.vig)
-    f:send("sat", fx.sat)
-    f:send("contrast", fx.contrast)
+    local adj = render.adj
+    f:send("vig", fx.vig * adj.vig)
+    f:send("sat", fx.sat * adj.sat)
+    f:send("contrast", math.max(0, fx.contrast + adj.contrast))
+    f:send("ditherAmt", adj.ditherAmt)
+    f:send("exposure", adj.bright)
+    f:send("gammaAdj", adj.gamma)
     f:send("shaft", fx.shaft)
     f:send("sunPos", { fx.sunX, fx.sunY })
     for i = 1, 4 do
@@ -316,6 +370,7 @@ function render.endWorld()
     f:send("dead", mood.dead)
     f:send("shadowTint", fx.shadow)
     f:send("lightTint", fx.light)
+    f:send("ditherMode", render.dither or 0)
     -- The whole post pass runs on the 640x360 frame (it is all whole-pixel
     -- effects anyway), then the result is scaled up: far cheaper than shading
     -- every pixel of a 1080p window
@@ -329,7 +384,7 @@ function render.endWorld()
     addShader:send("bloomNear", bloomA)
     addShader:send("bloomFar", bloomC)
     addShader:send("res", { W, H })
-    addShader:send("aberr", fx.aberr)
+    addShader:send("aberr", fx.aberr * adj.aberr)
     addShader:send("hurt", mood.hurt)
     addShader:send("bloom", render.bloom)
   end

@@ -16,6 +16,7 @@ local enemies = require("src.enemies")
 local fluids = require("src.fluids")
 local materials = require("src.materials")
 local parallax = require("src.parallax")
+local depthblend = require("src.depthblend")
 local props = require("src.props")
 local render = require("src.render")
 local weather = require("src.weather")
@@ -49,7 +50,11 @@ local POND_X0, POND_X1 = 1318, 1378 -- an oasis pond between the bones and the r
 local SPINE_W = catacombs.SPINE_W
 local _, _, LAYOUT_TOP, LAYOUT_H = catacombs.layoutBounds()
 local HEIGHT = CAVE_TOP + LAYOUT_H -- (the world's bottom edge)
-local TOP = CAVE_TOP + LAYOUT_TOP - 100 -- and its top: above the sky dungeon
+-- and its top: an invisible ceiling well above the sky dungeon, higher than the
+-- view can ever look (the camera stops at the sky's top: see camera.setTop), so
+-- the hunter can fly up out of sight and fall back into view
+local SKY_HEADROOM = 420
+local TOP = CAVE_TOP + LAYOUT_TOP - SKY_HEADROOM
 
 -- The old mine: a ramp down into a pit, the shaft in the pit floor, and two
 -- timber-shored steps back up on the far side
@@ -72,7 +77,7 @@ local FRAME_TOP = PIT_Y - 150 -- the headframe's crossbeam, high enough to be se
 local GEN_BUDGET = 0.010
 
 local SPAWN_X = 990
-local CAMPFIRE_X = 1032
+local CAMPFIRE_X = 972 -- (just right of the tent, clear of the doctor's lot)
 local TENT_X = 930
 -- (the camp's people and the bounty board live on the lots of the town, src.town)
 local WINCH_X = 1758 -- left edge of the winch house
@@ -88,7 +93,10 @@ local function plain(x)
     local t = math.min(1, (x - 5350) / 520)
     lift = 120 * t * t * (3 - 2 * t) -- the long ramp up to the mountain's door
   end
-  return 509 - lift + math.sin(x * 0.0058) * 8 + math.sin(x * 0.017 + 1) * 4 + math.sin(x * 0.043 + 2) * 1.5
+  -- Rolling dunes and hollows away from the camp and the mine, easing out near the mountain's ramp
+  local far = math.max(0, math.min(1, (math.abs(x - 1100) - 800) / 400)) * math.max(0, math.min(1, (5300 - x) / 300))
+  local rolling = far * (math.sin(x * 0.0031 + 4) * 24 + math.sin(x * 0.0093 + 0.5) * 11 + math.sin(x * 0.021 + 2) * 4)
+  return 509 - lift + rolling + math.sin(x * 0.0058) * 8 + math.sin(x * 0.017 + 1) * 4 + math.sin(x * 0.043 + 2) * 1.5
 end
 
 -- The ground's top surface (before anything is built on it or dug out)
@@ -327,7 +335,7 @@ function overworld.build(opts)
   canyonWall(world, RIGHT - 121, RIGHT - 1, false)
   -- West: badlands
   boulder(world, 168, 9)
-  mesa(world, 250, 460, 352, 9)
+  boulder(world, 330, 7) -- (the big hill beside the camp is gone: the hub is open ground)
   -- (the natural arch that stood here fenced in the Prospector's camp and
   -- was taken out: the ground is open)
   -- The pond: a shallow hollow in the sand (filled with water in populate)
@@ -377,12 +385,24 @@ function overworld.build(opts)
     if e.lake then
       -- A lake: a wide bowl in the ground, narrowing to a neck that drops into the top of the cave below
       local rim = math.min(surface(x0), surface(x1))
-      lakes[#lakes + 1] = { x0 = x0 + 6, x1 = x1 - 6, top = rim + 8 }
+      lakes[#lakes + 1] = { x0 = x0 + 6, x1 = x1 - 6, top = rim + 36 }
+      -- A beach: the sand slopes gently down from the east bank into the water
+      -- and on to the neck, where the cave opens; the far side is a steep bank
+      local slopeEnd
       for x = x0, x1 do
-        local t = (x - e.x) / e.half
-        local depth = math.floor(230 * (1 - t * t) ^ 0.7)
+        local depth
+        local mx = x0 + x1 - x -- (mirrored, so the gentle slope faces the camp)
+        slopeEnd = e.x - 90
+        if mx < slopeEnd then
+          local u = (mx - x0) / (slopeEnd - x0)
+          depth = math.floor(230 * u ^ 1.35)
+        else
+          local u = (mx - slopeEnd) / (x1 - slopeEnd)
+          depth = math.floor(230 * (1 - u ^ 3) ^ 0.8)
+        end
         local g = surface(x)
         world:fillRect(x, g - 8, x, g + depth, AIR)
+        world:fillRect(x, g + depth + 1, x, g + depth + 5, SAND)
       end
       world:fillRect(e.x - e.neck, surface(e.x), e.x + e.neck, SHAFT_BOTTOM, AIR)
       goto nextEntry
@@ -396,7 +416,7 @@ function overworld.build(opts)
   end
   -- The town's lots (src.town): fixed every run, but a porch only goes up
   -- once its person has moved in
-  town.build(world, surface, WOOD, SAND, AIR)
+  town.build(world, surface, materials.HARDWOOD, SAND, AIR) -- (the porches' timber can't be broken)
 
   -- Only the first stretch is painted now (the cave paints itself as it
   -- generates, and the far desert as it comes into view)
@@ -414,6 +434,7 @@ function overworld.build(opts)
   shop.onHatchBreak = function(child)
     catacombs.generate(child)
   end
+  catacombs.surfaceName = overworld.title
   catacombs.start(world, {
     x0 = 0,
     y0 = CAVE_TOP,
@@ -423,6 +444,8 @@ function overworld.build(opts)
     shaftX0 = SHAFT_X0,
     shaftX1 = SHAFT_X1,
   }, seed, TIERS)
+  local band = catacombs.spaceBand()
+  require("src.camera").setTop(band and band.y0 or nil)
   if opts and opts.atCave then
     catacombs.finish(1)
     local info = catacombs.info()
@@ -480,7 +503,7 @@ function overworld.populate(world)
       props.spawn("crate", x + 7, ground(x) - 20)
     end
   end
-  props.spawn("crate", 1046, ground(1046) - 7)
+  props.spawn("crate", 846, ground(846) - 7)
   -- Where the camp's people set up once they are freed (src.npcs; only
   -- drawn for a profile that has them)
   for _, lot in ipairs(town.LOTS) do
@@ -709,7 +732,7 @@ local function lanterns()
   }
   for _, e in ipairs(catacombs.entries()) do
     if e.walk then
-      list[#list + 1] = { e.x - 215, surface(e.x - 215) - 24 }
+      list[#list + 1] = { e.x - 455, surface(e.x - 455) - 24 }
     elseif not e.lake then
       list[#list + 1] = { e.x - e.half - 8, surface(e.x) - 24 }
       list[#list + 1] = { e.x + e.half + 8, surface(e.x) - 24 }
@@ -757,12 +780,102 @@ local function drawVultures(camX, camY)
   end
 end
 
+-- High in the sky (the Cloud Reaches) the dusk gives way to space: the sky
+-- darkens toward the top of the area into a starfield with a faint band of
+-- nebula, and far banks of cloud drift past below. Screen space, like the rest
+-- of the background; worked out per row from the world height it shows.
+local SPACE_DEEP = { 0.012, 0.012, 0.035 }
+local SPACE_MID = { 0.07, 0.07, 0.20 }
+
+local function drawSpace(camX, camY)
+  local band = catacombs.spaceBand()
+  if not band then
+    return
+  end
+  local W, H = config.VIRTUAL_W, config.VIRTUAL_H
+  -- 0 at the cloud floor's height, 1 at the area's top
+  local lo, hi = band.y1 - 520, band.y0 + 120
+  local function depth(wy)
+    local d = math.max(0, math.min(1, (lo - wy) / (lo - hi)))
+    return d * d * (3 - 2 * d)
+  end
+  if depth(camY + H) <= 0 then
+    return
+  end
+  local t = love.timer.getTime()
+  -- Far cloud banks drifting, lit from the dusk below
+  for layer = 1, 3 do
+    local p = 0.1 + layer * 0.08
+    local baseY = math.floor((band.y1 - 340 + layer * 60 - camY) * p + H * (1 - p) * 0.6)
+    local drift = t * (3 + layer * 2)
+    local a = 0.16 + layer * 0.06
+    local shade = 0.5 + layer * 0.12
+    for sx = 0, W, 4 do
+      local wx = sx + camX * p + drift
+      local h = love.math.noise(wx * 0.004, layer * 7.3) * 40 + love.math.noise(wx * 0.017, layer * 3.1) * 14
+      local top = baseY - math.floor(h)
+      if top < H then
+        love.graphics.setColor(0.62 * shade + 0.25, 0.62 * shade + 0.28, 0.80 * shade + 0.2, a)
+        love.graphics.rectangle("fill", sx, top, 4, H - top)
+        love.graphics.setColor(1, 0.86, 0.80, a * 0.8)
+        love.graphics.rectangle("fill", sx, top, 4, 1)
+      end
+    end
+  end
+  -- The dark of space, deeper the higher the row
+  for sy = 0, H - 1, 3 do
+    local d = depth(camY + sy)
+    if d > 0 then
+      local k = math.min(1, d * 1.4)
+      love.graphics.setColor(SPACE_MID[1] + (SPACE_DEEP[1] - SPACE_MID[1]) * d, SPACE_MID[2] + (SPACE_DEEP[2] - SPACE_MID[2]) * d, SPACE_MID[3] + (SPACE_DEEP[3] - SPACE_MID[3]) * d, math.min(1, k * 1.1))
+      love.graphics.rectangle("fill", 0, sy, W, 3)
+    end
+  end
+  -- A faint nebula band, slow to move
+  local np = 0.04
+  for sx = 0, W, 3 do
+    local wx = sx + camX * np
+    for k = 0, 5 do
+      local sy = math.floor((band.y0 + 380 - camY) * 0.3 + math.sin(wx * 0.006) * 40 + k * 7 + love.math.noise(wx * 0.01, k) * 18)
+      if sy >= 0 and sy < H then
+        local a = depth(camY + sy) * 0.08 * love.math.noise(wx * 0.008, k * 0.7, 4.2)
+        love.graphics.setColor(k % 2 == 0 and 0.55 or 0.35, 0.30, 0.80, a)
+        love.graphics.rectangle("fill", sx, sy, 3, 7)
+      end
+    end
+  end
+  -- Stars: a fixed field that barely moves, twinkling, showing as the sky darkens
+  local sp = 0.05
+  local ox, oy = camX * sp, (camY - band.y0) * 0.25
+  for i = 0, 220 do
+    local hx, hy = math.sin(i * 12.9898) * 43758.5453, math.sin(i * 78.233) * 12543.123
+    hx, hy = hx - math.floor(hx), hy - math.floor(hy)
+    local sx = (hx * (W + 400) - ox) % (W + 400) - 200
+    local sy = math.floor(hy * 900 - oy)
+    if sx >= 0 and sx < W and sy >= 0 and sy < H then
+      local d = depth(camY + sy)
+      if d > 0.05 then
+        local tw = 0.6 + 0.4 * math.sin(t * (1 + hx * 2) + i)
+        local big = i % 17 == 0
+        love.graphics.setColor(0.85 + hy * 0.15, 0.88, 1, d * tw)
+        love.graphics.rectangle("fill", math.floor(sx), sy, 1, 1)
+        if big then
+          love.graphics.setColor(0.8, 0.85, 1, d * tw * 0.4)
+          love.graphics.rectangle("fill", math.floor(sx) - 1, sy, 3, 1)
+          love.graphics.rectangle("fill", math.floor(sx), sy - 1, 1, 3)
+        end
+      end
+    end
+  end
+end
+
 function overworld.drawBackground(camX, camY)
   if camY > CAVE_TOP - 200 then
     return -- the view is all underground; the backdrop (drawDecor) covers it
   end
   love.graphics.setColor(1, 1, 1)
-  love.graphics.draw(background.sky, 0, 0)
+  -- (stretched across if the view has grown wider than when it was painted)
+  love.graphics.draw(background.sky, 0, 0, 0, math.max(1, config.VIRTUAL_W / background.sky:getWidth()), math.max(1, config.VIRTUAL_H / background.sky:getHeight()))
   for i, l in ipairs(background.layers) do
     local oy = -math.floor(camY * l.parallax * 0.5)
     love.graphics.setColor(1, 1, 1)
@@ -785,6 +898,7 @@ function overworld.drawBackground(camX, camY)
     love.graphics.setColor(0.92, 0.62, 0.44, a)
     love.graphics.rectangle("fill", 0, y, config.VIRTUAL_W, 16)
   end
+  drawSpace(camX, camY)
 end
 
 -- Twisted dead tree: a leaning trunk with forked, tapering branches
@@ -1057,6 +1171,7 @@ local function drawWeeds()
 end
 
 local EARTH = { 0.10, 0.07, 0.07 }
+local EARTH_NEAR = { 0.30, 0.19, 0.15 }
 local CAVE_BACK = { 0.10, 0.08, 0.14 }
 
 -- Colour of the backdrop behind the terrain at a depth: dark earth under the
@@ -1071,9 +1186,34 @@ end
 -- The far scenery of the caves: two layers per area that slide past more
 -- slowly than the near terrain, so the open caverns have depth, in the style of
 -- the area in view (see src.parallax)
-local function drawCaveDepth(camX, camY, vx0, vx1, vy0, vy1)
-  local index = catacombs.levelAt((vy0 + vy1) / 2, (vx0 + vx1) / 2) or 1
-  parallax.draw(catacombs.theme(index).parallax or index, camX, camY, vx0, vy0, vx1, vy1, catacombs.theme(index).pillars)
+
+-- Inside a mountain that stands in the open air (the Needle) there is no earth
+-- behind the rock: a backdrop and the area's far scenery are drawn in
+-- horizontal bands, each clipped to the mountain's silhouette at its top edge
+-- (the rock walls are thicker than a band's step, so nothing shows outside)
+local NEEDLE_BAND = 40
+
+local function drawMountainDepth(camX, camY, vx0, vy0, vx1, vy1)
+  for _, m in ipairs(catacombs.climbLevels()) do
+    local top, bottom = math.max(vy0, m.y0, -1e9), math.min(vy1, m.y1, CAVE_TOP - 120)
+    if bottom > top then
+      local y = math.floor(top / NEEDLE_BAND) * NEEDLE_BAND
+      while y < bottom do
+        local xa, xb = m.theme.profile(math.max(y, m.y0))
+        if xa then
+          local bx0, bx1 = math.max(xa, vx0), math.min(xb, vx1)
+          if bx1 > bx0 then
+            love.graphics.setScissor(math.floor(bx0 - camX), math.floor(y - camY), math.ceil(bx1 - bx0), NEEDLE_BAND)
+            love.graphics.setColor(catacombs.backdrop(y, bx0))
+            love.graphics.rectangle("fill", bx0, y, bx1 - bx0, NEEDLE_BAND)
+            parallax.draw(m.theme.parallax or m.index, camX, camY, bx0, y, bx1, y + NEEDLE_BAND, m.theme.pillars)
+          end
+        end
+        y = y + NEEDLE_BAND
+      end
+      love.graphics.setScissor()
+    end
+  end
 end
 
 -- Decorations drawn behind the player (they receive lighting)
@@ -1082,22 +1222,33 @@ function overworld.drawDecor(camX, camY)
   local vx1, vy1 = camX + config.VIRTUAL_W + 8, camY + config.VIRTUAL_H + 8
   -- Backdrop behind the ground, so holes, the mine shaft and the caves show
   -- earth and rock rather than sky. Its top follows the surface.
-  love.graphics.setColor(EARTH)
+  -- (warm earth just under the ground, fading to the cave dark by 150 px down,
+  -- so a hole dug near the surface is not black)
   for x = math.floor(vx0 / 8) * 8, vx1, 8 do
     local a, b = surface(x) + 4, surface(x + 8) + 4
     if math.abs(a - b) > 12 then
       a, b = math.max(a, b), math.max(a, b) -- a sheer step: stay under its lower side
     end
     if math.min(a, b) < vy1 then
+      love.graphics.setColor(EARTH)
       love.graphics.polygon("fill", x, a, x + 8, b, x + 8, vy1, x, vy1)
+      for k = 0, 4 do
+        local f = 1 - k / 5
+        love.graphics.setColor(EARTH[1] + (EARTH_NEAR[1] - EARTH[1]) * f, EARTH[2] + (EARTH_NEAR[2] - EARTH[2]) * f, EARTH[3] + (EARTH_NEAR[3] - EARTH[3]) * f)
+        love.graphics.polygon("fill", x, a + k * 30, x + 8, b + k * 30, x + 8, math.min(vy1, math.max(a, b) + k * 30 + 31), x, math.min(vy1, math.max(a, b) + k * 30 + 31))
+      end
     end
   end
-  for y = math.max(math.floor(vy0 / 8) * 8, CAVE_TOP - 120), vy1, 8 do
+  -- (above the caves: the earth fading into the cave dark; below, each area's own backdrop,
+  -- with the next area's bleeding over it at the borders: src.depthblend)
+  for y = math.max(math.floor(vy0 / 8) * 8, CAVE_TOP - 120), math.min(vy1, CAVE_TOP), 8 do
     love.graphics.setColor(backdrop(y, (vx0 + vx1) / 2))
     love.graphics.rectangle("fill", vx0, y, vx1 - vx0, 8)
   end
+  drawMountainDepth(camX, camY, vx0, vy0, vx1, vy1)
   if vy1 > CAVE_TOP then
-    drawCaveDepth(camX, camY, vx0, vx1, math.max(vy0, CAVE_TOP), vy1)
+    local index = catacombs.levelAt((math.max(vy0, CAVE_TOP) + vy1) / 2, (vx0 + vx1) / 2) or 1
+    depthblend.draw(index, camX, camY, vx0, vy0, vx1, vy1, CAVE_TOP)
   end
   catacombs.drawDecor(view(camX, camY))
   if vy0 > CAVE_TOP then
@@ -1117,7 +1268,7 @@ function overworld.drawDecor(camX, camY)
   drawLanternPost(PIT_X0 - 8)
   for _, e in ipairs(catacombs.entries()) do
     if e.walk then
-      drawLanternPost(e.x - 215)
+      drawLanternPost(e.x - 455)
     elseif not e.lake then
       drawLanternPost(e.x - e.half - 8)
       drawLanternPost(e.x + e.half + 8)
@@ -1133,8 +1284,80 @@ function overworld.drawFront(camX, camY)
   catacombs.drawFront(view(camX, camY))
 end
 
+-- Each way down is named over its hole, the lettering fading in as the hunter
+-- nears it and out as he walks off or drops in
+local NAME_NEAR, NAME_FAR = 21, 90
+
+local NAME_COLORS = {
+  ["The Old Mine"] = { 0.95, 0.78, 0.5 },
+  ["The Sunken Hollows"] = { 0.45, 0.9, 0.7 },
+  ["The Sulfur Vents"] = { 0.95, 0.9, 0.35 },
+  ["The Cinder Warrens"] = { 1, 0.5, 0.25 },
+  ["The Drowned Halls"] = { 0.4, 0.7, 1 },
+  ["The Quarry"] = { 0.8, 0.8, 0.85 },
+  ["The Foreman's Hall"] = { 0.9, 0.62, 0.4 },
+  ["The Flooded Caverns"] = { 0.35, 0.85, 0.95 },
+  ["The Deep"] = { 0.7, 0.5, 1 },
+  ["The Needle"] = { 0.85, 0.85, 1 },
+  ["The Cloud Reaches"] = { 0.75, 0.9, 1 },
+}
+
+local function drawEntranceNames(toScreen, font, player)
+  if not player or player.dead then
+    return
+  end
+  local px, py = player:center()
+  local spots = { { x = SHAFT_CX, y = PIT_Y - 30, name = catacombs.areaName(1) } }
+  for _, e in ipairs(catacombs.namedEntries()) do
+    local sy = e.walk and (e.y - 34) or (surface(e.x) - 30)
+    if e.lake then
+      for _, l in ipairs(lakes) do
+        if e.x > l.x0 and e.x < l.x1 then
+          sy = surface(e.x) + 195 -- (the lettering floats in the water right over the hole down)
+        end
+      end
+    end
+    spots[#spots + 1] = { x = e.walk and (e.x - 455) or e.x, y = sy, name = e.name, range = e.lake and 3 or 1 }
+  end
+  love.graphics.setFont(font)
+  for _, s in ipairs(spots) do
+    local d = math.sqrt((px - s.x) ^ 2 + (py - s.y) ^ 2)
+    local rg = s.range or 1
+    local a = math.max(0, math.min(1, (NAME_FAR * rg - d) / (NAME_FAR * rg - NAME_NEAR)))
+    a = a * math.max(0, math.min(1, 1 - (py - s.y - 30) / 40)) -- (once he is down the hole it is gone)
+    if a > 0.01 and s.name and s.name ~= "" then
+      local sx, sy = toScreen(s.x, s.y)
+      -- (larger lettering, with extra room between the letters)
+      local big = require("src.fonts").get(math.floor(font:getHeight() * 1.27))
+      local gap = math.floor(big:getHeight() * 0.28)
+      local total = -gap
+      for ch in s.name:gmatch(".") do
+        total = total + big:getWidth(ch) + gap
+      end
+      local x, y = math.floor(sx - total / 2), math.floor(sy - big:getHeight() * 1.6)
+      local c = NAME_COLORS[s.name] or { 1, 0.9, 0.7 }
+      love.graphics.setFont(big)
+      for pass = 1, 2 do
+        local px = x
+        for ch in s.name:gmatch(".") do
+          if pass == 1 then
+            love.graphics.setColor(0, 0, 0, 0.85 * a)
+            love.graphics.print(ch, px + 2, y + 2)
+          else
+            love.graphics.setColor(c[1], c[2], c[3], a)
+            love.graphics.print(ch, px, y)
+          end
+          px = px + big:getWidth(ch) + gap
+        end
+      end
+      love.graphics.setFont(font)
+    end
+  end
+end
+
 function overworld.drawScreen(toScreen, font, player)
   catacombs.drawScreen(toScreen, font, player)
+  drawEntranceNames(toScreen, font, player)
 end
 
 -- The last of the evening sun falling straight down the mine shaft: a warm

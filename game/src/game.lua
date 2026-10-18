@@ -26,6 +26,7 @@ local critters = require("src.critters")
 local weather = require("src.weather")
 local chests = require("src.chests")
 local compare = require("src.compare")
+local visuals = require("src.visuals")
 local config = require("src.config")
 local effects = require("src.effects")
 local deaths = require("src.deaths")
@@ -46,6 +47,7 @@ local events = require("src.events")
 local surveymap = require("src.surveymap")
 local npcs = require("src.npcs")
 local perks = require("src.perks")
+local fog = require("src.fog")
 local physics = require("src.physics")
 local pickups = require("src.pickups")
 local Player = require("src.player")
@@ -101,6 +103,7 @@ local function load(name, opts)
   bullets.clear()
   effects.clear()
   enemies.clear()
+  fog.clear()
   fuser.clear()
   pickups.clear()
   chests.clear()
@@ -110,6 +113,7 @@ local function load(name, opts)
   bounties.reset()
   compare.close()
   local spawnX, spawnY
+  camera.setTop(nil) -- (a scene with a roof sets it as it builds)
   world, spawnX, spawnY = scene.build(opts)
   physics.init(world)
   surveymap.reset(world)
@@ -248,6 +252,17 @@ function game.load()
   end
   npcs.onTalk = function(id)
     menu.open(id == "board" and "board" or "camp", id)
+  end
+  -- Akimbo taken: the third weapon slot goes (its gun moves over, or drops)
+  perks.onAdd = function(id)
+    if id ~= "akimbo" or not inv then
+      return
+    end
+    local spare = inv:foldThirdSlot()
+    if spare and player then
+      local px, py = player:center()
+      pickups.dropWeapon(px + player.facing * 6, py, spare, player.facing * 70, -50)
+    end
   end
   -- A freed prisoner's gift for this run (the Prospector: dynamite)
   npcs.onFreed = function(id)
@@ -482,6 +497,7 @@ local FRAME_TARGET = 0.011 -- (of 16.7 ms: the rest is headroom for the GC, the 
 local frameT0, genSpent, lastWork = 0, 0, 0.008
 
 function game.update(dt)
+  audio.setHearing(meta.limbOn("ear") and 0.45 or 1)
   frameT0 = love.timer.getTime()
   genSpent = 0
   dt = math.min(dt, 1 / 30) -- avoid huge steps after hitches
@@ -518,7 +534,8 @@ function game.update(dt)
   -- (with the weapon panel open the area's sound plays on, but muffled; under water too)
   audio.update(dt, underground, menu.isOpen(), area, inShop, itembar.isOpen() or (playing and player.submerged))
   -- The weapon panel and the menus pause the game, like Noita's inventory
-  love.mouse.setVisible(itembar.isOpen() or menu.isOpen() or compare.isOpen())
+  love.mouse.setVisible(itembar.isOpen() or menu.isOpen() or compare.isOpen() or visuals.isOpen())
+  visuals.update()
   menu.update(dt)
   if menu.isFrontEnd() then
     menubg.update(dt)
@@ -595,7 +612,10 @@ function game.update(dt)
 
   -- A dead hunter stays where he fell until the run is restarted (R)
   if not player.dead then
+    local ob = player.body
+    local ox, oy = ob.x, ob.y
     player:update(dt, aimX, aimY)
+    require("src.dev").fly(player, dt, ox, oy)
   end
   player:updateHurt(dt)
   player:syncPhysics(dt)
@@ -614,6 +634,7 @@ function game.update(dt)
   events.update(dt, player, playing and area or nil)
   bullets.update(dt, world)
   enemies.update(dt, world, player)
+  fog.update(dt, world, player, enemies.nearby(), bullets)
   pickups.update(dt, world, player)
   fuser.update(dt, world, player, inv)
   effects.update(dt, world)
@@ -710,8 +731,8 @@ drawFrame = function()
   lighting.render(camX, camY, function()
     world:draw(camX, camY, config.VIRTUAL_W, config.VIRTUAL_H)
   end, function()
-    -- Monsters block light a little, so they throw soft moving shadows (not the
-    -- hunter: the light is his own, and shining out through his body speckles it)
+    -- Monsters block light a little, so they throw soft moving shadows (a
+    -- light inside a monster's own body ignores that monster)
     love.graphics.setColor(1, 1, 1, 0.7)
     enemies.drawOccluders(view)
   end)
@@ -720,6 +741,9 @@ drawFrame = function()
   -- The look of the frame: the area's mood, bent by the hunter's health and hits
   local lowhp = player.dead and 0 or math.max(0, math.min(1, (0.4 - player.hp / player.maxHp) / 0.3))
   render.setMood(scene.fx, player.hurtFlash, lowhp, player.dead and math.min(1, deadTime / 2) or 0)
+  if meta.limbOn("eye") then
+    render.eyeBlur() -- (one eye gone: a heavy, smeared vignette)
+  end
   render.beginWorld()
   if scene.drawBackground then
     scene.drawBackground(camX, camY)
@@ -765,6 +789,7 @@ drawFrame = function()
   events.drawEmissive(view)
   bullets.draw()
   effects.drawEmissive()
+  fog.draw(view) -- (after every light and glow: it hides them all)
   fuser.drawEmissive()
   if showPhysics then
     physics.drawDebug()
@@ -802,7 +827,9 @@ drawFrame = function()
   end
   effects.drawScreen(toScreen, font)
   enemies.drawScreen(toScreen, font)
-  pickups.drawScreen(toScreen, font, player)
+  if not shop.nearPedestal(player) then
+    pickups.drawScreen(toScreen, font, player) -- (a pedestal's prompt takes the key, see game.keypressed)
+  end
   chests.drawScreen(toScreen, font, player)
   shop.drawScreen(toScreen, font, player)
   npcs.drawScreen(toScreen, font, player)
@@ -841,6 +868,7 @@ drawFrame = function()
     love.graphics.rectangle("fill", 0, 0, ww, wh)
   end
   compare.draw(inv, render.uiScale())
+  visuals.draw(render.uiScale())
   toasts.draw(render.uiScale())
   menu.draw(render.uiScale())
   love.graphics.setColor(1, 1, 1)
@@ -849,6 +877,20 @@ end
 -- Returns true if the key was handled (main.lua uses this so Escape closes
 -- the weapon panel or opens the pause menu instead of quitting)
 function game.keypressed(key)
+  if key == "f2" then
+    if playing and not menu.isOpen() then
+      require("src.dev").toggle(player)
+    end
+    return true
+  end
+  if key == "f4" and not menu.isOpen() then
+    visuals.toggle()
+    return true
+  end
+  if visuals.isOpen() then
+    visuals.keypressed(key)
+    return true
+  end
   if key == "f11" then
     settings.set("fullscreen", not settings.get("fullscreen"))
     return true
@@ -949,6 +991,10 @@ function game.keypressed(key)
 end
 
 function game.mousepressed(x, y, button)
+  if visuals.isOpen() then
+    visuals.mousepressed(x, y, button)
+    return
+  end
   if menu.isOpen() then
     menu.mousepressed(x, y, button)
     return
@@ -960,13 +1006,21 @@ function game.mousepressed(x, y, button)
     return
   end
   if button == 2 and inv:selectedGun() then
-    if inv:selectedGun():reload() then
+    local started = inv:selectedGun():reload()
+    if inv:offhandGun() and inv:offhandGun():reload() then
+      started = true -- (Akimbo: both guns reload together)
+    end
+    if started then
       audio.play("reload")
     end
   end
 end
 
 function game.mousereleased(x, y, button)
+  if visuals.isOpen() then
+    visuals.mousereleased()
+    return
+  end
   if menu.isOpen() then
     menu.mousereleased(x, y, button)
     return

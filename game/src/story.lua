@@ -25,6 +25,22 @@ local FONT = {
 
 story.FONT = FONT -- (the town's signs are lettered with it too)
 
+-- What the dead leave behind, in each named area (a sign picks from its own
+-- area's list; areas not listed fall back to the tier's)
+local AREA_TEXTS = {
+  ["The Old Mine"] = { "SHIFT ENDS AT DUSK", "MIND THE PROPS", "NO CANARY LEFT", "PAY OWED TO MARGO", "LANTERN OIL 3 DEEP", "THE PROPS ARE CREAKING", "DIG NORTH", "CLAIM 14 IS DRY" },
+  ["The Sunken Hollows"] = { "DONT DRINK", "THE WATER WATCHES", "TOO MANY EYES", "IT FOLLOWS THE GLOW", "DAY 9 STILL DOWN", "MUSHROOMS SING AT NIGHT", "SPORES IN MY LUNGS", "THE CAPS ARE WATCHING" },
+  ["The Sulfur Vents"] = { "DONT BREATHE", "SULFUR SOURS THE MIND", "GAS TO THE LEFT", "WE WERE SIX", "NO FLAME PAST HERE", "WET CLOTH OVER THE MOUTH", "HER VOICE IN THE STEAM", "THE QUEEN WAITS" },
+  ["The Cinder Warrens"] = { "IT IS HOT", "ASH TO ASH", "BURN IT ALL", "NO WATER LEFT", "THE FLOOR IS GLASS", "EMBERS SEE YOU", "FOLLOW THE COOL AIR", "DEEPER IS HOTTER" },
+  ["The Drowned Halls"] = { "TOO DEEP", "THE TIDE REMEMBERS", "WE FLOODED IT", "COLD COLD COLD", "SHE IS BELOW", "COUNT THE ARCHES", "WADE DONT SWIM", "THE CHAINS MOVE" },
+  ["The Quarry"] = { "CUT STRAIGHT", "BLASTING AT NOON", "FOREMAN SAYS DIG", "THE STONE IS HOLLOW", "DONT STAND UNDER", "TALLY 9000 BLOCKS", "NO ONE LEAVES" },
+  ["The Foreman's Hall"] = { "FOREMAN WAS HERE", "HE NEVER STOPPED", "LAST SHIFT", "THE BELL DOESNT RING", "TURN AROUND", "ORDERS ARE ORDERS" },
+  ["The Flooded Caverns"] = { "BREATHE WHILE YOU CAN", "THE DEEP IS HUNGRY", "TEETH IN THE DARK", "GLOWING THINGS BITE", "NEED A HELM", "DONT GO SWIMMING", "SOMETHING LARGE" },
+  ["The Needle"] = { "THE WAY UP", "KEEP CLIMBING", "WIND AT THE TOP", "DONT LOOK DOWN", "SO CLOSE TO THE SKY", "ONLY WINGS NOW", "MIND THE LEDGES" },
+  ["The Ember Foundry"] = { "MELT IT DOWN", "THE FURNACE LIVES", "SLAG RUNS DEEP", "FIRE FEEDS HERE", "DAY 3 IN THE HEAT", "DONT TOUCH THE MOLD" },
+  ["The Silt Vaults"] = { "SILT TO THE KNEES", "THE VAULTS SINK", "FROGS KNOW THE WAY", "ROT BELOW", "NOTHING DRIES HERE", "THE MUD REMEMBERS" },
+}
+
 -- What the dead leave behind, per area
 local TEXTS = {
   { "TURN BACK", "THEY HEAR THE LIGHT", "DAY 41", "NO WAY OUT", "DONT TRUST THE LAMPS", "I WAS HERE" },
@@ -49,9 +65,9 @@ local BLOOD = { 0.36, 0.04, 0.06 }
 local KINDS = { "fallen", "sign", "camp", "fallen", "cairn", "sign", "ritual", "fallen", "camp", "sign", "fallen", "cairn" }
 
 -- spots: floor spots { x, y } from cavegen; level: the area number; rng: its random generator
-function story.generate(world, spots, level, rng)
+function story.generate(world, spots, level, rng, areaName)
   local items = {}
-  local texts = TEXTS[math.min(level, #TEXTS)] or TEXTS[1]
+  local texts = AREA_TEXTS[areaName or ""] or TEXTS[math.min(level, #TEXTS)] or TEXTS[1]
   for i, s in ipairs(spots) do
     local kind = KINDS[(i + rng:random(0, 3)) % #KINDS + 1]
     local item = { kind = kind, x = s[1], y = s[2], flip = rng:random() < 0.5, seed = rng:random(1, 9999) }

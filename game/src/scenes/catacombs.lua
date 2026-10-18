@@ -18,6 +18,7 @@ local audio = require("src.audio")
 local effects = require("src.effects")
 local enemies = require("src.enemies")
 local fluids = require("src.fluids")
+local parallax = require("src.parallax")
 local pickups = require("src.pickups")
 local hud = require("src.hud")
 local materials = require("src.materials")
@@ -36,7 +37,7 @@ local catacombs = {}
 -- (dark face, rim light, cracks). glowCount is per 1920x3680 of area.
 local THEMES = {
   {
-    name = "The Catacombs",
+    name = "The Old Mine",
     subtitle = "Area 1",
     prisoner = "prospector", -- buried by a cave-in in the old mine (src.npcs)
     ambient = { 0.20, 0.18, 0.25 },
@@ -49,7 +50,7 @@ local THEMES = {
     backTop = { 0.10, 0.08, 0.14 },
     backDeep = { 0.06, 0.05, 0.09 },
     pillars = { { 0.03, 0.025, 0.05 }, { 0.16, 0.13, 0.22 }, { 0.10, 0.08, 0.15 } },
-    monsters = { ghoul = 38, bat = 28, spitter = 14, hopper = 6, miner = 28, roller = 10, worm = 12 }, -- per 1920x3680; an old mine: skeletal miners, rollers and worms in the rock
+    monsters = { ghoul = 38, bat = 28, spitter = 14, hopper = 6, miner = 28, roller = 10, worm = 12, wisp = 8 }, -- per 1920x3680; an old mine: skeletal miners, rollers and worms in the rock
     boss = { "warden", "dreadbat" }, -- one of the two, chosen per run
     waterPools = 30,
     swarms = { swarmbat = 4 }, -- colonies of bats under the ceilings
@@ -67,13 +68,14 @@ local THEMES = {
     fx = { shadow = { 0.84, 0.95, 1.16 }, light = { 1.0, 1.02, 1.05 }, sat = 0.9, vig = 0.45 },
     palette = { rock = materials.SLATE, dirt = materials.BLUECLAY },
     glow = { 0.35, 1.0, 0.45 }, -- green mushrooms, lots of them
+    glowLight = 0.5, -- (480 of them: half the light each, or the fen is overpowered by green)
     glowCount = 480,
     glowRadius = 40,
     stalk = { 0.45, 0.62, 0.50 },
     backTop = { 0.045, 0.06, 0.105 },
     backDeep = { 0.03, 0.04, 0.075 },
     pillars = { { 0.02, 0.03, 0.05 }, { 0.10, 0.14, 0.22 }, { 0.06, 0.08, 0.14 } },
-    monsters = { ghoul = 20, bat = 14, spitter = 20, hopper = 44, bloater = 10, worm = 12, roller = 14, miner = 5 }, -- a fen: hoppers everywhere
+    monsters = { ghoul = 20, bat = 14, spitter = 20, hopper = 44, bloater = 10, worm = 12, roller = 14, miner = 5, wisp = 8 }, -- a fen: hoppers everywhere
     boss = "matron",
     waterPools = 60,
     swarms = { swarmbat = 2 },
@@ -143,7 +145,7 @@ local THEMES = {
     backTop = { 0.035, 0.07, 0.09 },
     backDeep = { 0.02, 0.045, 0.06 },
     pillars = { { 0.015, 0.035, 0.05 }, { 0.08, 0.17, 0.24 }, { 0.05, 0.10, 0.15 } },
-    monsters = { ghoul = 10, bat = 10, spitter = 16, hopper = 52, bloater = 18, worm = 12, roller = 10, miner = 4 },
+    monsters = { ghoul = 10, bat = 10, spitter = 16, hopper = 52, bloater = 18, worm = 12, roller = 10, miner = 4, wisp = 8 },
     swarms = { swarmbat = 3 },
     waterPools = 100,
     breakables = { { "sporePod", 30 }, { "geode", 12 }, { "urn", 16 }, { "pouch", 14 }, { "lantern", 12 } },
@@ -153,7 +155,7 @@ local THEMES = {
     -- Not on the main road: reached by a crevice in the east desert. An old
     -- quarry: pale cut sandstone and spoil, dust, amber lamps and crystals,
     -- the miners' ghosts and their blasting powder.
-    name = "The Old Quarry",
+    name = "The Quarry",
     subtitle = "A side road",
     prisoner = "cartographer", -- a lost surveyor, caged in the workings (src.npcs)
     ambient = { 0.22, 0.17, 0.12 },
@@ -167,13 +169,13 @@ local THEMES = {
     backTop = { 0.16, 0.11, 0.08 },
     backDeep = { 0.09, 0.06, 0.05 },
     pillars = { { 0.05, 0.035, 0.03 }, { 0.26, 0.18, 0.12 }, { 0.15, 0.10, 0.07 } },
-    monsters = { ghoul = 16, bat = 10, miner = 44, roller = 24, worm = 18, spitter = 6 },
+    monsters = { ghoul = 16, bat = 10, miner = 44, roller = 24, worm = 18, spitter = 6, wisp = 8 },
     swarms = { swarmbat = 2 },
     waterPools = 8,
     breakables = { { "urn", 8 }, { "pouch", 14 }, { "lantern", 10 }, { "skullCandle", 6 }, { "tntBarrel", 30 }, { "tntBarrel", 12 }, { "crate", 18 } },
     mine = true,
     stalactites = 60,
-    parallax = 1, -- (the first area's far scenery, in this area's colours)
+    parallax = 6, -- (the first area's far scenery, in this area's colours)
     track = 1, -- (and its music)
   },
   {
@@ -195,13 +197,16 @@ local THEMES = {
     monsters = {},
     arena = true,
     arenaFrac = 0.11,
-    arenaH = 400,
+    arenaH = 460,
+    arenaWidth = 0.5,
+    arenaShape = "rect", -- a walled hall: semi-flat rocky floor, stalactites overhead
+    noPlatforms = true,
     arenaBanner = { "The Marble Hall", "A colossus of marble stands dormant at the middle of the hall. It guards the way into the flooded caverns" },
     boss = "golem",
     defy = "Stone",
     bossReward = "diving_helm",
     stalactites = 30,
-    parallax = 1,
+    parallax = 6,
     track = 3,
   },
   {
@@ -220,14 +225,16 @@ local THEMES = {
     stalk = { 0.45, 0.62, 0.62 },
     backTop = { 0.045, 0.07, 0.11 },
     backDeep = { 0.03, 0.045, 0.075 },
+    prisoner = "sawbone", -- floating on the water (src.npcs)
     pillars = { { 0.02, 0.03, 0.05 }, { 0.10, 0.15, 0.22 }, { 0.06, 0.09, 0.14 } },
-    monsters = { hopper = 10, bloater = 8, spitter = 6, worm = 10, miner = 14 },
+    monsters = { miner = 14, wisp = 6 }, -- (only skeleton miners and wisps on dry ground: the rest is the water's)
     flood = { level = 150 }, -- every open cell below this (px under the top) is water
     fish = 60, -- piranhas in the water
+    aquatic = { jellyfish = 30, angler = 12, urchin = 16 }, -- and the rest of what swims
     mine = true,
-    breakables = { { "urn", 8 }, { "pouch", 10 }, { "lantern", 10 }, { "crate", 14 } },
+    breakables = { { "kelp", 60 }, { "seaSponge", 36 }, { "urn", 6 }, { "pouch", 8 }, { "crate", 10 } },
     stalactites = 60,
-    parallax = 2,
+    parallax = 7,
     track = 2,
   },
   {
@@ -247,17 +254,20 @@ local THEMES = {
     backDeep = { 0.02, 0.04, 0.07 },
     pillars = { { 0.02, 0.03, 0.05 }, { 0.10, 0.15, 0.22 }, { 0.06, 0.09, 0.14 } },
     monsters = {},
+    breakables = { { "kelp", 24 }, { "seaSponge", 14 } },
     arena = true,
     arenaFrac = 0.08,
     arenaH = 1000,
     arenaWidth = 0.72,
     arenaBanner = { "The Deep", "Something old and large turns in the dark water" },
-    boss = "matron",
+    boss = "bigfish",
+    arenaShape = "round", -- (an oval of water, no ledges)
+    noPlatforms = true,
     defy = "Depths",
     flood = { level = 90 },
     fish = 30,
     stalactites = 20,
-    parallax = 5,
+    parallax = 7,
     track = 5,
   },
   {
@@ -277,7 +287,7 @@ local THEMES = {
     backTop = { 0.13, 0.09, 0.08 },
     backDeep = { 0.07, 0.05, 0.05 },
     pillars = { { 0.05, 0.035, 0.03 }, { 0.26, 0.17, 0.12 }, { 0.15, 0.10, 0.07 } },
-    monsters = { bat = 26, ghoul = 18, spitter = 10, miner = 12, roller = 8, worm = 10 },
+    monsters = { bat = 12, ghoul = 10, spitter = 6, miner = 8, roller = 5, worm = 6, wisp = 6, crow = 34, cragram = 18, dustdevil = 14, gargoyle = 16 },
     swarms = { swarmbat = 3 },
     waterPools = 4,
     breakables = { { "urn", 8 }, { "pouch", 12 }, { "lantern", 10 }, { "skullCandle", 6 }, { "tntBarrel", 12 }, { "crate", 14 } },
@@ -286,25 +296,33 @@ local THEMES = {
     indoors = true, -- dark inside, though it stands above the ground
     profile = function(y)
       -- The mountain's silhouette: the plain's rock below the ground line, a
-      -- flank rising from x 5900 to x 6900 at the summit above it
-      if y < -2900 then
+      -- flank rising from x 5900 to x 6900 at the summit (7400 px up) above it
+      if y < -6900 then
         return nil
       end
       if y >= 500 then
         return 5800, 8599
       end
-      return math.floor(5900 + (500 - y) * (1000 / 3400)), 8599
+      return math.floor(5900 + (500 - y) * (1000 / 7400)), 8599
     end,
     groundY = 500,
     arena = true,
     arenaFrac = 0.04,
+    arenaCx = 7880,
+    arenaWidth = 0.46,
     arenaH = 400,
-    arenaCx = 7750,
-    arenaBanner = { "The Summit", "Kill the Dreadbat. The way up lies beyond it" },
-    arenaWon = { "The Dreadbat Has Fallen", "The gate above the arena is open: the sky lies beyond" },
-    boss = "dreadbat",
+    arenaShape = "round", -- an oval chamber, entered from its lower corners
+    platformStyle = "edges", -- its ledges stagger round the outer edges, the middle left open
+    caveInset = 300, -- the caves start this much further in from the mountain's face
+    fog = 22, -- banks of dense fog in the caves (src.fog)
+    arenaDecor = true, -- the Dark Hunter's hall: the shop's void behind the oval, violet crystals round it
+    noBraziers = true, -- (no orange fires in it)
+    arenaBanner = { "The Summit", "Something wearing your shape waits at the top. The way up lies beyond it" },
+    arenaWon = { "The Crow Rider Has Fallen", "The gate above the arena is open: the sky lies beyond" },
+    boss = "darkhunter", -- the Dark Hunter, then the Crow Rider (src.darkhunter)
+    bossReward = "akimbo", -- (and beating him unlocks it for good)
     defy = "Heights",
-    parallax = 1,
+    parallax = 9, -- the inside of a mountain, with holes peeping out to the sky (src.parallax)
     track = 1,
   },
   {
@@ -313,7 +331,7 @@ local THEMES = {
     subtitle = "Where the air thins",
     ambient = { 0.55, 0.48, 0.5 },
     fx = { shadow = { 0.95, 0.96, 1.06 }, light = { 1.08, 1.02, 0.92 }, sat = 1.05, aberr = 0.5 },
-    palette = { rock = materials.SANDSTONE, dirt = materials.SAND },
+    palette = { rock = materials.CLOUDBANK, dirt = materials.CLOUD }, -- the ground is cloud
     glow = { 0.75, 0.9, 1.0 },
     glowCount = 60,
     glowRadius = 38,
@@ -322,6 +340,7 @@ local THEMES = {
     backTop = { 0.30, 0.22, 0.28 },
     backDeep = { 0.30, 0.22, 0.28 },
     pillars = { { 0.2, 0.15, 0.2 }, { 0.5, 0.4, 0.45 }, { 0.35, 0.27, 0.32 } },
+    space = true, -- the sky darkens into space toward the top (src.scenes.overworld)
     monsters = { bat = 30, ghoul = 10, spitter = 14, wisp = 12 },
     swarms = { swarmbat = 6, wisp = 3 },
     breakables = { { "urn", 10 }, { "pouch", 12 }, { "lantern", 8 }, { "crate", 12 } },
@@ -354,6 +373,11 @@ local function derive(base, over)
 end
 THEMES[12] = derive(THEMES[4], {
   name = "The Ember Foundry",
+  parallax = 4, -- (the Warrens' far scenery)
+  -- The way for those who are ready: a lot more of everything, tougher, and thrice the elites
+  spawnMul = 1.7,
+  toughMul = 1.8,
+  eliteMul = 3,
   subtitle = "Area 5 - under the Cinder Warrens",
   ambient = { 0.26, 0.15, 0.11 },
   glowCount = 300,
@@ -365,20 +389,27 @@ THEMES[12] = derive(THEMES[4], {
 })
 THEMES[13] = derive(THEMES[5], {
   name = "The Silt Vaults",
+  parallax = 5, -- (the Drowned Halls' far scenery)
+  spawnMul = 1.7,
+  toughMul = 1.8,
+  eliteMul = 3,
   subtitle = "Area 5 - under the Drowned Halls",
   ambient = { 0.06, 0.11, 0.15 },
   waterPools = 150,
-  monsters = { ghoul = 8, bat = 8, spitter = 18, hopper = 60, bloater = 26, worm = 14, roller = 8, miner = 6 },
+  monsters = { ghoul = 8, bat = 8, spitter = 18, hopper = 60, bloater = 26, worm = 14, roller = 8, miner = 6, wisp = 8 },
   stalactites = 100,
 })
 
 local AREA_W, AREA_H = 2880, 3100
+local PATH_GAP = 644 -- the rock between the two paths below the Queen
 local LAYOUT = {
   { x = 0, y = 0, w = AREA_W, h = AREA_H, tier = 1 },
   { x = 0, y = AREA_H, w = AREA_W, h = AREA_H, tier = 2 },
   { x = 0, y = 2 * AREA_H, w = AREA_W, h = AREA_H, tier = 3 },
-  { x = 0, y = 3 * AREA_H, w = AREA_W / 2, h = AREA_H, tier = 4, side = "left", parent = 3 },
-  { x = AREA_W / 2, y = 3 * AREA_H, w = AREA_W / 2, h = AREA_H, tier = 4, side = "right", parent = 3 },
+  -- (the two paths below the Queen stand apart, with diggable rock between: each
+  -- one's way in is its top corner nearest the middle, under its shop's hatch)
+  { x = 0, y = 3 * AREA_H, w = AREA_W / 2, h = AREA_H, tier = 4, side = "left", parent = 3, gapRight = PATH_GAP },
+  { x = AREA_W / 2 + PATH_GAP, y = 3 * AREA_H, w = AREA_W / 2, h = AREA_H, tier = 4, side = "right", parent = 3, gapLeft = PATH_GAP },
   -- The Old Quarry: a side branch under the east desert, entered from a
   -- crevice on the surface (entry: its x and half-width). Shorter than the
   -- main areas. rank is what it counts as for "deepest reached".
@@ -392,13 +423,15 @@ local LAYOUT = {
   -- The mountain at the east end: a doorway at the top of a ramp (entry.x, entry.y is
   -- inside, behind the doorway), climbing to a summit boss. Its rock above the ground
   -- line is the mountain you see from the desert.
-  { x = 5800, y = -3660, w = 2800, h = 4000, tier = 4, rank = 4, entry = { x = 6080, y = 380, walk = true } },
+  -- (chamber: where the long passage in from the doorway opens up, about half
+  -- the mountain's width in)
+  { x = 5800, y = -7660, w = 2800, h = 8000, tier = 4, rank = 4, entry = { x = 6320, y = 380, walk = true, chamber = 7260 } },
   -- The sky, over the mountain's summit and most of the desert, reached through the
   -- gate above the summit boss's arena
-  { x = 0, y = -5060, w = 8600, h = 1400, tier = 5, rank = 5, parent = 10 },
+  { x = 0, y = -9060, w = 8600, h = 1400, tier = 5, rank = 5, parent = 10 },
   -- The way on below each post-Queen path (their last shops get hatches)
-  { x = 0, y = 4 * AREA_H, w = AREA_W / 2, h = AREA_H, tier = 5, parent = 4 },
-  { x = AREA_W / 2, y = 4 * AREA_H, w = AREA_W / 2, h = AREA_H, tier = 5, parent = 5 },
+  { x = 0, y = 4 * AREA_H, w = AREA_W / 2, h = AREA_H, tier = 5, parent = 4, gapRight = PATH_GAP },
+  { x = AREA_W / 2 + PATH_GAP, y = 4 * AREA_H, w = AREA_W / 2, h = AREA_H, tier = 5, parent = 5, gapLeft = PATH_GAP },
 }
 
 -- Width of the main road's column: everything east of it is side branches
@@ -410,6 +443,18 @@ function catacombs.entries()
   for _, l in ipairs(LAYOUT) do
     if l.entry then
       list[#list + 1] = l.entry
+    end
+  end
+  return list
+end
+
+-- The entrances with the name of the area behind each: { x, y (for a doorway),
+-- walk, lake, name }
+function catacombs.namedEntries()
+  local list = {}
+  for i, l in ipairs(LAYOUT) do
+    if l.entry then
+      list[#list + 1] = { x = l.entry.x, y = l.entry.y, walk = l.entry.walk, lake = l.entry.lake, name = THEMES[i] and THEMES[i].name or "" }
     end
   end
   return list
@@ -444,8 +489,73 @@ function catacombs.count()
   return #levels
 end
 
+-- Each area has a name of its own, made up fresh for every run from words that
+-- suit its theme (shown when it is entered, in place of "Area 3")
+local TITLE_WORDS = {
+  ["The Old Mine"] = { { "Rusted", "Forgotten", "Hollow", "Lantern", "Tallow", "Cracked", "Timbered", "Widow's" }, { "Gallery", "Drift", "Shaft", "Seam", "Winze", "Cutting", "Adit", "Stope" } },
+  ["The Sunken Hollows"] = { { "Whispering", "Glimmer", "Mossback", "Sporefall", "Dripping", "Pale", "Lanternroot", "Weeping" }, { "Grotto", "Fen", "Hollow", "Warren", "Bower", "Sink", "Mere", "Undergrowth" } },
+  ["The Sulfur Vents"] = { { "Yellow", "Choking", "Rotten", "Hissing", "Bitter", "Brimstone", "Pallid", "Fuming" }, { "Flues", "Chimneys", "Breath", "Stacks", "Pits", "Vents", "Reek", "Chambers" } },
+  ["The Cinder Warrens"] = { { "Smoldering", "Ashen", "Scorched", "Blackened", "Ember", "Molten", "Charred", "Sooty" }, { "Burrows", "Kilns", "Tunnels", "Crucibles", "Hearths", "Galleries", "Runs", "Furnaces" } },
+  ["The Drowned Halls"] = { { "Sunken", "Dripping", "Tidal", "Waterlogged", "Silent", "Brine", "Mirrored", "Cold" }, { "Colonnade", "Cloisters", "Vestibule", "Nave", "Passage", "Arcade", "Crypts", "Atrium" } },
+  ["The Quarry"] = { { "Broken", "Chalk", "Grey", "Hewn", "Blasted", "Dusty", "Scarred", "Terraced" }, { "Terraces", "Cuttings", "Ledges", "Faces", "Benches", "Pits", "Slabs", "Yards" } },
+  ["The Foreman's Hall"] = { { "Iron", "Silent", "Bellless", "Overseer's", "Last", "Cold", "Tallied", "Shuttered" }, { "Office", "Hall", "Muster", "Chamber", "Roll-Room", "Gantry", "Court", "Forum" } },
+  ["The Flooded Caverns"] = { { "Glowing", "Inky", "Abyssal", "Drifting", "Tideless", "Lantern-fish", "Bruised", "Cobalt" }, { "Depths", "Shallows", "Basin", "Reach", "Gulf", "Trench", "Lagoon", "Deeps" } },
+  ["The Deep"] = { { "Black", "Bottomless", "Sleeping", "Old", "Crushing", "Maw of the", "Silent", "Leviathan's" }, { "Trench", "Abyss", "Floor", "Hold", "Dark", "Basin", "Deep", "Throat" } },
+  ["The Needle"] = { { "Wind-Cut", "Giddy", "Narrow", "Sky-Bound", "Windward", "Spired", "Cragged", "Last" }, { "Ascent", "Stair", "Spire", "Climb", "Ridgeway", "Chimney", "Flue", "Pinnacle" } },
+  ["The Cloud Reaches"] = { { "Drifting", "Thin", "Silver", "Floating", "Breathless", "Pale", "Lofty", "Windblown" }, { "Isles", "Spires", "Shelves", "Banks", "Heights", "Steps", "Terraces", "Shoals" } },
+  ["The Ember Foundry"] = { { "Roaring", "White-Hot", "Slag", "Forge", "Glowing", "Iron-Fed", "Choking", "Bellows" }, { "Floor", "Casting-Hall", "Foundry", "Crucible", "Works", "Pour", "Smelter", "Furnace-Row" } },
+  ["The Silt Vaults"] = { { "Muddy", "Sinking", "Buried", "Murky", "Slumped", "Silted", "Rotting", "Croaking" }, { "Vaults", "Cellars", "Strongrooms", "Crypts", "Basements", "Bogs", "Sumps", "Undercroft" } },
+}
+
+function catacombs.areaTitle(i)
+  local lv = levels[i]
+  if not lv then
+    return ""
+  end
+  if not lv.title then
+    local words = TITLE_WORDS[lv.theme.name]
+    if words then
+      local rng = love.math.newRandomGenerator((baseSeed or 0) * 31 + i * 7919)
+      rng:random()
+      lv.title = words[1][rng:random(1, #words[1])] .. " " .. words[2][rng:random(1, #words[2])]
+    else
+      lv.title = lv.theme.subtitle
+    end
+  end
+  return lv.title
+end
+
+-- The mountain-shaped areas standing in the open air: { index, theme, y0, y1 }
+function catacombs.climbLevels()
+  local list = {}
+  for i, lv in ipairs(levels) do
+    if lv.theme.climb and lv.theme.profile then
+      list[#list + 1] = { index = i, theme = lv.theme, y0 = lv.y0, y1 = lv.y1 }
+    end
+  end
+  return list
+end
+
 function catacombs.theme(i)
   return THEMES[i] or THEMES[#THEMES]
+end
+
+-- The sky area that darkens into space at its top: { x0, x1, y0, y1 }, or nil
+function catacombs.spaceBand()
+  for _, lv in ipairs(levels) do
+    if lv.theme.space then
+      return lv
+    end
+  end
+  return nil
+end
+
+-- An area's rectangle: x0, y0, x1, y1 (nil if the layout has no such area)
+function catacombs.bounds(i)
+  local lv = levels[i]
+  if lv then
+    return lv.x0, lv.y0, lv.x1, lv.y1
+  end
 end
 
 local zoomNow, zoomWant, zoomT = 1, 1, 0 -- (the fight camera: see updateBossCamera)
@@ -469,6 +579,8 @@ function catacombs.start(w, first, seed, tiers)
         parent = l.parent,
         side = l.side,
         entry = l.entry,
+        gapLeft = l.gapLeft,
+        gapRight = l.gapRight,
         x0 = first.x0 + l.x,
         x1 = first.x0 + l.x + l.w - 1,
         y0 = first.y0 + l.y,
@@ -518,7 +630,7 @@ local function areaFor(i)
       x1 = lv.x1,
       y0 = lv.y0,
       y1 = lv.y1,
-      entranceX = lv.entry.x,
+      entranceX = lv.entry.chamber or lv.entry.x,
       entranceY = lv.entry.y,
     }
   elseif lv.entry then
@@ -565,6 +677,8 @@ local function areaFor(i)
     end
   end
   base.level = lv.row
+  base.name = lv.theme.name
+  base.gapLeft, base.gapRight = lv.gapLeft, lv.gapRight
   base.palette = lv.theme.palette
   base.arena = lv.theme.arena
   base.glowCount = lv.theme.glowCount
@@ -576,9 +690,13 @@ local function areaFor(i)
   base.lavaPools = lv.theme.lavaPools
   base.acidPools = lv.theme.acidPools
   base.monsters = lv.theme.monsters
+  base.spawnMul, base.toughMul = lv.theme.spawnMul, lv.theme.toughMul
   base.boss = lv.theme.boss
   base.swarms = lv.theme.swarms
   base.arenaFrac, base.arenaH, base.arenaWidth = lv.theme.arenaFrac, lv.theme.arenaH, lv.theme.arenaWidth
+  base.arenaShape, base.noPlatforms = lv.theme.arenaShape, lv.theme.noPlatforms
+  base.platformStyle = lv.theme.platformStyle
+  base.caveInset, base.noBraziers = lv.theme.caveInset, lv.theme.noBraziers
   base.bossReward = lv.theme.bossReward
   base.wounded = lv.theme.wounded
   base.prisoner = lv.theme.prisoner
@@ -807,6 +925,15 @@ function catacombs.backdrop(y, x)
     t.backTop[3] + (t.backDeep[3] - t.backTop[3]) * d
 end
 
+-- The backdrop colour of area i at depth y (see catacombs.backdrop)
+function catacombs.backdropIn(i, y)
+  local lv, t = levels[i], THEMES[i] or THEMES[#THEMES]
+  local d = math.min(1, math.max(0, (y - lv.y0) / ((lv.y1 - lv.y0 + 1) * 0.8)))
+  return t.backTop[1] + (t.backDeep[1] - t.backTop[1]) * d,
+    t.backTop[2] + (t.backDeep[2] - t.backTop[2]) * d,
+    t.backTop[3] + (t.backDeep[3] - t.backTop[3]) * d
+end
+
 -- Scatters crates, chests, monsters and the shop stock through every area
 -- that exists. Needs the physics world, so the scene calls it after setting
 -- that up (and the area update calls it every frame after).
@@ -815,6 +942,30 @@ function catacombs.spawnProps()
     local info = lv.info
     if info and not lv.propsSpawned then
       lv.propsSpawned = true
+      if lv.theme.fog then
+        -- Banks of dense fog lying in the caves (src.fog), well away from the way in and the arena
+        local fogRng = love.math.newRandomGenerator(baseSeed + i * 31)
+        local a = info.arena
+        local made, tries = 0, 0
+        while made < lv.theme.fog and tries < lv.theme.fog * 40 and #info.glows > 0 do
+          tries = tries + 1
+          local s = info.glows[fogRng:random(1, #info.glows)]
+          local bx, by = s[1], s[2] - 26
+          local clear = not world:isSolid(bx, by) and not world:isSolid(bx - 50, by) and not world:isSolid(bx + 50, by)
+          if clear and a and bx > a.x0 - 80 and bx < a.x1 + 80 and by > a.top - 80 and by < a.floorY + 80 then
+            clear = false
+          end
+          if clear and math.abs(bx - (lv.entry and lv.entry.chamber or -9999)) < 160 and by > 200 then
+            clear = false -- (not at the first chamber)
+          end
+          if clear then
+            require("src.fog").addBank(bx, by, 150 + fogRng:random() * 110, 56 + fogRng:random() * 30, function()
+              return fogRng:random()
+            end)
+            made = made + 1
+          end
+        end
+      end
       -- Resting objects start asleep: their terrain outlines are only traced
       -- once something wakes them, instead of all in the same frame
       for _, s in ipairs(info.crates) do
@@ -887,6 +1038,19 @@ function catacombs.spawnProps()
             enemies.spawn("piranha", x, y, 1 + (lv.row - 1) * 0.6, lv.row)
           end
         end
+        for kind, count in pairs(lv.theme.aquatic or {}) do
+          for _ = 1, count do
+            local r = runs[love.math.random(#runs)]
+            local x, y = (r[2] + love.math.random() * (r[3] - r[2])) * 2, r[1] * 2 + 1
+            local inShop = false
+            for _, room in ipairs(info.shops) do
+              inShop = inShop or (x > room.x - 20 and x < room.x + room.w + 20 and y > room.y - 20 and y < room.y + room.h + 20)
+            end
+            if not inShop and r[3] - r[2] > 6 and y > lv.y0 + (lv.theme.flood and lv.theme.flood.level or 0) + 14 then
+              enemies.spawn(kind, x, y, 1 + (lv.row - 1) * 0.6, lv.row)
+            end
+          end
+        end
       end
       -- A prisoner's cage, with two of the things that keep them
       local pr = info.prisoner
@@ -911,6 +1075,19 @@ function catacombs.spawnProps()
           -- An arena's boss isn't there until the hunter steps up to the
           -- pedestal at the middle of the arena (catacombs.interact)
           lv.boss = { m = m, state = "idle" }
+          if m.kind == "bigfish" then
+            -- The fish waits at the bottom middle of its round arena, no pedestal:
+            -- the fight starts when it notices the hunter
+            lv.boss.noAltar = true
+            local a = info.arena
+            local fx, fy = a.cx, a.floorY - 90
+            local e = enemies.spawn("bigfish", fx, fy, 1, lv.row)
+            e.dormant = true
+            e.areaIndex = i
+            e.arena = a
+            e.reward = m.reward
+            lv.boss.e = e
+          end
         else
           local swarm
           if m.swarm then
@@ -926,7 +1103,7 @@ function catacombs.spawnProps()
         end
       end
       -- A few of them are elite (src.enemies), more the deeper the area
-      local elites = enemies.rollElites(spawned, lv.row)
+      local elites = enemies.rollElites(spawned, lv.row, nil, lv.theme.eliteMul)
       require("src.events").spawnArea(world, info, i, lv.row, elites, chests)
     end
   end
@@ -960,11 +1137,39 @@ function catacombs.update(player, dt)
       physics.world:setGravity(0, config.gravity)
     end
   end
-  if at and not announced[at] and py > levels[at].y0 and (not levels[at].theme.indoors or catacombs.indoors(px, py) > 0.5) then
-    announced[at] = true
-    hud.showBanner(levels[at].theme.name, levels[at].theme.subtitle .. "  -  seed " .. baseSeed)
+  -- The zone's name comes up each time the hunter crosses into another (shops don't count:
+  -- they belong to the zone around them)
+  if not catacombs.inShop(px, py) then
+    local zone = catacombs.zoneAt(px, py)
+    if zone ~= announced.zone then
+      local first = announced.zone == nil
+      announced.zone = zone
+      if zone == 0 then
+        if not first then
+          hud.showBanner(catacombs.surfaceName or "The Barrens", nil)
+        end
+      else
+        hud.showBanner(levels[zone].theme.name, catacombs.areaTitle(zone))
+      end
+    end
   end
   local b = player.body
+  for _, lv in ipairs(levels) do
+    -- Violet motes drifting up through the Dark Hunter's hall
+    local arena = lv.info and lv.info.arena
+    if arena and lv.theme.arenaDecor and px > arena.x0 and px < arena.x1 and py > arena.top - 40 and py < arena.floorY + 40 and love.math.random() < dt * 16 then
+      local ang, r = love.math.random() * math.pi * 2, math.sqrt(love.math.random())
+      local mx, my = arena.cx + math.cos(ang) * r * arena.w * 0.46, arena.top + arena.h / 2 + math.sin(ang) * r * arena.h * 0.46
+      effects.particle(mx, my, (love.math.random() - 0.5) * 12, -6 - love.math.random() * 12, 2.5 + love.math.random() * 2.5, love.math.random() < 0.5 and { 0.6, 0.3, 1 } or { 0.35, 0.5, 1 }, -3, true)
+    end
+    local fish = lv.boss and lv.boss.noAltar and lv.boss.state == "idle" and lv.boss.e
+    if fish and not fish.dead then
+      local fx, fy = fish.body.x + fish.body.w / 2, fish.body.y + fish.body.h / 2
+      if (px - fx) ^ 2 + (py - fy) ^ 2 < 380 ^ 2 or fish.hp < fish.maxHp then
+        catacombs.startBoss(lv, player)
+      end
+    end
+  end
   for i, lv in ipairs(levels) do
     local info = lv.info
     if info then
@@ -1040,6 +1245,30 @@ function catacombs.openGates(lv)
     physics.rebuildRegion(g.x0, g.y0, g.x1, g.y1)
   end
   a.plugs = nil
+  if a.ring then
+    for _, r in ipairs(a.ring) do
+      for x = r[1], r[2] do
+        world:setRaw(x, r[3], materials.AIR)
+      end
+    end
+    world:repaintRegion(a.x0 - 40, a.top - 30, a.x1 + 40, a.floorY + 60)
+    physics.rebuildRegion(a.x0 - 40, a.top - 30, a.x1 + 40, a.floorY + 60)
+    a.ring = nil
+  end
+  if a.seal then
+    -- the rock round the arena is only rock again
+    local z = a.seal
+    for y = z.y0, z.y1 do
+      for x = z.x0, z.x1 do
+        if world:get(x, y) == materials.SEALED then
+          world:setRaw(x, y, z.rock)
+        end
+      end
+    end
+    world:repaintRegion(z.x0, z.y0, z.x1, z.y1)
+    physics.rebuildRegion(z.x0, z.y0, z.x1, z.y1)
+    a.seal = nil
+  end
   for _, g in ipairs(a.gates) do
     for y = g.y0, g.y1 do
       for x = g.x0, g.x1 do
@@ -1075,7 +1304,7 @@ end
 -- The pedestal the hunter is standing at, if any (a boss waiting to be woken)
 local function altarNear(px, py)
   for _, lv in ipairs(levels) do
-    if lv.info and lv.boss and lv.boss.state == "idle" then
+    if lv.info and lv.boss and lv.boss.state == "idle" and not lv.boss.noAltar then
       local ax, ay = altarSpot(lv)
       if math.abs(px - ax) < 22 and math.abs(py - (ay - 8)) < 30 then
         return lv
@@ -1150,6 +1379,31 @@ local function sealArena(lv)
     world:repaintRegion(g.x0, g.y0, g.x1, g.y1)
     physics.rebuildRegion(g.x0, g.y0, g.x1, g.y1)
   end
+  if a.shape == "round" then
+    -- An oval hall has its mouths low down, at the foot of the shafts that climb into it:
+    -- iron fills every open hole just outside the oval, so nothing can drop out of it
+    local cx, cy, rx, ry = a.cx, a.top + a.h / 2, a.w / 2, a.h / 2
+    a.ring = {}
+    for y = a.top - 30, a.floorY + 60 do
+      local ny = ((y - cy) / ry) ^ 2
+      local x = a.x0 - 40
+      while x <= a.x1 + 40 do
+        local d = ((x - cx) / rx) ^ 2 + ny
+        if d >= 1.0 and d <= 1.45 and not world:isSolid(x, y) then
+          local xa = x
+          while x <= a.x1 + 40 and not world:isSolid(x, y) and ((x - cx) / rx) ^ 2 + ny >= 1.0 and ((x - cx) / rx) ^ 2 + ny <= 1.45 do
+            world:setRaw(x, y, materials.IRON)
+            x = x + 1
+          end
+          a.ring[#a.ring + 1] = { xa, x - 1, y }
+        else
+          x = x + 1
+        end
+      end
+    end
+    world:repaintRegion(a.x0 - 40, a.top - 30, a.x1 + 40, a.floorY + 60)
+    physics.rebuildRegion(a.x0 - 40, a.top - 30, a.x1 + 40, a.floorY + 60)
+  end
 end
 
 -- The hunter steps up to the pedestal: the arena is sealed, what else lives in
@@ -1158,11 +1412,20 @@ function catacombs.startBoss(lv, player)
   local a, m = lv.info.arena, lv.boss.m
   lv.boss.state = "fight"
   sealArena(lv)
-  for _, e in ipairs(enemies.all()) do
+  for _, e in ipairs(enemies.every()) do
     local cx, cy = e.body.x + e.body.w / 2, e.body.y + e.body.h / 2
     if not e.dead and not e.def.boss and cx > a.x0 and cx < a.x1 and cy > a.top - 40 and cy < a.floorY + 40 then
       enemies.vanish(e)
     end
+  end
+  if lv.boss.noAltar and lv.boss.e then
+    local fe = lv.boss.e
+    fe.dormant = false
+    fe.state, fe.seesPlayer = "chase", true
+    audio.play("explosion", 1, 0.4)
+    require("src.camera").shake(0.7)
+    hud.showBanner(defyTitle(lv), (lv.theme.arenaBanner and lv.theme.arenaBanner[1] or "The Arena") .. ": the way out is sealed until the boss falls")
+    return
   end
   local def = enemies.defs[m.kind]
   local ax = altarSpot(lv)
@@ -1232,8 +1495,13 @@ updateBossCamera = function(player, dt)
       end
     end
     best = best or fight
-    camera.setFocus(best.body.x + best.body.w / 2, best.body.y + best.body.h / 2)
-    zoomWant = FIGHT_ZOOM
+    if best.kind == "bigfish" then
+      camera.setFocus(nil) -- (the camera stays on the hunter: only a wider view)
+      zoomWant = 1.3
+    else
+      camera.setFocus(best.body.x + best.body.w / 2, best.body.y + best.body.h / 2)
+      zoomWant = FIGHT_ZOOM
+    end
   else
     camera.setFocus(nil)
     zoomWant = 1
@@ -1242,6 +1510,25 @@ updateBossCamera = function(player, dt)
 end
 
 -- Is the point inside a shop room?
+-- Which zone a point is in: an area's index, or 0 for the open surface and sky above it.
+-- A mountain only counts inside its own silhouette.
+function catacombs.zoneAt(px, py)
+  for i, lv in ipairs(levels) do
+    if px >= lv.x0 and px <= lv.x1 and py >= lv.y0 and py <= lv.y1 then
+      local th = lv.theme
+      if th.profile then
+        local xa, xb = th.profile(py)
+        if xa and px >= xa and px <= xb then
+          return i
+        end
+      else
+        return i
+      end
+    end
+  end
+  return 0
+end
+
 function catacombs.inShop(x, y)
   for _, lv in ipairs(levels) do
     for _, s in ipairs(lv.info and lv.info.shops or {}) do
@@ -1286,12 +1573,53 @@ local function inArea(lv, view)
   return view.x + view.w > lv.x0 - 600 and view.x < lv.x1 + 600 and view.y + view.h > lv.y0 - 1500 and view.y < lv.y1 + 600
 end
 
+-- The ring of violet crystals set into the Dark Hunter's oval: places and sizes, made once
+local crystalRings = {}
+local function arenaCrystals(a)
+  if crystalRings[a] then
+    return crystalRings[a]
+  end
+  local list = {}
+  local cx, cy, rx, ry = a.cx, a.top + a.h / 2, a.w / 2, a.h / 2
+  for k = 0, 35 do
+    local ang = k / 36 * math.pi * 2
+    local jitter = 1 - 0.02 * (k % 3)
+    list[#list + 1] = {
+      x = cx + math.cos(ang) * rx * 0.985 * jitter,
+      y = cy + math.sin(ang) * ry * 0.985 * jitter,
+      ang = ang,
+      len = 6 + (k * 7) % 9,
+      ph = k * 1.7,
+    }
+  end
+  crystalRings[a] = list
+  return list
+end
+
 function catacombs.addLights(lighting, view)
   fluids.addLights(lighting, view)
   local t = love.timer.getTime()
   for _, lv in ipairs(levels) do
+    local arena = lv.info and lv.info.arena
+    if lv.theme.arenaDecor and arena and view.x + view.w > arena.x0 and view.x < arena.x1 and view.y + view.h > arena.top - 10 and view.y < arena.floorY + 10 then
+      for _, c in ipairs(arenaCrystals(arena)) do
+        if visible(view, c.x, c.y, 80) then
+          lighting.add(c.x, c.y, 70, 0.55, 0.25, 0.95, 0.45 + 0.15 * math.sin(t * 1.3 + c.ph))
+        end
+      end
+    end
+    if lv.theme.parallax == 9 and lv.theme.profile and inArea(lv, view) then
+      -- The holes in the far rock that open onto the sky throw its light in (src.parallax)
+      -- (no lights for them: a light sitting in the far rock spills onto the ground in front.
+    -- They glow through drawEmissive instead, only where the air shows them)
+    parallax.skyHoles(view.x, view.y, view.x, view.y, view.x + view.w, view.y + view.h, function(x, y, r, g, b, radius)
+        if false then
+          lighting.add(x, y, radius, r, g, b, 0.75)
+        end
+      end)
+    end
     local info = inArea(lv, view) and lv.info
-    if info and lv.boss and lv.boss.state == "idle" and info.arena and visible(view, info.arena.cx, info.arena.floorY, 160) then
+    if info and lv.boss and lv.boss.state == "idle" and not lv.boss.noAltar and info.arena and visible(view, info.arena.cx, info.arena.floorY, 160) then
       local ax, ay = altarSpot(lv)
       lighting.add(ax, ay - 20, 80, 1, 0.5, 0.28, 0.8 + 0.15 * math.sin(t * 3))
     end
@@ -1340,13 +1668,164 @@ local function drawFungus(x, y, seed, stalk)
   end
 end
 
+-- The shop's back wall: a void of its own, hiding the cave's parallax (and the
+-- same in every area): dark indigo with wisps of purple and blue turning slowly
+-- round the room's centre, like the title screen's nebula without the hole
+local VOID_SHADER = [[
+uniform float time;
+uniform float hall;   // 1: the Dark Hunter's hall (dark, calm, with sparks), 0: the shop's void
+uniform vec2 offset;  // of the drawn slice inside the shop room
+uniform vec2 sliceSize;
+uniform vec2 player;  // the hunter, in the room's own coordinates
+uniform vec2 oval;    // the pulsing blue oval's centre (the portal), in the same; far away = none
+uniform vec2 ovalSize;
+uniform vec2 boxMin;  // the whole window, in the room's coordinates
+uniform vec2 boxMax;
+uniform vec4 feather; // how far in from the left, right, top and bottom edges it fades out (0: not at all)
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float fbm(vec2 p) {
+  float v = 0.0, a = 0.5;
+  for (int i = 0; i < 4; i++) { v += a * noise(p); p = p * 2.03 + 11.0; a *= 0.5; }
+  return v;
+}
+vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
+  vec2 p = uv * sliceSize + offset;
+  if (hall > 0.5) {
+    // the hall: near-black slate with one slow, soft haze (no folds, no lensing) and
+    // sparks winking in it
+    vec2 hq = p * 0.006;
+    float h1 = fbm(hq + vec2(time * 0.012, 0.0));
+    vec3 hc = mix(vec3(0.012, 0.014, 0.026), vec3(0.036, 0.030, 0.066), smoothstep(0.25, 0.8, h1));
+    vec2 cell = floor(p / 9.0);
+    vec2 inCell = fract(p / 9.0);
+    float r = hash(cell + 3.7);
+    if (r > 0.955) {
+      vec2 at = vec2(0.25 + 0.5 * hash(cell + 9.1), 0.25 + 0.5 * hash(cell + 2.3));
+      float tw = 0.5 + 0.5 * sin(time * (1.2 + 2.0 * hash(cell + 5.5)) + r * 40.0);
+      float spark = smoothstep(0.16, 0.0, length(inCell - at)) * tw * tw;
+      hc += mix(vec3(0.55, 0.40, 0.95), vec3(0.45, 0.80, 1.0), hash(cell + 7.7)) * spark * 0.85;
+    }
+    float ha = 1.0;
+    ha *= smoothstep(0.0, 90.0, p.x - boxMin.x) * smoothstep(0.0, 90.0, boxMax.x - p.x);
+    ha *= smoothstep(0.0, 90.0, p.y - boxMin.y) * smoothstep(0.0, 90.0, boxMax.y - p.y);
+    return vec4(hc * ha, ha);
+  }
+  vec2 q = p * 0.011;
+  // the space bends away from the hunter, like a weight pressing on a sheet
+  vec2 dp = p - player;
+  float near = exp(-dot(dp, dp) / (70.0 * 70.0));
+  q += dp / (length(dp) + 8.0) * near * 0.5;
+  // the blue oval: it breathes, and bends the space round it a little
+  float pulse = 0.5 + 0.5 * sin(time * 1.6);
+  vec2 od = (p - oval) / (ovalSize * (1.0 + 0.13 * pulse));
+  float ov = length(od);
+  q += normalize(p - oval + vec2(0.001)) * exp(-ov * 1.4) * (0.35 + 0.25 * pulse) * 0.5;
+  // a fractal fold of the plane: noise warped by noise warped by noise
+  vec2 w1 = vec2(fbm(q + vec2(0.0, time * 0.05)), fbm(q + vec2(5.2, 1.3) - vec2(time * 0.04, 0.0)));
+  vec2 w2 = vec2(fbm(q + 3.0 * w1 + vec2(1.7, 9.2) + time * 0.03), fbm(q + 3.0 * w1 + vec2(8.3, 2.8) - time * 0.025));
+  float n = fbm(q + 3.2 * w2);
+  float w = fbm(q * 1.8 + 2.0 * w2 + vec2(0.0, time * 0.04));
+  vec3 col = mix(vec3(0.020, 0.016, 0.045), vec3(0.085, 0.045, 0.145), n);
+  col += vec3(0.24, 0.10, 0.36) * smoothstep(0.50, 0.85, n) * 0.5;
+  col += vec3(0.08, 0.22, 0.48) * smoothstep(0.52, 0.88, w) * 0.5;
+  col += vec3(0.30, 0.2, 0.5) * near * 0.12;
+  col += vec3(0.10, 0.35, 0.95) * smoothstep(1.0, 0.0, ov) * (0.65 + 0.3 * pulse);
+  col += vec3(0.30, 0.6, 1.0) * exp(-abs(ov - 1.0) * 7.0) * (0.35 + 0.3 * pulse);
+  col += vec3(0.05, 0.15, 0.45) * exp(-ov * 0.9) * 0.4;
+  col *= 0.8 + 0.2 * smoothstep(0.25, 0.65, fbm(q * 4.0 + 3.0));
+  // the edges bleed into whatever is behind them
+  float a = 1.0;
+  // (outward: the room's own box stays at full strength, the void spills past it and fades)
+  if (feather.x > 0.0) a *= 1.0 - smoothstep(0.0, feather.x, boxMin.x - p.x);
+  if (feather.y > 0.0) a *= 1.0 - smoothstep(0.0, feather.y, p.x - boxMax.x);
+  if (feather.z > 0.0) a *= 1.0 - smoothstep(0.0, feather.z, boxMin.y - p.y);
+  if (feather.w > 0.0) a *= 1.0 - smoothstep(0.0, feather.w, p.y - boxMax.y);
+  return vec4(col * a, a);
+}
+]]
+local voidShader, voidBlank
+
+-- Draws the void over (cx, cy, cw, ch), as a window onto the shop room s's one
+-- field of it, so the teleport room below is the same space continued
+local VOID_FEATHER = 36 -- (and its edges fade over this much, into the cave's own background)
+
+local function drawVoidRect(s, cx, cy, cw, ch, view, ovalX, ovalY, ovalW, ovalH, fadeTop, fadeBottom, hall)
+  -- The shop's void bleeds outward into the backdrop beside it (the hall's fades inward)
+  local ox0, ox1, oy0, oy1 = 0, 0, 0, 0
+  if not hall then
+    ox0, ox1 = VOID_FEATHER, VOID_FEATHER
+    oy0, oy1 = fadeTop and VOID_FEATHER or 0, fadeBottom and VOID_FEATHER or 0
+  end
+  local x0, x1 = math.max(cx - ox0, math.floor(view.x)), math.min(cx + cw + ox1, math.ceil(view.x + view.w))
+  local y0, y1 = math.max(cy - oy0, math.floor(view.y)), math.min(cy + ch + oy1, math.ceil(view.y + view.h))
+  if x1 <= x0 or y1 <= y0 then
+    return
+  end
+  local t = love.timer.getTime()
+  if voidShader == nil then
+    local ok, sh = pcall(love.graphics.newShader, VOID_SHADER)
+    voidShader = ok and sh or false
+    local data = love.image.newImageData(1, 1)
+    data:setPixel(0, 0, 1, 1, 1, 1)
+    voidBlank = love.graphics.newImage(data)
+  end
+  if voidShader then
+    local okp, gp = pcall(function()
+      return require("src.game").player()
+    end)
+    local px, py = 0, -9999
+    if okp and gp then
+      px, py = gp:center()
+    end
+    love.graphics.setShader(voidShader)
+    voidShader:send("time", t)
+    voidShader:send("hall", hall and 1 or 0)
+    voidShader:send("offset", { x0 - s.x, y0 - s.y })
+    voidShader:send("sliceSize", { x1 - x0, y1 - y0 })
+    voidShader:send("player", { px - s.x, py - s.y })
+    voidShader:send("oval", { ovalX or -9999, ovalY or -9999 })
+    voidShader:send("ovalSize", { ovalW or 46, ovalH or 26 })
+    voidShader:send("boxMin", { cx - s.x, cy - s.y })
+    voidShader:send("boxMax", { cx + cw - s.x, cy + ch - s.y })
+    voidShader:send("feather", { VOID_FEATHER, VOID_FEATHER, fadeTop and VOID_FEATHER or 0, fadeBottom and VOID_FEATHER or 0 })
+    love.graphics.setBlendMode("alpha", "premultiplied")
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.draw(voidBlank, x0, y0, 0, x1 - x0, y1 - y0)
+    love.graphics.setShader()
+    love.graphics.setBlendMode("alpha")
+  else
+    love.graphics.setColor(0.04, 0.03, 0.09)
+    love.graphics.rectangle("fill", x0, y0, x1 - x0, y1 - y0)
+  end
+end
+
+local function drawShopVoid(s, view)
+  local b = s.back
+  drawVoidRect(s, s.x, s.y, s.w, s.h, view, nil, nil, nil, nil, true, not b)
+  if b then
+    -- (the pulsing blue oval belongs to the portal below the shop)
+    drawVoidRect(s, b.x0, b.y0, b.x1 - b.x0 + 1, b.floorY - b.y0, view, nil, nil, nil, nil, false, true)
+  end
+end
+
 function catacombs.drawDecor(view)
   fluids.drawDecor(view)
   for _, lv in ipairs(levels) do
     local info = inArea(lv, view) and lv.info
     if info then
       local drawGlow = lv.theme.crystals and drawCrystals or drawFungus
-      if lv.boss and lv.boss.state ~= "done" and lv.info.arena and visible(view, lv.info.arena.cx, lv.info.arena.floorY, 160) then
+      local arena = info.arena
+      if lv.theme.arenaDecor and arena and view.x + view.w > arena.x0 and view.x < arena.x1 and view.y + view.h > arena.top - 10 and view.y < arena.floorY + 10 then
+        -- The Dark Hunter's hall: the shop's void (black and violet) behind the oval, whatever the cave's
+        -- own scenery was (the rock round the oval covers the rest of the box)
+        drawVoidRect({ x = arena.x0, y = arena.top }, arena.x0 - 4, arena.top - 4, arena.w + 8, arena.h + 8, view, nil, nil, nil, nil, nil, nil, true)
+      end
+      if lv.boss and not lv.boss.noAltar and lv.boss.state ~= "done" and lv.info.arena and visible(view, lv.info.arena.cx, lv.info.arena.floorY, 160) then
         drawAltar(lv)
       end
       for i, g in ipairs(info.glows) do
@@ -1362,14 +1841,7 @@ function catacombs.drawDecor(view)
       end
       for _, s in ipairs(info.shops) do
         if visible(view, s.x + s.w / 2, s.y + s.h / 2, 400) then
-          -- Empty shelves on the back wall, each with a darker underside
-          for i = 0, 2 do
-            local y = s.y + 32 + i * 16
-            love.graphics.setColor(0.36, 0.25, 0.17)
-            love.graphics.rectangle("fill", s.x + s.w - 112, y, 70, 2)
-            love.graphics.setColor(0.20, 0.14, 0.10)
-            love.graphics.rectangle("fill", s.x + s.w - 112, y + 2, 70, 1)
-          end
+          drawShopVoid(s, view)
         end
       end
       if visible(view, view.x + view.w / 2, view.y + view.h / 2, 3000) then
@@ -1428,13 +1900,62 @@ end
 
 function catacombs.drawEmissive(view)
   fluids.drawEmissive(view)
+  for _, lv in ipairs(levels) do
+    if lv.theme.parallax == 9 and lv.theme.profile and inArea(lv, view) then
+      parallax.drawSkyGlow(view.x, view.y, view.x + view.w, view.y + view.h, require("src.lighting").mask(), lv.theme.profile)
+    end
+  end
   fluids.drawGlints(require("src.lighting").list())
   for _, lv in ipairs(levels) do
     local info = inArea(lv, view) and lv.info
     if info then
       local g = lv.theme.glow
-      if lv.boss and lv.boss.state ~= "done" and info.arena and visible(view, info.arena.cx, info.arena.floorY, 160) then
+      if lv.boss and not lv.boss.noAltar and lv.boss.state ~= "done" and info.arena and visible(view, info.arena.cx, info.arena.floorY, 160) then
         drawAltarGlow(lv)
+      end
+      local arena = info.arena
+      if lv.theme.arenaDecor and arena and view.x + view.w > arena.x0 and view.x < arena.x1 and view.y + view.h > arena.top - 10 and view.y < arena.floorY + 10 then
+        -- Violet crystals growing out of the oval's wall, pulsing, and a haze round each
+        local t = love.timer.getTime()
+        for _, c in ipairs(arenaCrystals(arena)) do
+          if visible(view, c.x, c.y, 30) then
+            local pulse = 0.65 + 0.3 * math.sin(t * 1.3 + c.ph)
+            local dx, dy = -math.cos(c.ang), -math.sin(c.ang) -- (growing inward)
+            love.graphics.setColor(0.55, 0.25, 0.95, 0.16 * pulse)
+            love.graphics.circle("fill", c.x, c.y, c.len * 1.6)
+            for s = -1, 1 do
+              local len = c.len * (s == 0 and 1 or 0.65)
+              local ox, oy = c.x - dy * s * 2.5, c.y + dx * s * 2.5
+              love.graphics.setColor(0.42, 0.18, 0.78, 0.95)
+              love.graphics.polygon("fill", ox - dy * 1.8, oy + dx * 1.8, ox + dy * 1.8, oy - dx * 1.8, ox + dx * len, oy + dy * len)
+              love.graphics.setColor(0.86, 0.6, 1, 0.9 * pulse)
+              love.graphics.line(ox, oy, ox + dx * len * 0.9, oy + dy * len * 0.9)
+            end
+          end
+        end
+      end
+      if info.diamonds then
+        local t = love.timer.getTime()
+        for di, d in ipairs(info.diamonds) do
+          if visible(view, d[1], d[2], 12) then
+            for k = 1, 5 do
+              local h = math.sin(di * 12.9 + k * 78.2) * 43758.5
+              h = h - math.floor(h)
+              local h2 = math.sin(di * 39.3 + k * 11.1) * 24634.6
+              h2 = h2 - math.floor(h2)
+              local sx, sy = math.floor(d[1] + (h - 0.5) * 2 * d[3]), math.floor(d[2] + (h2 - 0.5) * 2 * d[3])
+              local tw = math.sin(t * 2.2 + di * 3.7 + k * 1.9)
+              if tw > 0.55 and world:get(sx, sy) == materials.DIAMONDORE then
+                local a = (tw - 0.55) / 0.45
+                love.graphics.setColor(0.85, 0.97, 1, a)
+                love.graphics.rectangle("fill", sx, sy, 1, 1)
+                love.graphics.setColor(0.7, 0.92, 1, a * 0.55)
+                love.graphics.rectangle("fill", sx - 1, sy, 3, 1)
+                love.graphics.rectangle("fill", sx, sy - 1, 1, 3)
+              end
+            end
+          end
+        end
       end
       if info.mine then
         minedecor.drawEmissive(info.mine, view)
@@ -1516,6 +2037,10 @@ end
 -- Whether area i's monsters and props have been placed
 function catacombs.spawned(i)
   return levels[i] ~= nil and levels[i].propsSpawned == true
+end
+
+function catacombs.seed()
+  return baseSeed
 end
 
 function catacombs.areaName(i)

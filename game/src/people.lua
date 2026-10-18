@@ -34,6 +34,13 @@ local LOOKS = {
     hat = "cap", hatCol = { 0.36, 0.26, 0.16 },
     face = { 0.40, 0.30, 0.22 }, faceStyle = "stubble", prop = "scroll", goggles = true,
   },
+  sawbone = {
+    skin = { 0.78, 0.74, 0.66 },
+    shirt = { 0.62, 0.74, 0.72 }, shirtD = { 0.44, 0.56, 0.55 },
+    vest = { 0.90, 0.88, 0.84 }, trouser = { 0.28, 0.30, 0.32 },
+    hat = "hood", hatCol = { 0.66, 0.78, 0.76 },
+    face = { 0.55, 0.52, 0.50 }, faceStyle = "stubble", prop = "saw", goggles = true, coat = true,
+  },
   bartender = {
     skin = { 0.84, 0.64, 0.52 },
     shirt = { 0.88, 0.86, 0.80 }, shirtD = { 0.70, 0.68, 0.62 },
@@ -85,6 +92,10 @@ function people.draw(id, x, g, facing, pose, k, alpha)
     r({ 0.86, 0.78, 0.58 }, 4, -14 + bob, 2, 7)
     r({ 0.52, 0.40, 0.26 }, 4, -14 + bob, 2, 1)
     r({ 0.52, 0.40, 0.26 }, 4, -8 + bob, 2, 1)
+  elseif L.prop == "saw" then
+    r(IRON_L, 5, -15 + bob, 1, 7)
+    r(IRON_D, 6, -15 + bob, 1, 7)
+    r({ 0.45, 0.22, 0.20 }, 5, -9 + bob, 2, 2)
   elseif L.prop == "mug" then
     r({ 0.78, 0.76, 0.70 }, 5, -12 + bob, 2, 3)
     r({ 0.95, 0.80, 0.40 }, 5, -12 + bob, 2, 1)
@@ -234,49 +245,87 @@ local function bartenderStall(s)
   people.draw("bartender", x - 4, g - 11 + 11, s.near and (s.facing or 1) or 1, s.near and "stand" or "work", s.hammer)
 end
 
--- The saloon's bottles that glow for the house rules switched on (each rule
--- has its own two bottles on the back shelf, in its own colour)
-local RULE_BOTTLES = {
-  rotgut = { bottles = { 0, 1 }, color = { 0.55, 1, 0.3 } },
-  powderkeg = { bottles = { 3, 4 }, color = { 1, 0.4, 0.18 } },
-  lean = { bottles = { 6, 7 }, color = { 1, 0.85, 0.3 } },
+-- The saloon's house rules switched on fly as pennants from poles above the
+-- stall, each with a small icon for its debuff (drawn after the lighting so
+-- they read in the dark)
+local RULE_FLAGS = {
+  rotgut = { dx = -13, color = { 0.45, 0.85, 0.25 }, icon = "heart" },
+  powderkeg = { dx = 0, color = { 0.95, 0.35, 0.15 }, icon = "burst" },
+  lean = { dx = 13, color = { 0.95, 0.78, 0.2 }, icon = "coin" },
+}
+local FLAG_ICONS = {
+  heart = { "01010", "11111", "11111", "01110", "00100" },
+  burst = { "10101", "01110", "11111", "01110", "10101" },
+  coin = { "01110", "11011", "10001", "11011", "01110" },
 }
 
--- Drawn after the lighting, so they shine in the dark
 function people.drawStallGlow(s, t)
   if s.id ~= "bartender" then
     return
   end
   local meta = require("src.meta")
   local x, g = s.x, s.y
-  for rule, def in pairs(RULE_BOTTLES) do
+  for rule, def in pairs(RULE_FLAGS) do
     if meta.ruleOn(rule) then
-      local pulse = 0.65 + 0.3 * math.sin(t * 3 + def.bottles[1])
+      local px, top = x + def.dx, g - 46
+      R({ 0.25, 0.2, 0.15 }, px, top, 1, 20) -- the pole
+      R({ 0.9, 0.8, 0.4 }, px - 1, top - 1, 3, 1)
       local c = def.color
-      for _, i in ipairs(def.bottles) do
-        R(c, x - 19 + i * 5, g - 27, 4, 6, 0.35 * pulse) -- the halo
-        R(c, x - 18 + i * 5, g - 26, 2, 4, pulse)
-        R({ 1, 1, 1 }, x - 18 + i * 5, g - 27, 2, 1, 0.8 * pulse)
+      for col = 0, 9 do
+        local wave = math.floor(math.sin(t * 4 + col * 0.6 + px) * 1.2 + 0.5)
+        local h = 9 - math.floor(col * 0.5)
+        R({ c[1] * 0.55, c[2] * 0.55, c[3] * 0.55 }, px + 1 + col, top + wave, 1, h)
+        R(c, px + 1 + col, top + wave + 1, 1, h - 2)
+      end
+      local icon = FLAG_ICONS[def.icon]
+      for row = 1, 5 do
+        for col = 1, 5 do
+          if icon[row]:sub(col, col) == "1" then
+            R({ 1, 1, 1 }, px + 2 + col, top + 1 + row + math.floor(math.sin(t * 4 + (col + 2) * 0.6 + px) * 1.2 + 0.5), 1, 1, 0.92)
+          end
+        end
       end
     end
   end
 end
 
--- The glow's lights
-function people.addStallLights(s, lighting)
-  if s.id ~= "bartender" then
-    return
+-- (the flags give off no light: they only need to be seen)
+function people.addStallLights(s, lighting) end
+
+-- Sawbone: a cot with a stained sheet, a bone saw on a hook, jars of things,
+-- a lamp, and him with his saw
+local function sawboneStall(s)
+  local x, g = s.x, s.y
+  if not s.bare then
+    R(WOOD_D, x - 22, g - 26, 2, 26)
+    R(WOOD_D, x + 20, g - 26, 2, 26)
+    R(WOOD_D, x - 23, g - 27, 46, 1)
   end
-  local meta = require("src.meta")
-  for rule, def in pairs(RULE_BOTTLES) do
-    if meta.ruleOn(rule) then
-      local c = def.color
-      lighting.add(s.x - 16 + (def.bottles[1] + 0.5) * 5, s.y - 24, 26, c[1], c[2], c[3], 0.7)
-    end
+  -- the saw and tools hanging from the beam
+  R(IRON_D, x - 16, g - 26, 1, 3)
+  R(IRON_L, x - 17, g - 23, 3, 9)
+  R(IRON_D, x - 17, g - 14, 3, 1)
+  R(IRON_D, x - 10, g - 26, 1, 2)
+  R(IRON_L, x - 12, g - 24, 5, 1)
+  R(IRON_D, x - 12, g - 23, 1, 3)
+  R(IRON_D, x - 8, g - 23, 1, 3)
+  -- the cot
+  R(WOOD_D, x - 14, g - 6, 2, 6)
+  R(WOOD_D, x + 12, g - 6, 2, 6)
+  R({ 0.82, 0.80, 0.74 }, x - 15, g - 9, 30, 3)
+  R({ 0.62, 0.60, 0.56 }, x - 15, g - 7, 30, 1)
+  R({ 0.55, 0.14, 0.12 }, x - 5, g - 9, 6, 3)
+  R({ 0.70, 0.68, 0.62 }, x - 15, g - 11, 6, 2)
+  -- jars on a shelf
+  R(WOOD_D, x + 4, g - 20, 14, 1)
+  for i = 0, 2 do
+    R({ 0.72, 0.84, 0.80 }, x + 5 + i * 4, g - 24, 3, 4)
+    R({ 0.80, 0.50, 0.50 }, x + 5 + i * 4, g - 22, 3, 2)
   end
+  people.draw("sawbone", x + 24, g, s.near and (s.facing or 1) or -1, s.near and "stand" or "work", s.hammer)
 end
 
-local STALLS = { apothecary = apothecaryStall, cartographer = cartographerStall, bartender = bartenderStall }
+local STALLS = { apothecary = apothecaryStall, cartographer = cartographerStall, bartender = bartenderStall, sawbone = sawboneStall }
 
 function people.drawStall(s)
   local f = STALLS[s.id]

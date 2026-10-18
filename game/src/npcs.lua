@@ -33,12 +33,14 @@ local CALLS = {
   apothecary = { "Hunter! Mind the fumes!", "The lock! I can barely breathe!", "I'm no use to anyone in here!", "Shoot the padlock, please!" },
   cartographer = { "Over here! A friendly hand!", "My maps! Shoot the lock!", "I've charted worse. Not much worse.", "Please, the padlock!" },
   gunsmith = { "Hunter! Over here!", "Shoot the lock off, quick!", "They'll be back for me...", "Please, the lock!" },
+  sawbone = { "Glub... a visitor? Wonderful.", "Don't mind the water. I don't.", "Swim closer. I bite less than the fish.", "I'm floating. Professionally." },
   prospector = { "Down here! Under the rock!", "Shoot the dirt off me!", "Can't feel my legs...", "Dig, hunter, dig!" },
 }
 local THANKS = {
   apothecary = { "Fresh air, at last!", "I'll set up by your camp.", "Here, a tonic for the road." },
   cartographer = { "I owe you a good map!", "Find me at your camp.", "Take this. Don't ask what it's for." },
   gunsmith = { "Bless you, hunter!", "I'll make for your camp.", "Find me by the fire. Take this." },
+  sawbone = { "Dry land! I'll set up at your camp.", "Come see me when you're falling apart.", "Take this. It isn't mine." },
   prospector = { "Air! Sweet air!", "I'll be under the arch, west of your fire.", "Here, for your trouble. Mind the fuses." },
 }
 
@@ -112,8 +114,14 @@ function npcs.breakLock(c)
       -- His gift: a pouch of nuggets (and dynamite, from src.game)
       pickups.dropGold(c.x, c.y - 10, 60)
     else
-      -- A gift on the cage floor: a gun he doesn't make yet if there is one
+      -- A gift on the cage floor: a gun he doesn't make yet if there is one.
+      -- The Gunsmith's is his machine gun, the only way to come by one until
+      -- he crafts it for the pool (src.meta.SPECIAL_GUNS).
       local kind = meta.lockedArchetype()
+      if c.id == "gunsmith" and not meta.isUnlocked("weapon", "automatic") then
+        kind = "automatic"
+        meta.see("weapon", "automatic")
+      end
       pickups.dropWeapon(c.x - 4, c.y - 8, guns.generate(kind, nil, 0.5), -30, -90)
     end
     if npcs.onFreed then
@@ -140,6 +148,12 @@ function npcs.update(dt, player)
     if c.state == "locked" and meta.atCamp(c.id) then
       c.state = "empty" -- already freed in an earlier run
       c.door = 1
+    end
+    if c.state == "locked" and c.held == "float" then
+      -- Floating on the water: freed by swimming up to him
+      if math.abs(px - c.x) < 22 and math.abs(py - (c.y - 4)) < 24 and not player.dead then
+        npcs.breakLock(c)
+      end
     end
     if c.state == "locked" and c.held == "rubble" then
       -- Buried: free once most of the earth over his body has been dug away
@@ -467,9 +481,29 @@ local function drawRubble(c)
   R(IRON_D, x - 22, c.y - 3, 4, 3)
 end
 
+-- Someone adrift on a few planks, bobbing on the waterline
+local function drawFloat(c)
+  local t = love.timer.getTime()
+  local bob = math.floor(math.sin(t * 1.6 + c.x) * 1.2 + 0.5)
+  local x, g = c.x, c.y + bob
+  R(WOOD_D, x - 14, g - 1, 28, 3)
+  R(WOOD, x - 14, g - 2, 28, 1)
+  R(WOOD_D, x - 6, g - 2, 1, 4)
+  R(WOOD_D, x + 5, g - 2, 1, 4)
+  if c.state == "locked" then
+    drawPerson(c.id, x - 2, g - 2, c.alert and (c.facing or 1) or 1, c.alert and "stand" or "sit")
+  elseif c.state == "open" then
+    local fade = math.max(0, math.min(1, (5.2 - c.t) / 1))
+    drawPerson(c.id, x - 2, g - 2, 1, "stand", 0, fade)
+  end
+end
+
 local function drawCage(c)
   if c.held == "rubble" then
     return drawRubble(c)
+  end
+  if c.held == "float" then
+    return drawFloat(c)
   end
   local x, g = c.x, c.y
   -- straw and a bowl inside, behind him
@@ -829,11 +863,11 @@ function npcs.addLights(lighting, view)
       people.addStallLights(s, lighting)
       if people.glow(id) then
         local gl = people.glow(id)
-        lighting.add(s.x + gl[1], s.y + gl[2], 60, gl[3][1], gl[3][2], gl[3][3], 0.5)
+        lighting.add(s.x + gl[1], s.y + gl[2], 34, gl[3][1], gl[3][2], gl[3][3], 0.22)
       elseif id == "taxidermist" then
-        lighting.add(s.x + 6, s.y - 20, 60, 0.75, 0.95, 0.8, 0.45)
+        lighting.add(s.x + 6, s.y - 20, 34, 0.75, 0.95, 0.8, 0.2)
       else
-        lighting.add(id == "prospector" and s.x - 18 or s.x + 13, s.y - 18, 70, 1, 0.68, 0.34, 0.6)
+        lighting.add(id == "prospector" and s.x - 18 or s.x + 13, s.y - 18, 38, 1, 0.68, 0.34, 0.26)
       end
     end
   end

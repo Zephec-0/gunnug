@@ -39,6 +39,13 @@ local ITEMS = 8
 local HEAL_FRACTION = 0.1 -- of max health per purchase
 local HATCH_DELAY = 0.7 -- seconds between the chain breaking and the plate dropping
 local RANGE = 80 -- the DPS dummy's range at the left end; the goods start after it
+-- The sell mat, as offsets from the room's left edge (right of the merchant's
+-- counter, left of the shaft to the way home)
+local SELL_X0, SELL_X1 = 558, 590
+-- What the merchant pays for a thing lying on the mat: by item rarity, and by
+-- a gun's grade
+local SELL_ITEM = { common = 8, rare = 20, cursed = 15, fused = 40 }
+local SELL_GUN_BASE, SELL_GUN_PER_GRADE = 10, 12
 
 -- Where the DPS dummy stands in a shop room (x centre, floor y)
 function shop.dummySpot(room)
@@ -62,7 +69,10 @@ local function priceOf(entry)
   if entry.price <= 0 then
     return 0
   end
-  return math.max(5, roundTo5(entry.price * perks.prod("shopPrice")))
+  -- (twice the base price, and dearer again with each area further down)
+  local depth = entry.owner and entry.owner.level or 1
+  local scale = 2 * (1 + 0.3 * (depth - 1))
+  return math.max(5, roundTo5(entry.price * scale * perks.prod("shopPrice")))
 end
 
 -- Fills a weapon stock entry with a freshly generated gun and its price
@@ -127,6 +137,7 @@ function shop.populate(room, world, level, child)
     locked = false,
     entered = false,
     heal = { x = room.x + RANGE + 105 },
+    sell = { x0 = room.x + SELL_X0, x1 = room.x + SELL_X1 }, -- drop things here to sell them
     back = room.back, -- after a boss: the room under the floor with the way home (cavegen)
   }
   shops[#shops + 1] = s
@@ -252,17 +263,24 @@ end
 
 -- Healing is priced by how much health is missing: 8g when nearly full up to
 -- 40g when nearly dead, for each 10% of max health, and 80% dearer with each
--- area further down (shop s of area s.level)
+-- area further down (shop s of area s.level), and 1.5x dearer with each heal
+-- already bought at that shop
 local HEAL_AREA_RISE = 0.8
+local HEAL_BUY_RISE = 1.5
 
 local function healCost(player, s)
   local missing = (player.maxHp - player.hp) / player.maxHp
   local area = 1 + (s.level - 1) * HEAL_AREA_RISE
-  return roundTo5((8 + 32 * missing) * area * perks.prod("healPrice"))
+  return roundTo5((8 + 32 * missing) * area * HEAL_BUY_RISE ^ (s.healBuys or 0) * perks.prod("healPrice"))
 end
 
 local function healAmount(player)
   return math.min(player.maxHp - player.hp, math.ceil(player.maxHp * HEAL_FRACTION))
+end
+
+-- Is the hunter next to a pedestal (so its prompt is the one on screen)?
+function shop.nearPedestal(player)
+  return nearest(player) ~= nil
 end
 
 -- E: buys from the nearest pedestal. Returns true if it handled the key.
@@ -331,6 +349,7 @@ function shop.interact(player)
       return true
     end
     inv.gold = inv.gold - cost
+    s.healBuys = (s.healBuys or 0) + 1
     player.hp = math.min(player.maxHp, player.hp + amount)
     audio.play("heal")
     say("+" .. amount .. " HP", { 0.5, 1, 0.55 })
@@ -441,8 +460,22 @@ end
 function shop.update(dt, player)
   local px, py = player:center()
   returnArm = math.max(0, returnArm - dt)
+  local lying = require("src.pickups").all()
   for _, s in ipairs(shops) do
     s.px = px
+    if s.sell then
+      -- Anything dropped on the mat (and settled) is sold
+      for i = #lying, 1, -1 do
+        local p = lying[i]
+        if (p.kind == "item" or p.kind == "weapon") and p.x > s.sell.x0 and p.x < s.sell.x1 and p.y > s.floorY - 26 and p.y < s.floorY + 3 and math.abs(p.vy) < 5 and p.age > 0.6 then
+          local value = p.kind == "weapon" and (SELL_GUN_BASE + SELL_GUN_PER_GRADE * gunInfo.gradeIndex(p.gun)) or (SELL_ITEM[p.item.rarity] or SELL_ITEM.common)
+          table.remove(lying, i)
+          player.inventory.gold = player.inventory.gold + value
+          effects.popup(p.x, p.y - 12, "Sold +" .. value .. "g", { 1, 0.85, 0.35 })
+          audio.play("buy")
+        end
+      end
+    end
     for _, e in ipairs(s.stock) do
       if e.kind == "perk" then
         -- Perks stir as the hunter comes near: rising, glowing, shedding sparks
@@ -675,6 +708,7 @@ local function backOnScreen(s, view)
 end
 
 function shop.draw(view)
+  shop.drawMats(view)
   for _, s in ipairs(shops) do
     if backOnScreen(s, view) then
       drawPad(s)
@@ -749,6 +783,21 @@ function shop.draw(view)
   end
 end
 
+-- The sell mat: a rug with a gold border (the lettering is in drawScreen)
+function shop.drawMats(view)
+  for _, s in ipairs(shops) do
+    if s.sell and s.sell.x1 > view.x and s.sell.x0 < view.x + view.w then
+      local x0, x1, f = s.sell.x0, s.sell.x1, s.floorY
+      love.graphics.setColor(0.30, 0.10, 0.14)
+      love.graphics.rectangle("fill", x0, f - 2, x1 - x0, 2)
+      love.graphics.setColor(0.78, 0.62, 0.25)
+      love.graphics.rectangle("fill", x0, f - 3, x1 - x0, 1)
+      love.graphics.rectangle("fill", x0, f - 2, 1, 2)
+      love.graphics.rectangle("fill", x1 - 1, f - 2, 1, 2)
+    end
+  end
+end
+
 function shop.drawEmissive(view)
   local t = love.timer.getTime()
   for _, s in ipairs(shops) do
@@ -756,13 +805,24 @@ function shop.drawEmissive(view)
       -- the pad's ring of light, rising off it
       local b = s.back
       local pulse = 0.55 + 0.35 * math.sin(t * 2.4)
-      for i = 0, 11 do
-        local a = i / 12 * math.pi * 2 + t * 0.8
-        love.graphics.setColor(0.45, 0.9, 1, pulse)
-        love.graphics.rectangle("fill", math.floor(b.cx + math.cos(a) * 12), math.floor(b.floorY - 6 + math.sin(a) * 2.5), 1, 1)
+      -- the portal: a tall oval standing on the pad, a glowing ring round a dim blue pool
+      local pcx, pcy = b.cx, b.floorY - 15
+      local rx, ry = 9 + pulse, 14 + pulse
+      for i = 0, 40 do
+        local a = i / 40 * math.pi * 2
+        love.graphics.setColor(0.2, 0.55, 1, 0.5 + 0.2 * pulse)
+        love.graphics.rectangle("fill", math.floor(pcx + math.cos(a) * rx), math.floor(pcy + math.sin(a) * ry), 1, 1)
       end
-      love.graphics.setColor(0.5, 0.95, 1, 0.25 + 0.15 * pulse)
-      love.graphics.rectangle("fill", b.cx - 10, b.floorY - 22, 20, 17)
+      for yy = -ry + 2, ry - 2, 1 do
+        local w = rx * math.sqrt(math.max(0, 1 - (yy / ry) ^ 2)) - 1.5
+        love.graphics.setColor(0.1, 0.35, 0.9, 0.22 + 0.1 * math.sin(t * 3 + yy * 0.5))
+        love.graphics.rectangle("fill", math.floor(pcx - w), math.floor(pcy + yy), math.floor(w * 2), 1)
+      end
+      for i = 0, 11 do
+        local a = i / 12 * math.pi * 2 + t * 1.4
+        love.graphics.setColor(0.7, 0.95, 1, pulse)
+        love.graphics.rectangle("fill", math.floor(pcx + math.cos(a) * (rx + 1)), math.floor(pcy + math.sin(a) * (ry + 1)), 1, 1)
+      end
     end
     if roomOnScreen(s, view) then
       drawMerchantEyes(s)
@@ -824,7 +884,7 @@ end
 function shop.addLights(lighting, view)
   for _, s in ipairs(shops) do
     if backOnScreen(s, view) then
-      lighting.add(s.back.cx, s.back.floorY - 12, 58, 0.4, 0.8, 1, 0.8)
+      lighting.add(s.back.cx, s.back.floorY - 15, 30, 0.35, 0.65, 1, 0.55) -- (just round the portal)
     end
     if roomOnScreen(s, view) and not s.locked then
       lighting.add(merchantX(s) + 14, s.floorY - 12, 70, 1, 0.78, 0.45, 0.8)
@@ -854,6 +914,7 @@ function shop.drawScreen(toScreen, font, player)
   end
   local gold = player.inventory.gold
   local sw, sh = love.graphics.getDimensions()
+  local px0, py0 = player:center()
   if not player.dead then
     local ps = padNear(player)
     if ps then
@@ -885,6 +946,14 @@ function shop.drawScreen(toScreen, font, player)
     love.graphics.setColor(color)
     love.graphics.print(text, x, y)
     return y
+  end
+
+  -- The sell mat's caption, when the hunter is near it
+  for _, s in ipairs(shops) do
+    if s.sell and math.abs(px0 - (s.sell.x0 + s.sell.x1) / 2) < 140 and math.abs(py0 - s.floorY) < 60 then
+      local sx, sy = toScreen((s.sell.x0 + s.sell.x1) / 2, s.floorY - 36)
+      label("Drop things here to sell", sx, sy, { 1, 0.85, 0.45 })
+    end
   end
 
   for _, s in ipairs(shops) do
@@ -924,7 +993,7 @@ function shop.drawScreen(toScreen, font, player)
                 -- The effect, wrapped in a box above the prompt
                 local width = 460
                 local _, lines = font:getWrap(thing.desc, width)
-                local top = y - 4 - #lines * font:getHeight()
+                local top = y - 12 - #lines * font:getHeight()
                 love.graphics.setColor(0, 0, 0, 0.8)
                 love.graphics.printf(thing.desc, math.floor(sx - width / 2) + 2, top + 2, width, "center")
                 love.graphics.setColor(0.9, 0.88, 0.82)

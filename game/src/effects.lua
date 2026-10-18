@@ -139,6 +139,7 @@ end
 
 -- A burst of fire, sparks and smoke for an explosion of the given radius
 function effects.explosion(x, y, radius)
+  require("src.fog").explosion(x, y, radius) -- (a blast blows the fog about)
   flashes[#flashes + 1] = { x = x, y = y, angle = 0, life = 0.1, size = radius / 6 }
   for _ = 1, math.floor(radius * 1.6) do
     local a = love.math.random() * math.pi * 2

@@ -67,6 +67,8 @@ function events.spawnArea(w, info, index, tier, elites, chests)
     vaults[#vaults + 1] = vault
     local chest = chests.spawn(v.x, v.y, 1)
     chest.vault = true -- (a weapon and a locked item, never just gold)
+    chest.locked = true -- (can't be opened until the vault's door is: see events.openVault)
+    vault.chest = chest
     local carrier = elites and elites[1]
     if carrier then
       carrier.carriesKey = #vaults
@@ -136,13 +138,17 @@ local function rollOffers()
   return out
 end
 
+function events.runTime()
+  return runTime
+end
+
 function events.update(dt, player, areaIndex)
+  runTime = runTime + dt
   if not world then
     return
   end
   local px, py = player:center()
   local inv = player.inventory
-  runTime = runTime + dt
   -- keys fall and are picked up by walking over them
   for i = #keys, 1, -1 do
     local k = keys[i]
@@ -251,6 +257,9 @@ function events.openVault(v)
     return
   end
   v.open = true
+  if v.chest then
+    v.chest.locked = false
+  end
   local d = v.door
   for y = d.y0, d.y1 do
     for x = d.x0, d.x1 do

@@ -36,11 +36,12 @@ local function distance(c, player)
   return math.sqrt((c.x - px) ^ 2 + (c.y - H / 2 - py) ^ 2)
 end
 
--- The nearest unopened chest within reach
+-- The nearest unopened chest within reach (a vault's chest stays shut until
+-- its door has been unlocked)
 function chests.nearest(player)
   local best, bestDist = nil, REACH
   for _, c in ipairs(list) do
-    if not c.opened then
+    if not c.opened and not c.locked then
       local d = distance(c, player)
       if d < bestDist then
         best, bestDist = c, d

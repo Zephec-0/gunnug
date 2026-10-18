@@ -403,9 +403,9 @@ local function drawBar(inv, u)
   local margin = 6 * u
   local x, y = margin, margin
   local numberFont = font(3 * u)
-  for i = 1, inventory.WEAPON_SLOTS do
+  for i = 1, inventory.weaponSlots() do
     local size = WEAPON_SIZE * u
-    drawSlot(inv, { kind = "weapon", index = i }, x, y, size, u, i == inv.selected)
+    drawSlot(inv, { kind = "weapon", index = i }, x, y, size, u, i == inv.selected or inventory.akimbo())
     shadowPrint(tostring(i), x + u, y + 0.5 * u, numberFont, { 1, 1, 1, 0.7 })
     x = x + size + 2 * u
   end
@@ -518,10 +518,10 @@ local function drawPanel(inv, u)
   local titleFont, textFont, bigFont = font(5 * u), font(3.4 * u), font(6.4 * u)
 
   shadowPrint("Weapons", x, y - 8 * u, titleFont, { 0.98, 0.99, 1 })
-  for i = 1, inventory.WEAPON_SLOTS do
+  for i = 1, inventory.weaponSlots() do
     local gun = inv.weapons[i]
     if gun then
-      local selected = i == inv.selected
+      local selected = i == inv.selected or inventory.akimbo()
       love.graphics.setColor(0.10, 0.07, 0.12, 0.94)
       love.graphics.rectangle("fill", x, y, cardW, cardH, 2 * u, 2 * u)
       love.graphics.setLineWidth(math.max(1, u * 0.5))
@@ -589,6 +589,37 @@ local function drawPanel(inv, u)
   shadowPrint(hint, math.floor((ww - textFont:getWidth(hint)) / 2), y + 2 * u, textFont, { 1, 1, 1, 0.75 })
 end
 
+-- Holding or hovering an item: a pulsing teal frame on every other item on
+-- the bar (or in a gun's slots, or the fuser) it can be fused with
+local function drawFuseHints(inv, u, mx, my)
+  local ref = drag and drag.ref
+  local over = not drag and hitTest(mx, my) or nil
+  if over then
+    ref = over.ref
+  end
+  if not ref or (ref.kind ~= "item" and ref.kind ~= "gunSlot" and ref.kind ~= "fuse") then
+    return
+  end
+  local a = inv:get(ref)
+  if not (a and a.id and items.defs[a.id]) then
+    return
+  end
+  local fuser = require("src.fuser")
+  local pulse = 0.5 + 0.5 * math.sin(love.timer.getTime() * 6)
+  love.graphics.setLineWidth(math.max(1, u * 0.7))
+  for _, box in ipairs(hitboxes) do
+    local k = box.ref.kind
+    if (k == "item" or k == "gunSlot" or k == "fuse") and box.ref ~= ref and not (ref.kind == box.ref.kind and ref.index == box.ref.index and ref.gun == box.ref.gun) then
+      local b = inv:get(box.ref)
+      if b and b ~= a and b.id and items.defs[b.id] and fuser.combine(a, b) then
+        love.graphics.setColor(FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], 0.35 + 0.65 * pulse)
+        local grow = (1 + pulse) * u * 0.5
+        love.graphics.rectangle("line", box.x - grow, box.y - grow, box.w + 2 * grow, box.h + 2 * grow, u, u)
+      end
+    end
+  end
+end
+
 function itembar.draw(inv, u)
   hitboxes = {}
   if isOpen then
@@ -597,6 +628,7 @@ function itembar.draw(inv, u)
   drawBar(inv, u * BAR_SCALE)
 
   local mx, my = love.mouse.getPosition()
+  drawFuseHints(inv, u, mx, my)
   if drag then
     local thing = inv:get(drag.ref)
     if thing then

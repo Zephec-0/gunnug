@@ -31,11 +31,12 @@ town.LOTS = {
   { id = "prospector", x = 652, accent = { 0.58, 0.42, 0.22 }, sign = "ASSAY" },
   { id = "taxidermist", x = 718, accent = { 0.42, 0.50, 0.30 }, sign = "TAXIDERMY" },
   { id = "board", x = 784, accent = { 0.45, 0.32, 0.20 }, sign = "WANTED" },
+  { id = "sawbone", x = 1034, accent = { 0.40, 0.58, 0.56 }, sign = "DOCTOR" },
   { id = "gunsmith", x = 1100, accent = { 0.58, 0.30, 0.22 }, sign = "GUNS" },
   { id = "bartender", x = 1166, accent = { 0.55, 0.20, 0.26 }, sign = "SALOON" },
   { id = "hall", x = 1232, accent = { 0.52, 0.49, 0.43 }, sign = "TOWN HALL" },
 }
-local PEOPLE = { "gunsmith", "prospector", "apothecary", "cartographer", "bartender", "taxidermist" }
+local PEOPLE = { "gunsmith", "prospector", "apothecary", "cartographer", "bartender", "taxidermist", "sawbone" }
 
 local byId = {}
 for _, l in ipairs(town.LOTS) do
@@ -452,11 +453,11 @@ function town.addLights(lighting, view)
       -- (the saloon's lights are blue: the warm ones were lost in the camp's glow)
       local blue = l.id == "bartender"
       local c = blue and { 0.35, 0.6, 1 } or { 1, 0.7, 0.36 }
-      local k = blue and 0.7 or 0.4
-      lighting.add(l.x - 30, l.top - 24, blue and 52 or 40, c[1], c[2], c[3], k)
-      lighting.add(l.x + 30, l.top - 24, blue and 52 or 40, c[1], c[2], c[3], k)
+      local k = blue and 0.3 or 0.2
+      lighting.add(l.x - 30, l.top - 24, blue and 34 or 26, c[1], c[2], c[3], k)
+      lighting.add(l.x + 30, l.top - 24, blue and 34 or 26, c[1], c[2], c[3], k)
       if stage == 3 then
-        lighting.add(l.x, l.top - 42, blue and 76 or 60, c[1], blue and c[2] or 0.74, blue and c[3] or 0.4, k)
+        lighting.add(l.x, l.top - 42, blue and 44 or 34, c[1], blue and c[2] or 0.74, blue and c[3] or 0.4, k)
       end
     end
   end

@@ -48,14 +48,8 @@ function Player.new(x, y, world, inv)
       return true, prop
     end
     -- One-way platforms: only landed on, falling or standing, and S drops through
-    local plats = self.world.platforms
-    if plats and self.body.vy >= 0 and not controls.down("down") then
-      local feet = cy + ch
-      for _, p in ipairs(plats) do
-        if feet == p.y + 1 and cx + cw > p.x0 and cx <= p.x1 then
-          return true
-        end
-      end
+    if self.body.vy >= 0 and not controls.down("down") and self:platformUnder(cx, cw, cy + ch - 1) then
+      return true
     end
     return false
   end
@@ -104,6 +98,44 @@ function Player.new(x, y, world, inv)
   return self
 end
 
+-- The one-way platform whose top row is `row` and which spans x..x+w, or nil
+function Player:platformUnder(x, w, row)
+  local plats = self.world.platforms
+  if not plats then
+    return nil
+  end
+  row = math.floor(row + 0.5) -- (a body that was ever put down at a fractional y still lands)
+  for _, p in ipairs(plats) do
+    if math.floor(p.y + 0.5) == row and x + w > p.x0 and x <= p.x1 then
+      return p
+    end
+  end
+  return nil
+end
+
+-- Catches a body that peaked a few pixels short of clearing a platform (or sank
+-- into one) and sets it on top, so a jump onto a ledge never slips back through
+function Player:catchOnPlatform(dt)
+  local b = self.body
+  if controls.down("down") then
+    self.noCatchT = 0.3 -- (S dropped through on purpose: don't pull him back up)
+  else
+    self.noCatchT = math.max(0, (self.noCatchT or 0) - dt)
+  end
+  if b.vy < 0 or self.noCatchT > 0 then
+    return
+  end
+  local feet = b.y + b.h - 1
+  for d = 0, 5 do
+    if self:platformUnder(b.x, b.w, feet - d) then
+      b.y = b.y - d - 1 -- (feet to the row above its top)
+      b.vy = 0
+      b.remY = 0
+      return
+    end
+  end
+end
+
 function Player:center()
   local b = self.body
   return b.x + b.w / 2, b.y + b.h / 2
@@ -123,6 +155,9 @@ end
 
 -- Shift: roll as soon as the hunter is on the ground (see Player:update)
 function Player:pressRoll()
+  if require("src.meta").limbOn("leg") then
+    return -- (the Sawbone has the leg: no rolling)
+  end
   self.rollBuffer = cfg.rollBuffer
 end
 
@@ -166,7 +201,7 @@ function Player:startRoll(dir)
 end
 
 function Player:kick()
-  if self.kickCooldown > 0 or self.rollT then
+  if self.kickCooldown > 0 or self.rollT or require("src.meta").limbOn("leg") then
     return
   end
   self.kickCooldown = cfg.kickCooldown
@@ -175,7 +210,7 @@ function Player:kick()
   local x = self.facing > 0 and b.x + b.w or b.x - cfg.kickRange
   audio.play("kick")
   local damage = cfg.kickDamage * perks.prod("kickDamage")
-  if self.gun and self.gun:stats().bayonet > 0 then
+  if self:gunStat("bayonet") > 0 then
     damage = damage * 3
   end
   targets.kick(x, b.y + 6, cfg.kickRange, b.h - 6, damage)
@@ -195,9 +230,9 @@ local function airKick(v, kick)
 end
 
 -- Pushes the player opposite the shot. On the ground the push is heavily reduced.
-function Player:applyRecoil(angle)
+function Player:applyRecoil(angle, gun)
   local b = self.body
-  local st = self.gun:stats()
+  local st = (gun or self.gun):stats()
   local strength = st.recoil
   local ix, iy = -math.cos(angle) * strength, -math.sin(angle) * strength
   if self.grounded then
@@ -213,17 +248,37 @@ function Player:applyRecoil(angle)
   end
 end
 
+-- What the guns in hand add up to for an attachment's effect (Akimbo holds two, and both count)
+function Player:gunStat(key)
+  local total = 0
+  if self.gun then
+    total = total + (self.gun:stats()[key] or 0)
+  end
+  if self.gun2 then
+    total = total + (self.gun2:stats()[key] or 0)
+  end
+  return total
+end
+
 function Player:shoot()
-  if not self.gun then
+  self:shootWith(self.gun, false)
+  if self.gun2 then
+    self:shootWith(self.gun2, true) -- Akimbo: the other hand fires with it
+  end
+end
+
+-- Fires one gun: the held one, or (second) the Akimbo off-hand gun
+function Player:shootWith(gun, second)
+  if not gun then
     return
   end
-  local st = self.gun:stats()
+  local st = gun:stats()
   local ctx = {
     damageMult = (self.hp < self.maxHp * 0.3) and (1 + perks.sum("lastStand")) or 1,
     fireRate = 1 + 0.06 * self.streak,
     still = math.abs(self.body.vx) < 25 and self.grounded,
   }
-  local shots, side = self.gun:fire(self.aimAngle, ctx)
+  local shots, side = gun:fire(self.aimAngle, ctx)
   if not shots then
     return
   end
@@ -231,18 +286,23 @@ function Player:shoot()
   -- monster pressed up against the hunter (closer than the muzzle) still
   -- gets hit, and a wall in front of the barrel blocks the shot
   local sx, sy = self:shoulder()
+  local mx, my = self.muzzleX, self.muzzleY
+  if second then
+    mx, my = playeranim.muzzle2(self)
+    sx, sy = sx - self.facing * 0.6, sy + 1.4
+  end
   for _, s in ipairs(shots) do
     bullets.spawn(sx, sy, s)
   end
   -- Spent shell: pistols and machine guns spit it out at once, revolvers and
   -- the double-barrel keep theirs until a reload
-  local cs = self.gun.def.casing
+  local cs = gun.def.casing
   if cs and cs.eject == "shot" then
-    local len = self.gun.def.length
+    local len = gun.def.length
     local f = self.facing
     effects.casing(
-      self.muzzleX - math.cos(self.aimAngle) * len * 0.55,
-      self.muzzleY - math.sin(self.aimAngle) * len * 0.55 - 1,
+      mx - math.cos(self.aimAngle) * len * 0.55,
+      my - math.sin(self.aimAngle) * len * 0.55 - 1,
       -f * (30 + love.math.random() * 50) + self.body.vx * 0.4,
       -(70 + love.math.random() * 70) + self.body.vy * 0.3,
       cs.size,
@@ -251,24 +311,28 @@ function Player:shoot()
     )
   end
   local quiet = st.sneak > 0 -- Suppressor
-  effects.muzzleFlash(self.muzzleX, self.muzzleY, self.aimAngle, self.gun.def.flash * (quiet and 0.5 or 1), self.gun.def.model)
-  audio.play("shot_" .. (self.gun.def.model == "pistol" and "pistol" or self.gun.def.model), quiet and 0.35 or nil)
+  effects.muzzleFlash(mx, my, self.aimAngle, gun.def.flash * (quiet and 0.5 or 1), gun.def.model)
+  audio.play("shot_" .. (gun.def.model == "pistol" and "pistol" or gun.def.model), quiet and 0.35 or nil)
   if side then
     if side.cost > 0 and self.hp > 1 then
       -- Blood Rounds: every shot costs blood, but never the last drop
       self.hp = math.max(1, self.hp - side.cost)
-      effects.popup(self.muzzleX, self.muzzleY - 6, "-" .. side.cost, { 0.8, 0.1, 0.15 })
+      effects.popup(mx, my - 6, "-" .. side.cost, { 0.8, 0.1, 0.15 })
     end
     if side.misfire then
-      bullets.blast(self.muzzleX, self.muzzleY, 1, 0.8) -- Unstable Rounds
+      bullets.blast(mx, my, 1, 0.8) -- Unstable Rounds
     end
   end
-  if self.gun.chambers == 0 then
+  if gun.chambers == 0 then
     audio.play("reload", 0.8)
   end
-  self:applyRecoil(self.aimAngle)
+  self:applyRecoil(self.aimAngle, gun)
   juice.shot(self.aimAngle, st.recoil, quiet)
-  playeranim.onShoot(self)
+  if second then
+    playeranim.onShoot2(self)
+  else
+    playeranim.onShoot(self)
+  end
 end
 
 -- Takes damage from something at (fromX, fromY): knocks the hunter away from
@@ -277,7 +341,7 @@ end
 -- cursed items), with Second Wind and Adrenaline. Returns the damage dealt.
 function Player:loseHealth(amount)
   local cx = self:center()
-  local vulnerable = self.gun and self.gun:stats().vulnerable or 0
+  local vulnerable = self:gunStat("vulnerable")
   amount = math.max(1, math.floor(amount * perks.prod("dmgTaken") * (1 + vulnerable) + 0.5))
   if self.hp - amount <= 0 and perks.has("second_wind") and not self.inventory.secondWindUsed then
     -- Second Wind: the first killing blow leaves the hunter standing
@@ -315,7 +379,7 @@ end
 -- no knockback or invulnerability, and the blink after a hit doesn't stop it
 -- source: what is doing it (an id for src.deaths: an enemy kind, "gas", "fire"...)
 function Player:hurtOverTime(amount, color, source)
-  if self.dead then
+  if self.dead or require("src.dev").on then
     return
   end
   self.lastSource, self.lastEnemy = source, nil
@@ -331,7 +395,7 @@ function Player:hurtOverTime(amount, color, source)
 end
 
 function Player:hurt(amount, fromX, fromY, source)
-  if self.dead or self.invuln > 0 then
+  if self.dead or self.invuln > 0 or require("src.dev").on then
     return false
   end
   if self:isDodging() then
@@ -520,6 +584,7 @@ end
 
 function Player:update(dt, aimX, aimY)
   local b = self.body
+  b.x, b.y = math.floor(b.x + 0.5), math.floor(b.y + 0.5) -- (bodies live on whole pixels: a fractional y once made one-way platforms miss)
   self.ignoreProps = props.overlapping(b.x, b.y, b.w, b.h, self.ignoreProps)
 
   -- Aim
@@ -677,24 +742,37 @@ function Player:update(dt, aimX, aimY)
   -- Gun
   self.inventory:update(dt)
   self.gun = self.inventory:selectedGun()
+  self.gun2 = self.inventory:offhandGun() -- (Akimbo)
   if self.gun ~= self.lastGun then
     self.lastGun = self.gun
     if self.gun then
       self.gun.drawn = true -- Quickdraw Holster: the first shot after switching
     end
   end
-  pickups.extraMagnet = self.gun and self.gun:stats().magnet or 0
+  if self.gun2 ~= self.lastGun2 then
+    self.lastGun2 = self.gun2
+    if self.gun2 then
+      self.gun2.drawn = true
+    end
+  end
+  pickups.extraMagnet = self:gunStat("magnet")
   local trigger = love.mouse.isDown(1) and not self.rollT
   if self.gun and self.gun.def.spoolTime then
     -- Gatling: the barrels wind up while the trigger is held, ratcheting
     -- faster and higher as they go
     self.gun:spinUp(dt, trigger)
+    if self.gun2 and self.gun2.def.spoolTime then
+      self.gun2:spinUp(dt, trigger)
+    end
     local spool = self.gun.spool
     self.spinClick = (self.spinClick or 0) - dt
     if spool > 0.02 and self.spinClick <= 0 then
       self.spinClick = 0.16 - 0.12 * spool
       audio.play("gatling_spin", 0.4 + 0.6 * spool, 0.7 + 0.9 * spool)
     end
+  end
+  if self.gun2 and self.gun2.def.spoolTime and not (self.gun and self.gun.def.spoolTime) then
+    self.gun2:spinUp(dt, trigger)
   end
   if trigger then
     self:shoot()
@@ -732,6 +810,9 @@ function Player:update(dt, aimX, aimY)
   if wasGrounded and not jumped and b.vy >= 0 then
     Body.snapDown(b, self.collide, cfg.stepHeight)
   end
+  if not jumped then
+    self:catchOnPlatform(dt)
+  end
   self:checkGround()
   if self.grounded and not jumped and self.springBonus > 0 then
     -- Whatever is left of a slide-jump's bonus is lost on landing, so
@@ -751,6 +832,9 @@ function Player:update(dt, aimX, aimY)
   self:updateMuzzle()
 end
 
+local STAND_IN_MAX_UP = 120 -- the fastest upward push the hunter's stand-in gives props
+local RIDE_MAX = 150 -- the fastest a prop underfoot may carry him sideways
+
 -- Before the physics step: move the kinematic stand-in to the player's new
 -- position via velocity, so props get proper contact responses.
 function Player:syncPhysics(dt)
@@ -761,7 +845,10 @@ function Player:syncPhysics(dt)
     self.physBody:setPosition(tx, ty)
     self.physBody:setLinearVelocity(0, 0)
   else
-    self.physBody:setLinearVelocity((tx - px) / dt, (ty - py) / dt)
+    -- (a step up onto a box moves the hunter several px in one frame: passed on
+    -- as it is, that is a kick that sends the box, and then him, flying)
+    local vy = math.max((ty - py) / dt, -STAND_IN_MAX_UP)
+    self.physBody:setLinearVelocity((tx - px) / dt, vy)
   end
 end
 
@@ -772,7 +859,11 @@ function Player:ride(dt)
     return
   end
   local b = self.body
-  local vx = prop.body:getLinearVelocityFromWorldPoint(b.x + b.w / 2, b.y + b.h)
+  local vx, vy = prop.body:getLinearVelocityFromWorldPoint(b.x + b.w / 2, b.y + b.h)
+  if math.abs(vy) > 150 then
+    return -- a box that is being flung does not take him along
+  end
+  vx = math.max(-RIDE_MAX, math.min(RIDE_MAX, vx))
   Body.moveX(b, self.collide, vx * dt, cfg.stepHeight)
 end
 
@@ -780,7 +871,7 @@ end
 function Player:addLights(lighting)
   local cx, cy = self:center()
   lighting.add(cx, cy, 180, 1, 0.86, 0.66, 1.0)
-  local lamp = self.gun and self.gun:stats().lamp or 0
+  local lamp = self:gunStat("lamp")
   if lamp > 0 then
     lighting.add(cx, cy, 150 + lamp, 1, 0.82, 0.55, 0.6) -- Muzzle Lantern
   end
@@ -797,17 +888,23 @@ function Player:drawEmissive()
   if visible(self) then
     playeranim.drawEyes(self)
     -- Laser Sight: a red line out to the first solid pixel
-    if self.gun and self.gun:stats().laser > 0 then
-      local dx, dy = math.cos(self.aimAngle), math.sin(self.aimAngle)
-      local x, y = self.muzzleX, self.muzzleY
-      local length = 0
-      while length < 320 and not self.world:isSolid(math.floor(x + dx * length), math.floor(y + dy * length)) do
-        length = length + 2
+    -- (each gun in hand, with its own muzzle: Akimbo's two both show theirs)
+    for k, gun in ipairs({ self.gun or false, self.gun2 or false }) do
+      if gun and gun:stats().laser > 0 then
+        local dx, dy = math.cos(self.aimAngle), math.sin(self.aimAngle)
+        local x, y = self.muzzleX, self.muzzleY
+        if k == 2 then
+          x, y = playeranim.muzzle2(self)
+        end
+        local length = 0
+        while length < 320 and not self.world:isSolid(math.floor(x + dx * length), math.floor(y + dy * length)) do
+          length = length + 2
+        end
+        love.graphics.setColor(1, 0.15, 0.15, 0.55)
+        love.graphics.line(x, y, x + dx * length, y + dy * length)
+        love.graphics.setColor(1, 0.5, 0.5)
+        love.graphics.rectangle("fill", math.floor(x + dx * length), math.floor(y + dy * length), 1, 1)
       end
-      love.graphics.setColor(1, 0.15, 0.15, 0.55)
-      love.graphics.line(x, y, x + dx * length, y + dy * length)
-      love.graphics.setColor(1, 0.5, 0.5)
-      love.graphics.rectangle("fill", math.floor(x + dx * length), math.floor(y + dy * length), 1, 1)
     end
   end
 end

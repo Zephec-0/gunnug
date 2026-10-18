@@ -16,11 +16,24 @@ local TRAUMA_DRAIN = 1.7 -- trauma lost per second
 local MAX_SHAKE = 7 -- px at full trauma
 
 local focus -- { x, y }: a point (a boss) the view looks toward as well as at the hunter
+local limits = {} -- limits.top: the view's top edge never goes above this world y (the sky's roof)
 local kickX, kickY = 0, 0
 local trauma = 0
 local clock = 0
 
+local target0
+
 local function target(fx, fy, aimX, aimY)
+  local tx, ty = target0(fx, fy, aimX, aimY)
+  -- Clamped under the roof: the hunter may fly up out of view and fall back
+  -- into it (the world's real top is an invisible ceiling higher up)
+  if limits.top and ty < limits.top then
+    ty = limits.top
+  end
+  return tx, ty
+end
+
+target0 = function(fx, fy, aimX, aimY)
   local W, H = config.VIRTUAL_W, config.VIRTUAL_H
   if focus then
     -- Between the hunter and what he fights, but never so far that he drifts to the edge
@@ -34,6 +47,11 @@ local function target(fx, fy, aimX, aimY)
   local tx = fx + (aimX - fx) * LOOK_AHEAD - W / 2
   local ty = fy + (aimY - fy) * LOOK_AHEAD - H / 2
   return tx, ty
+end
+
+-- The highest the view's top edge may go (nil: no limit)
+function camera.setTop(y)
+  limits.top = y
 end
 
 function camera.setFocus(x, y)

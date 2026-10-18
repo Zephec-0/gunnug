@@ -218,6 +218,199 @@ local DEFS = {
     end,
     volume = 0.45,
   },
+  -- The Needle's creatures ------------------------------------------------
+  -- A crow's hoarse caw: a buzzy, falling note with a rasp
+  crow_caw = {
+    gen = function()
+      local band = lp(0.5)
+      return synth(0.4, function(t, p)
+        local f = 620 - 250 * p + 40 * math.sin(t * 48 * TAU)
+        local saw = ((t * f) % 1) * 2 - 1
+        return (saw * 0.55 + band(noise()) * 0.28) * math.sin(math.min(1, p * 1.6) * math.pi) ^ 0.6 * (1 - p * 0.5)
+      end)
+    end,
+    volume = 0.42,
+    cooldown = 0.2,
+  },
+  -- ...the wet spit it makes before it flings bile: a hiss and a click
+  crow_spit = {
+    gen = function()
+      local hi = hp(0.6)
+      return synth(0.22, function(t, p)
+        return hi(noise()) * math.exp(-t * 16) * 0.8 + math.sin(t * (900 - 600 * p) * TAU) * math.exp(-t * 40) * 0.6
+      end)
+    end,
+    volume = 0.4,
+    cooldown = 0.15,
+  },
+  -- A ram's snort: a short, breathy blast with a growl under it
+  ram_snort = {
+    gen = function()
+      local low = lp(0.12)
+      return synth(0.5, function(t, p)
+        local growl = math.sin(t * (78 + 12 * math.sin(t * 9 * TAU)) * TAU) * 0.6
+        return (low(noise()) * 2.2 + growl) * math.sin(p * math.pi) ^ 0.8
+      end)
+    end,
+    volume = 0.5,
+    cooldown = 0.3,
+  },
+  -- ...a hoof pawing the rock before the charge
+  ram_stamp = {
+    gen = function()
+      local low = lp(0.2)
+      return synth(0.22, function(t, p)
+        return math.sin(t * (95 - 40 * p) * TAU) * math.exp(-t * 18) * 1.3 + low(noise()) * math.exp(-t * 30) * 0.9
+      end)
+    end,
+    volume = 0.55,
+    cooldown = 0.18,
+  },
+  -- ...and the crack of a skull on stone
+  ram_crash = {
+    gen = function()
+      local low = lp(0.3)
+      return synth(0.5, function(t, p)
+        local crack = noise() * math.exp(-t * 45) * 1.2
+        local boom = math.sin(t * (70 - 30 * p) * TAU) * math.exp(-t * 9) * 1.4
+        return crack + boom + low(noise()) * math.exp(-t * 12) * 0.6
+      end)
+    end,
+    volume = 0.6,
+    cooldown = 0.15,
+  },
+  -- A dust devil: a thin, wavering whistle in rushing wind
+  wind_howl = {
+    gen = function()
+      local band = lp(0.18)
+      return synth(0.9, function(t, p)
+        local f = 520 + 180 * math.sin(t * 4.1 * TAU) + 160 * p
+        return (math.sin(t * f * TAU) * 0.35 + band(noise()) * 0.9) * math.sin(p * math.pi) ^ 0.9
+      end)
+    end,
+    volume = 0.4,
+    cooldown = 0.5,
+  },
+  -- ...and the blast of wind it throws: a swelling whoosh
+  gust_blast = {
+    gen = function()
+      local band = lp(0.1)
+      return synth(0.8, function(t, p)
+        return band(noise()) * 2.4 * math.sin(p * math.pi) ^ 1.4 + math.sin(t * (200 + 500 * p) * TAU) * 0.12 * (1 - p)
+      end)
+    end,
+    volume = 0.55,
+    cooldown = 0.4,
+  },
+  -- A gargoyle: stone grinding on stone, with a dry crackle
+  gargoyle_grind = {
+    gen = function()
+      local low = lp(0.22)
+      return synth(0.6, function(t, p)
+        local ring = math.sin(t * 61 * TAU) * math.sin(t * 213 * TAU)
+        local crackle = (noise() > 0.8 and 1 or 0) * noise() * 0.8
+        return (low(noise()) * 1.4 * (0.5 + 0.5 * math.sin(t * 15 * TAU)) + ring * 0.5 + crackle) * math.sin(p * math.pi) ^ 0.6
+      end)
+    end,
+    volume = 0.45,
+    cooldown = 0.3,
+  },
+  -- ...it breaking loose of its perch and landing
+  gargoyle_crash = {
+    gen = function()
+      local low = lp(0.25)
+      return synth(0.7, function(t, p)
+        return noise() * math.exp(-t * 30) * 1.1 + math.sin(t * (55 - 20 * p) * TAU) * math.exp(-t * 7) * 1.6 + low(noise()) * math.exp(-t * 9) * 0.8
+      end)
+    end,
+    volume = 0.6,
+    cooldown = 0.2,
+  },
+  -- The Dark Hunter ------------------------------------------------------------
+  -- his voice: a low, doubled murmur that slides, like speech played backward
+  dh_voice = {
+    gen = function()
+      local low = lp(0.16)
+      return synth(0.75, function(t, p)
+        local f = 96 + 30 * math.sin(t * 5.5 * TAU) - 40 * p
+        local a = math.sin(t * f * TAU) + math.sin(t * f * 1.5 * TAU + 1) * 0.6
+        return (low(a + noise() * 0.5)) * 1.1 * math.sin(p * math.pi) ^ 0.7
+      end)
+    end,
+    volume = 0.5,
+    cooldown = 0.5,
+  },
+  -- an air dash: a thin violet whoosh that falls away
+  dh_dash = {
+    gen = function()
+      local band = lp(0.35)
+      return synth(0.28, function(t, p)
+        return (band(noise()) * 1.2 + math.sin(t * (1400 - 1000 * p) * TAU) * 0.35) * math.sin(p * math.pi) ^ 0.7
+      end)
+    end,
+    volume = 0.4,
+    cooldown = 0.12,
+  },
+  -- a beam winding up: a whine that climbs, with a tremble
+  dh_charge = {
+    gen = function()
+      return synth(0.9, function(t, p)
+        local f = 300 + 1700 * p * p
+        return math.sin(t * f * TAU) * (0.25 + 0.55 * p) * (0.7 + 0.3 * math.sin(t * (20 + 50 * p) * TAU)) + noise() * 0.05 * p
+      end)
+    end,
+    volume = 0.5,
+    cooldown = 0.3,
+  },
+  -- ...and the beam itself: a hard crack with a falling ring
+  dh_beam = {
+    gen = function()
+      local hi = hp(0.4)
+      return synth(0.55, function(t, p)
+        return hi(noise()) * math.exp(-t * 10) * 1.1 + math.sin(t * (2200 - 1800 * p) * TAU) * math.exp(-t * 6) * 0.9 + math.sin(t * 90 * TAU) * math.exp(-t * 14) * 0.8
+      end)
+    end,
+    volume = 0.6,
+    cooldown = 0.1,
+  },
+  -- The Crow Rider ---------------------------------------------------------------
+  -- the great crow's caw: huge and low, with a rattle in it
+  rider_caw = {
+    gen = function()
+      local band = lp(0.3)
+      return synth(0.9, function(t, p)
+        local f = 240 - 90 * p + 30 * math.sin(t * 38 * TAU)
+        local saw = ((t * f) % 1) * 2 - 1
+        local rattle = 0.6 + 0.4 * math.sin(t * 55 * TAU)
+        return (saw * 0.7 * rattle + band(noise()) * 0.35) * math.sin(math.min(1, p * 1.3) * math.pi) ^ 0.6
+      end)
+    end,
+    volume = 0.6,
+    cooldown = 0.4,
+  },
+  -- wingbeats: a deep whump of air
+  rider_flap = {
+    gen = function()
+      local low = lp(0.1)
+      return synth(0.32, function(t, p)
+        return low(noise()) * 2.2 * math.sin(p * math.pi) ^ 1.2 + math.sin(t * (60 + 30 * p) * TAU) * 0.5 * math.sin(p * math.pi)
+      end)
+    end,
+    volume = 0.5,
+    cooldown = 0.2,
+  },
+  -- the dive: a shriek that drops as the crow falls
+  rider_swoop = {
+    gen = function()
+      local band = lp(0.45)
+      return synth(0.8, function(t, p)
+        local f = 1900 - 1500 * p
+        return (math.sin(t * f * TAU) * 0.5 + band(noise()) * 0.5) * math.sin(math.min(1, p * 2) * math.pi * 0.5) * (1 - p * 0.6)
+      end)
+    end,
+    volume = 0.55,
+    cooldown = 0.3,
+  },
   casing = {
     gen = function()
       return synth(0.06, function(t, p)
@@ -463,6 +656,232 @@ local DEFS = {
       end)
     end,
     volume = 0.5,
+  },
+  -- Monster voices (src.enemies plays them now and then from awake monsters) ---------
+  -- A ghoul's low, wet growl: a sagging buzz with a throaty wobble
+  ghoul_growl = {
+    gen = function()
+      local low, rasp = lp(0.12), lp(0.3)
+      return synth(0.9, function(t, p)
+        local f = 78 - 22 * p + 5 * math.sin(t * 9 * TAU)
+        local buzz = (math.sin(t * f * TAU) + 0.6 * math.sin(t * f * 2 * TAU) + 0.35 * math.sin(t * f * 3 * TAU)) * (0.6 + 0.4 * math.sin(t * 26 * TAU))
+        local grit = rasp(noise()) * 0.5
+        local env = math.min(1, t / 0.08) * (1 - p) ^ 0.7
+        return low(buzz * 0.6 + grit) * 2.2 * env
+      end)
+    end,
+    volume = 0.55,
+    cooldown = 0.3,
+  },
+  -- A miner's yap: two quick, scratchy yips, the second a little lower
+  miner_yap = {
+    gen = function()
+      local hi = hp(0.1)
+      return synth(0.42, function(t, p)
+        local v = 0
+        for k = 0, 1 do
+          local tt = t - k * 0.19
+          if tt >= 0 and tt < 0.14 then
+            local q = tt / 0.14
+            local f = (k == 0 and 560 or 480) + 380 * math.sin(q * math.pi) - 120 * q
+            local tone = math.sin(tt * f * TAU) + 0.5 * math.sin(tt * f * 2 * TAU)
+            v = v + (tone * 0.5 + hi(noise()) * 0.25) * math.sin(q * math.pi) ^ 0.6
+          end
+        end
+        return v * 0.8
+      end)
+    end,
+    volume = 0.42,
+    cooldown = 0.3,
+  },
+  -- A spitter's gurgle: bubbling in the throat
+  spitter_gurgle = {
+    gen = function()
+      local low = lp(0.2)
+      return synth(0.55, function(t, p)
+        local f = 190 + 120 * math.sin(t * 17 * TAU) * (1 - p)
+        local bub = math.sin(t * f * TAU) * (0.5 + 0.5 * math.sin(t * 31 * TAU))
+        return (low(bub + noise() * 0.25)) * 1.6 * math.sin(p * math.pi) ^ 0.7
+      end)
+    end,
+    volume = 0.4,
+    cooldown = 0.3,
+  },
+  -- A spitter swelling up before it spits: bubbling that climbs and quickens
+  spitter_charge = {
+    gen = function()
+      local low = lp(0.25)
+      return synth(0.5, function(t, p)
+        local f = 140 + 360 * p * p
+        local rate = 14 + 40 * p
+        local bub = math.sin(t * f * TAU) * (0.5 + 0.5 * math.sin(t * rate * TAU))
+        return low(bub + noise() * 0.18) * 1.5 * (0.3 + 0.7 * p)
+      end)
+    end,
+    volume = 0.4,
+    cooldown = 0.3,
+  },
+  -- ...then the wet spit: a pop and a spray
+  spitter_spit = {
+    gen = function()
+      local band = lp(0.45)
+      return synth(0.3, function(t, p)
+        local pop = math.sin(t * (520 - 400 * p) * TAU) * math.exp(-t * 28)
+        return (pop * 0.9 + band(noise()) * 0.9 * math.exp(-t * 11)) * 1.2
+      end)
+    end,
+    volume = 0.5,
+    cooldown = 0.2,
+  },
+  -- The water's creatures ------------------------------------------------
+  -- A jellyfish's bell pulsing: a soft, wet thump with a rising hum
+  jelly_pulse = {
+    gen = function()
+      local low = lp(0.15)
+      return synth(0.4, function(t, p)
+        return low(math.sin(t * (110 + 90 * p) * TAU) * 1.4 + noise() * 0.2) * math.sin(p * math.pi) ^ 0.8
+      end)
+    end,
+    volume = 0.35,
+    cooldown = 0.2,
+  },
+  -- ...and its shock: a bright crackle over a falling whine
+  jelly_zap = {
+    gen = function()
+      local hi = hp(0.5)
+      return synth(0.55, function(t, p)
+        local crack = (noise() > 0.55 and 1 or 0) * noise() * 1.2
+        return (hi(crack) * 0.9 + math.sin(t * (900 - 600 * p) * TAU) * 0.35) * (1 - p) ^ 0.7
+      end)
+    end,
+    volume = 0.5,
+    cooldown = 0.3,
+  },
+  -- An anglerfish's lure: a glassy, throbbing hum
+  angler_lure = {
+    gen = function()
+      return synth(0.7, function(t, p)
+        return math.sin(t * 330 * TAU + math.sin(t * 9 * TAU) * 2) * 0.7 * math.sin(p * math.pi)
+      end)
+    end,
+    volume = 0.22,
+    cooldown = 0.5,
+  },
+  -- ...and its snap: jaws slamming shut
+  angler_snap = {
+    gen = function()
+      local band = lp(0.5)
+      return synth(0.3, function(t, p)
+        return (band(noise()) * 1.2 * math.exp(-t * 16) + math.sin(t * 90 * TAU) * math.exp(-t * 14)) * 1.3
+      end)
+    end,
+    volume = 0.6,
+    cooldown = 0.2,
+  },
+  -- An urchin shaking its spines, then loosing them
+  urchin_rattle = {
+    gen = function()
+      local hi = hp(0.55)
+      return synth(0.5, function(t, p)
+        local tick = (math.sin(t * 60 * TAU) > 0.6 and 1 or 0)
+        return hi(noise()) * tick * (0.3 + 0.7 * p) * 1.2
+      end)
+    end,
+    volume = 0.3,
+    cooldown = 0.4,
+  },
+  urchin_spines = {
+    gen = function()
+      local hi = hp(0.4)
+      return synth(0.25, function(t, p)
+        return hi(noise()) * math.exp(-t * 18) * 1.3 + math.sin(t * (1400 - 900 * p) * TAU) * 0.3 * (1 - p)
+      end)
+    end,
+    volume = 0.35,
+    cooldown = 0.2,
+  },
+  -- A golemling's grunt: a squeaky, mouse-like little huff
+  mouse_grunt = {
+    gen = function()
+      local band = lp(0.6)
+      return synth(0.2, function(t, p)
+        local f = 780 + 260 * math.sin(p * math.pi) - 200 * p
+        local v = (math.sin(t * f * TAU) * 0.6 + math.sin(t * f * 2.1 * TAU) * 0.25 + band(noise()) * 0.25)
+        return v * math.sin(p * math.pi) ^ 0.6 * 1.3
+      end)
+    end,
+    volume = 0.4,
+    cooldown = 0.12,
+  },
+  -- The big fish: a rushing dash, a crunching bite, a deep groan, a tooth breaking
+  fish_dash = {
+    gen = function()
+      local band = lp(0.3)
+      return synth(0.45, function(t, p)
+        return band(noise()) * 1.6 * math.sin(p * math.pi) ^ 0.7 * (0.4 + 0.6 * p)
+      end)
+    end,
+    volume = 0.5,
+    cooldown = 0.15,
+  },
+  fish_chomp = {
+    gen = function()
+      local band = lp(0.35)
+      return synth(0.5, function(t, p)
+        local crunch = band(noise()) * (math.sin(t * 38 * TAU) > 0 and 1 or 0.4) * math.exp(-t * 7)
+        return (crunch * 1.6 + math.sin(t * 55 * TAU) * math.exp(-t * 9)) * 1.1
+      end)
+    end,
+    volume = 0.7,
+    cooldown = 0.2,
+  },
+  fish_groan = {
+    gen = function()
+      local low = lp(0.1)
+      return synth(1.0, function(t, p)
+        local f = 62 - 20 * p + math.sin(t * 5 * TAU) * 4
+        return low(math.sin(t * f * TAU) + math.sin(t * f * 2.01 * TAU) * 0.4 + noise() * 0.15) * 1.8 * math.sin(p * math.pi) ^ 0.6
+      end)
+    end,
+    volume = 0.6,
+    cooldown = 0.5,
+  },
+  tooth_break = {
+    gen = function()
+      local hi = hp(0.3)
+      return synth(0.4, function(t, p)
+        return (hi(noise()) * math.exp(-t * 22) * 1.4 + math.sin(t * (700 - 500 * p) * TAU) * math.exp(-t * 10) * 0.6)
+      end)
+    end,
+    volume = 0.6,
+    cooldown = 0.15,
+  },
+  -- A bloater's wheeze: a long, breathy leak over a slow low swell
+  bloater_wheeze = {
+    gen = function()
+      local band = lp(0.35)
+      local hi = hp(0.15)
+      return synth(0.85, function(t, p)
+        local breath = hi(band(noise())) * 1.3 * math.sin(p * math.pi) ^ 1.2
+        local swell = math.sin(t * (58 + 12 * math.sin(t * 5 * TAU)) * TAU) * 0.3 * math.sin(p * math.pi)
+        return breath + swell
+      end)
+    end,
+    volume = 0.35,
+    cooldown = 0.3,
+  },
+  -- A wisp's crackle: sparks snapping and a soft flare
+  wisp_crackle = {
+    gen = function()
+      local hi = hp(0.5)
+      return synth(0.5, function(t, p)
+        local snap = love.math.random() < 0.015 and 1 or 0
+        local flare = hi(noise()) * 0.25 * math.sin(p * math.pi)
+        return (snap * noise() * 0.9 + flare) * (1 - p) ^ 0.5
+      end)
+    end,
+    volume = 0.3,
+    cooldown = 0.3,
   },
 
   -- Little events scattered over the area beds ----------------------------------------
@@ -1512,6 +1931,236 @@ local TRACKS = {
       },
     },
   },
+  -- 6: the Quarry, a dry, open drift in D dorian with sparse plucks
+  {
+    bpm = 66,
+    bars = 8,
+    echo = { delay = 0.45, fb = 0.45 },
+    prog = { "Dm", "Dm", "G", "G", "Am", "Am", "C", "Dm" },
+    chords = {
+      Dm = { root = "D2", fifth = "A2", pad = { "D3", "A3", "D4", "F4" }, notes = { "D4", "F4", "A4", "C5", "D5" } },
+      G = { root = "G1", fifth = "D2", pad = { "G2", "D3", "G3", "B3" }, notes = { "G3", "B3", "D4", "F4", "G4" } },
+      Am = { root = "A1", fifth = "E2", pad = { "A2", "E3", "A3", "C4" }, notes = { "A3", "C4", "E4", "G4", "A4" } },
+      C = { root = "C2", fifth = "G2", pad = { "C3", "G3", "C4", "E4" }, notes = { "C4", "E4", "G4", "B4", "C5" } },
+    },
+    channels = {
+      { wave = "tri", gain = 0.10, steps = 1, a = 1.0, r = 1.0, legato = 1.0, tokens = padPattern() },
+      { wave = "sine", gain = 0.28, steps = 1, a = 0.4, r = 0.7, legato = 1.0, tokens = bassPattern("R") },
+      { wave = "tri", gain = 0.09, steps = 8, pluck = 3.0, tokens = arpPattern({ 1, 0, 0, 3, 0, 2, 0, 0 }) },
+      {
+        wave = "p25", gain = 0.045, steps = 8, pluck = 6,
+        tokens = explicit({
+          "A4 . . . - - - -", "- - D5 . . . F5 .", "B4 . . . - - D5 .", "- - - - G4 . . .",
+          "C5 . . . E5 . . .", "- - - - A4 . . .", "G4 . . . - - E5 .", "F5 . . . D5 . . .",
+        }),
+      },
+    },
+  },
+  -- 7: the Foreman's Hall, heavy and slow: a low drone with a tolling bell
+  {
+    bpm = 52,
+    bars = 8,
+    echo = { delay = 0.58, fb = 0.5 },
+    prog = { "Bm", "Bm", "G", "G", "Bm", "Bm", "F#", "F#" },
+    chords = {
+      Bm = { root = "B1", fifth = "F#2", pad = { "B2", "F#3", "B3", "D4" }, notes = { "B3", "D4", "F#4", "A4", "B4" } },
+      G = { root = "G1", fifth = "D2", pad = { "G2", "D3", "G3", "B3" }, notes = { "G3", "B3", "D4", "F#4", "G4" } },
+      ["F#"] = { root = "F#1", fifth = "C#2", pad = { "F#2", "C#3", "F#3", "A#3" }, notes = { "F#3", "A#3", "C#4", "F#4", "A#4" } },
+    },
+    channels = {
+      { wave = "saw", gain = 0.05, steps = 1, a = 1.4, r = 1.1, legato = 1.0, tokens = padPattern() },
+      { wave = "tri", gain = 0.11, steps = 1, a = 1.2, r = 1.0, legato = 1.0, tokens = padPattern() },
+      { wave = "sine", gain = 0.32, steps = 1, a = 0.5, r = 0.9, legato = 1.0, tokens = bassPattern("R") },
+      {
+        wave = "sine", gain = 0.12, steps = 4, pluck = 2.0,
+        tokens = explicit({
+          "B4 . . .", "- - - -", "G4 . . .", "- - - -", "B4 . . .", "- - - -", "F#4 . . .", "- - - -",
+        }),
+      },
+    },
+  },
+  -- 8: the Flooded Caverns, slow dripping arpeggios in F# minor
+  {
+    bpm = 56,
+    bars = 8,
+    echo = { delay = 0.64, fb = 0.58 },
+    prog = { "F#m", "F#m", "D", "D", "A", "A", "E", "C#" },
+    chords = {
+      ["F#m"] = { root = "F#1", fifth = "C#2", pad = { "F#2", "C#3", "F#3", "A3", "C#4" }, notes = { "F#3", "A3", "C#4", "E4", "F#4" } },
+      D = { root = "D2", fifth = "A2", pad = { "D3", "A3", "D4", "F#4" }, notes = { "D4", "F#4", "A4", "C#5", "D5" } },
+      A = { root = "A1", fifth = "E2", pad = { "A2", "E3", "A3", "C#4" }, notes = { "A3", "C#4", "E4", "A4", "C#5" } },
+      E = { root = "E2", fifth = "B2", pad = { "E3", "B3", "E4", "G#4" }, notes = { "E4", "G#4", "B4", "D5", "E5" } },
+      ["C#"] = { root = "C#2", fifth = "G#2", pad = { "C#3", "G#3", "C#4", "F4" }, notes = { "C#4", "F4", "G#4", "B4", "C#5" } },
+    },
+    channels = {
+      { wave = "tri", gain = 0.10, steps = 1, a = 1.1, r = 1.0, legato = 1.0, tokens = padPattern() },
+      { wave = "sine", gain = 0.14, steps = 8, pluck = 2.2, tokens = arpPattern({ 1, 3, 5, 4, 5, 3, 2, 4 }) },
+      { wave = "sine", gain = 0.26, steps = 1, a = 0.4, r = 0.8, legato = 1.0, tokens = bassPattern("R") },
+      {
+        wave = "p50", gain = 0.04, steps = 8, pluck = 4,
+        tokens = explicit({
+          "C#5 . . . - - - -", "- - - - A4 . . .", "F#5 . . . - - D5 .", "- - - - - - - -",
+          "E5 . . . - - - -", "- - A5 . . . - -", "B4 . . . G#4 . . .", "- - - - E5 . . .",
+        }),
+      },
+    },
+  },
+  -- 9: the Deep, a very low, slow drone in C# minor
+  {
+    bpm = 46,
+    bars = 8,
+    echo = { delay = 0.7, fb = 0.6 },
+    prog = { "C#m", "C#m", "A", "A", "C#m", "C#m", "B", "G#" },
+    chords = {
+      ["C#m"] = { root = "C#2", fifth = "G#2", pad = { "C#2", "G#2", "C#3", "E3" }, notes = { "C#4", "E4", "G#4", "B4", "C#5" } },
+      A = { root = "A1", fifth = "E2", pad = { "A1", "E2", "A2", "C#3" }, notes = { "A3", "C#4", "E4", "G#4", "A4" } },
+      B = { root = "B1", fifth = "F#2", pad = { "B1", "F#2", "B2", "D#3" }, notes = { "B3", "D#4", "F#4", "A4", "B4" } },
+      ["G#"] = { root = "G#1", fifth = "D#2", pad = { "G#1", "D#2", "G#2", "C3" }, notes = { "G#3", "C4", "D#4", "F#4", "G#4" } },
+    },
+    channels = {
+      { wave = "saw", gain = 0.045, steps = 1, a = 1.6, r = 1.2, legato = 1.0, tokens = padPattern() },
+      { wave = "tri", gain = 0.12, steps = 1, a = 1.3, r = 1.1, legato = 1.0, tokens = padPattern() },
+      { wave = "sine", gain = 0.34, steps = 1, a = 0.6, r = 1.0, legato = 1.0, tokens = bassPattern("R") },
+      {
+        wave = "sine", gain = 0.07, steps = 8, pluck = 3.5,
+        tokens = explicit({
+          "- - - - - - - -", "G#4 . . . - - - -", "- - - - E4 . . .", "- - - - - - - -",
+          "- - C#5 . . . - -", "- - - - - - - -", "D#5 . . . - - - -", "- - - - B4 . . .",
+        }),
+      },
+    },
+  },
+  -- 10: the Needle, a thin, bright climb in D lydian
+  {
+    bpm = 72,
+    bars = 8,
+    echo = { delay = 0.42, fb = 0.45 },
+    prog = { "D", "D", "E", "E", "Bm", "Bm", "G", "A" },
+    chords = {
+      D = { root = "D2", fifth = "A2", pad = { "D3", "A3", "D4", "F#4" }, notes = { "D4", "F#4", "A4", "C#5", "D5" } },
+      E = { root = "E2", fifth = "B2", pad = { "E3", "B3", "E4", "G#4" }, notes = { "E4", "G#4", "B4", "D5", "E5" } },
+      Bm = { root = "B1", fifth = "F#2", pad = { "B2", "F#3", "B3", "D4" }, notes = { "B3", "D4", "F#4", "A4", "B4" } },
+      G = { root = "G1", fifth = "D2", pad = { "G2", "D3", "G3", "B3" }, notes = { "G3", "B3", "D4", "F#4", "G4" } },
+      A = { root = "A1", fifth = "E2", pad = { "A2", "E3", "A3", "C#4" }, notes = { "A3", "C#4", "E4", "G#4", "A4" } },
+    },
+    channels = {
+      { wave = "tri", gain = 0.09, steps = 1, a = 0.9, r = 0.9, legato = 1.0, tokens = padPattern() },
+      { wave = "sine", gain = 0.24, steps = 1, a = 0.3, r = 0.6, legato = 1.0, tokens = bassPattern("R") },
+      { wave = "tri", gain = 0.11, steps = 8, pluck = 2.6, tokens = arpPattern({ 1, 3, 5, 3, 2, 4, 5, 4 }) },
+      {
+        wave = "p25", gain = 0.045, steps = 8, pluck = 5,
+        tokens = explicit({
+          "F#5 . . . A5 . . .", "- - - - D5 . . .", "G#5 . . . - - B5 .", "- - - - E5 . . .",
+          "D5 . . . F#5 . . .", "- - - - B4 . . .", "B4 . . . D5 . . .", "- - - - C#5 . . .",
+        }),
+      },
+    },
+  },
+  -- 11: the Cloud Reaches, floating and airy in G lydian with high bells
+  {
+    bpm = 54,
+    bars = 8,
+    echo = { delay = 0.66, fb = 0.58 },
+    prog = { "G", "G", "D", "D", "Em", "Em", "C", "D" },
+    chords = {
+      G = { root = "G2", fifth = "D3", pad = { "G3", "D4", "G4", "B4" }, notes = { "G4", "B4", "D5", "F#5", "G5" } },
+      D = { root = "D2", fifth = "A2", pad = { "D3", "A3", "D4", "F#4" }, notes = { "D4", "F#4", "A4", "C5", "D5" } },
+      Em = { root = "E2", fifth = "B2", pad = { "E3", "B3", "E4", "G4" }, notes = { "E4", "G4", "B4", "D5", "E5" } },
+      C = { root = "C2", fifth = "G2", pad = { "C3", "G3", "C4", "E4" }, notes = { "C4", "E4", "G4", "B4", "C5" } },
+    },
+    channels = {
+      { wave = "sine", gain = 0.12, steps = 1, a = 1.3, r = 1.1, legato = 1.0, tokens = padPattern() },
+      { wave = "tri", gain = 0.07, steps = 1, a = 1.5, r = 1.2, legato = 1.0, tokens = padPattern() },
+      { wave = "sine", gain = 0.20, steps = 1, a = 0.6, r = 0.9, legato = 1.0, tokens = bassPattern("R") },
+      { wave = "sine", gain = 0.10, steps = 8, pluck = 2.0, tokens = arpPattern({ 5, 0, 3, 0, 4, 0, 2, 0 }) },
+      {
+        wave = "p50", gain = 0.035, steps = 8, pluck = 3.5,
+        tokens = explicit({
+          "B5 . . . - - - -", "- - - - F#5 . . .", "A5 . . . - - D6 .", "- - - - - - - -",
+          "G5 . . . - - B5 .", "- - - - - - - -", "E5 . . . G5 . . .", "- - - - A5 . . .",
+        }),
+      },
+    },
+  },
+  -- 12: the Ember Foundry, a slow industrial smoulder: a pulsing plucked bass
+  {
+    bpm = 74,
+    bars = 8,
+    echo = { delay = 0.4, fb = 0.45 },
+    prog = { "F#m", "F#m", "G", "G", "F#m", "F#m", "E", "G" },
+    chords = {
+      ["F#m"] = { root = "F#2", fifth = "C#3", pad = { "F#2", "C#3", "F#3", "A3" }, notes = { "F#3", "A3", "C#4", "E4", "F#4" } },
+      G = { root = "G2", fifth = "D3", pad = { "G2", "D3", "G3", "B3" }, notes = { "G3", "B3", "D4", "F#4", "G4" } },
+      E = { root = "E2", fifth = "B2", pad = { "E2", "B2", "E3", "G#3" }, notes = { "E3", "G#3", "B3", "D4", "E4" } },
+    },
+    channels = {
+      { wave = "saw", gain = 0.05, steps = 1, a = 1.0, r = 1.0, legato = 1.0, tokens = padPattern() },
+      { wave = "tri", gain = 0.24, steps = 4, pluck = 1.6, tokens = bassPattern("R . R 5") },
+      { wave = "p25", gain = 0.06, steps = 4, pluck = 6, tokens = bassPattern("R . R 5") },
+      { wave = "sine", gain = 0.08, steps = 8, pluck = 3.0, tokens = arpPattern({ 1, 0, 0, 3, 0, 0, 5, 0 }) },
+      {
+        wave = "p50", gain = 0.04, steps = 8, pluck = 5,
+        tokens = explicit({
+          "C#5 . . . - - - -", "- - - - A4 . . .", "D5 . . . - - B4 .", "- - - - G4 . . .",
+          "A4 . . . C#5 . . .", "- - - - - - F#5 .", "B4 . . . G#4 . . .", "- - - - D5 . . .",
+        }),
+      },
+    },
+  },
+  -- 13: the Silt Vaults, a hushed, ancient C minor with soft bells
+  {
+    bpm = 54,
+    bars = 8,
+    echo = { delay = 0.62, fb = 0.55 },
+    prog = { "Cm", "Cm", "Ab", "Ab", "Fm", "Fm", "G", "Cm" },
+    chords = {
+      Cm = { root = "C2", fifth = "G2", pad = { "C3", "G3", "C4", "Eb4" }, notes = { "C4", "Eb4", "G4", "Bb4", "C5" } },
+      Ab = { root = "Ab1", fifth = "Eb2", pad = { "Ab2", "Eb3", "Ab3", "C4" }, notes = { "Ab3", "C4", "Eb4", "G4", "Ab4" } },
+      Fm = { root = "F2", fifth = "C3", pad = { "F2", "C3", "F3", "Ab3" }, notes = { "F3", "Ab3", "C4", "Eb4", "F4" } },
+      G = { root = "G1", fifth = "D2", pad = { "G2", "D3", "G3", "B3" }, notes = { "G3", "B3", "D4", "F4", "G4" } },
+    },
+    channels = {
+      { wave = "tri", gain = 0.11, steps = 1, a = 1.2, r = 1.0, legato = 1.0, tokens = padPattern() },
+      { wave = "sine", gain = 0.28, steps = 1, a = 0.5, r = 0.8, legato = 1.0, tokens = bassPattern("R") },
+      { wave = "sine", gain = 0.09, steps = 8, pluck = 3.0, tokens = arpPattern({ 1, 0, 3, 0, 5, 0, 4, 0 }) },
+      {
+        wave = "p50", gain = 0.045, steps = 8, pluck = 4,
+        tokens = explicit({
+          "G5 . . . - - - -", "- - Eb5 . . . - -", "C5 . . . Eb5 . . .", "- - - - Ab4 . . .",
+          "F5 . . . - - Ab5 .", "- - - - C5 . . .", "D5 . . . - - B4 .", "- - - - G4 . . .",
+        }),
+      },
+    },
+  },
+}
+
+-- The Dark Hunter's fight: hard and fast in C minor, a driving saw bass under
+-- kick, snare and hats, a pulse arpeggio racing over the chords, a thin lead
+local BOSS_TRACK = {
+  bpm = 148,
+  bars = 8,
+  echo = { delay = 0.2, fb = 0.35 },
+  prog = { "Cm", "Cm", "Ab", "Ab", "Bb", "Bb", "G", "G" },
+  chords = {
+    Cm = { root = "C2", fifth = "G2", pad = { "C3", "G3", "C4", "Eb4" }, notes = { "C4", "Eb4", "G4", "Bb4", "C5" } },
+    Ab = { root = "Ab1", fifth = "Eb2", pad = { "Ab2", "Eb3", "Ab3", "C4" }, notes = { "Ab3", "C4", "Eb4", "G4", "Ab4" } },
+    Bb = { root = "Bb1", fifth = "F2", pad = { "Bb2", "F3", "Bb3", "D4" }, notes = { "Bb3", "D4", "F4", "A4", "Bb4" } },
+    G = { root = "G1", fifth = "D2", pad = { "G2", "D3", "G3", "B3" }, notes = { "G3", "B3", "D4", "F4", "G4" } },
+  },
+  channels = {
+    { drum = true, gain = 0.6, steps = 8, tokens = everyBar("k - s - k k s -") },
+    { drum = true, gain = 0.24, steps = 8, tokens = everyBar("h h h h h h h h") },
+    { wave = "saw", gain = 0.1, steps = 8, a = 0.01, r = 0.12, legato = 0.7, tokens = bassPattern("R R R R R R R R") },
+    { wave = "p25", gain = 0.06, steps = 16, pluck = 4, tokens = arpPattern({ 1, 3, 5, 3, 1, 3, 5, 4, 1, 3, 5, 3, 1, 4, 5, 3 }) },
+    { wave = "tri", gain = 0.11, steps = 1, a = 0.3, r = 0.5, legato = 1.0, tokens = padPattern() },
+    {
+      wave = "p125", gain = 0.05, steps = 8, pluck = 3,
+      tokens = explicit({
+        "C5 . . Eb5 . G5 . .", "Bb4 . . . C5 . . .", "Ab4 . . C5 . Eb5 . .", "G4 . . . C5 . . .",
+        "Bb4 . . D5 . F5 . .", "A4 . . . D5 . . .", "G4 . B4 . D5 . G5 .", "F5 . . D5 . B4 . .",
+      }),
+    },
+  },
 }
 
 -- The title screen's theme: a slow, cold drift in D minor with a glassy bell
@@ -1659,7 +2308,8 @@ local effectsOk = false -- OpenAL effects (reverb) available
 local space, spaceTarget = 0, 0 -- how big the place the hunter stands in is: 0 tight tunnel .. 1 cavern, -1 open air
 local listenerX, listenerY = 0, 0
 local lastSpace -- the reverb setting last sent
-local MAX_HEARD = 460 -- px: beyond this a positional sound is silent
+local hearing = 1
+local MAX_HEARD = 420 -- px: beyond this a positional sound is silent
 -- Areas whose theme is a recorded file (looped) rather than synthesised.
 -- To change one: replace the file (or point this at a different one). Its
 -- volume is set automatically from how loud the recording is (AREA_GAIN is
@@ -1670,6 +2320,8 @@ local shopGain = 1
 local AREA_GAIN = {}
 local TARGET_RMS = 0.126 -- the loudness (RMS, 0..1) a recorded theme is brought to
 local menuMusic -- the title screen's theme
+local bossMusic -- a boss fight's own theme (see audio.setBoss)
+local bossOn, bossMix = false, 0
 local recapMusic -- the death recap's theme
 
 function audio.load()
@@ -1732,6 +2384,9 @@ function audio.load()
         tensionMusic[i] = src
       end
     end
+    bossMusic = love.audio.newSource(renderTrack(BOSS_TRACK), "static")
+    bossMusic:setLooping(true)
+    bossMusic:setVolume(0)
     menuMusic = love.audio.newSource(renderTrack(MENU_TRACK), "static")
     menuMusic:setLooping(true)
     menuMusic:setVolume(0)
@@ -1819,7 +2474,7 @@ local function start(name, volume, pitch, x, y)
     if d >= MAX_HEARD then
       return -- (out of earshot: no voice taken)
     end
-    gain = gain * (1 - d / MAX_HEARD) ^ 1.5
+    gain = gain * (1 - d / MAX_HEARD) ^ 2
   end
   local src = voice(def)
   if not src then
@@ -1827,12 +2482,12 @@ local function start(name, volume, pitch, x, y)
   end
   if x then
     src:setRelative(true)
-    src:setPosition(math.max(-1, math.min(1, dx / 160)), 0, -0.4)
+    src:setPosition(math.max(-1, math.min(1, dx / 110)), 0, -0.4)
   else
     src:setRelative(false)
     src:setPosition(0, 0, 0)
   end
-  src:setVolume(def.volume * gain * MASTER * volMaster * volSfx * (0.9 + love.math.random() * 0.2))
+  src:setVolume(def.volume * gain * hearing * MASTER * volMaster * volSfx * (0.9 + love.math.random() * 0.2))
   src:setPitch((pitch or 1) * (0.94 + love.math.random() * 0.12))
   if muffled then
     pcall(src.setFilter, src, MUFFLE)
@@ -1852,6 +2507,11 @@ function audio.playAt(name, x, y, volume, pitch)
 end
 
 -- Where the hunter's ears are (call every frame)
+-- A deaf ear: sound effects come out quieter (1 = hears everything)
+function audio.setHearing(k)
+  hearing = k
+end
+
 function audio.setListener(x, y)
   listenerX, listenerY = x, y
 end
@@ -1875,7 +2535,7 @@ end
 
 local eventTimers = {}
 local lastArea
-local AREA_TRACK = { [6] = 1, [7] = 3, [8] = 2, [9] = 5, [10] = 1, [11] = 2 } -- areas that borrow another's music and sounds
+local AREA_TRACK = {} -- areas that borrow another area's music (none now: every area has its own theme)
 
 -- Fades the wind, the area themes and the shop's piano: underground is 0 (open
 -- air) to 1; area is the number of the area the hunter is in (nil on the
@@ -1953,6 +2613,9 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
     for _, src in pairs(tensionMusic) do
       src:setVolume(0)
     end
+    if bossMusic then
+      bossMusic:setVolume(0)
+    end
     music:setVolume(0)
     return
   end
@@ -1975,14 +2638,22 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
     music:play()
   end
   local fade = math.min(1, dt * 1.2)
+  -- A boss fight's theme takes over from the area's, and its tension layer
+  bossMix = bossMix + ((bossOn and 1 or 0) - bossMix) * math.min(1, dt * (bossOn and 1.5 or 0.6))
+  if bossMusic then
+    if bossMix > 0.01 and not bossMusic:isPlaying() then
+      bossMusic:play()
+    end
+    bossMusic:setVolume(bossMix * 0.16 * MASTER * 2 * volMaster * volMusic)
+  end
   local wind = ambient.wind
   wind:setVolume(wind:getVolume() + (0.10 * windGain * (1 - underground) * MASTER * 2 * volMaster * volSfx - wind:getVolume()) * math.min(1, dt * 1.5))
   for i, src in ipairs(areaMusic) do
-    local target = ((i == area and not inShop) and 0.10 * underground or 0) * (AREA_GAIN[i] or 1)
+    local target = ((i == area and not inShop) and 0.10 * underground * (1 - bossMix) or 0) * (AREA_GAIN[i] or 1)
     src:setVolume(src:getVolume() + (target * MASTER * 2 * volMaster * volMusic - src:getVolume()) * fade)
   end
   for i, src in pairs(tensionMusic) do
-    local target = ((i == area and not inShop) and 0.09 * underground * tension or 0) * (AREA_GAIN[i] or 1)
+    local target = ((i == area and not inShop) and 0.09 * underground * tension * (1 - bossMix) or 0) * (AREA_GAIN[i] or 1)
     src:setVolume(src:getVolume() + (target * MASTER * 2 * volMaster * volMusic - src:getVolume()) * math.min(1, dt * 2))
   end
   music:setVolume(music:getVolume() + ((inShop and 0.13 * shopGain or 0) * MASTER * 2 * volMaster * volMusic - music:getVolume()) * fade)
@@ -2002,6 +2673,11 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
       end
     end
   end
+end
+
+-- A boss fight's music on or off (the Dark Hunter)
+function audio.setBoss(on)
+  bossOn = on and true or false
 end
 
 -- Volume settings (src.settings): master, music and sound effects, each 0..1

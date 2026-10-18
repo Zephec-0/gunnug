@@ -29,6 +29,8 @@ items.rarities = {
   common = { name = "Common", weight = 70, price = { 20, 35 }, border = { 0.55, 0.52, 0.50 } },
   rare = { name = "Rare", weight = 24, price = { 45, 70 }, border = { 0.35, 0.65, 1.0 } },
   cursed = { name = "Cursed", weight = 6, price = { 35, 55 }, border = { 0.85, 0.15, 0.20 } },
+  -- The rarest of all, above rare: so far only the Akimbo perk
+  epic = { name = "Epic", weight = 2, price = { 90, 130 }, border = { 0.72, 0.42, 1.0 } },
   -- Made only in the fuser (src.fuser), never found: weight 0
   fused = { name = "Fused", weight = 0, price = { 80, 110 }, border = { 0.25, 1.0, 0.82 } },
 }

@@ -192,14 +192,6 @@ perks.defs = {
     desc = "Every shot sets enemies alight.",
     fx = { incendiary = 1 },
   },
-  ricochet_master = {
-    name = "Ricochet Master",
-    short = "RM",
-    color = { 0.55, 0.85, 0.95 },
-    rarity = "rare",
-    desc = "Every bullet ricochets once.",
-    fx = { bounces = 1 },
-  },
   needle_sight = {
     name = "Needle Sight",
     short = "NS",
@@ -286,14 +278,35 @@ perks.defs.diving_helm = {
   fx = { diving = 1 },
 }
 
+-- Akimbo: the first Epic perk. Locked until the Dark Hunter at the Needle's
+-- summit falls (he drops it, and from then on it can be rolled like any other
+-- perk, if rarely): the third weapon slot goes, and the guns in the first two
+-- are held one in each hand and fire together (src.inventory, src.player)
+perks.defs.akimbo = {
+  name = "Akimbo",
+  short = "AK",
+  color = { 0.72, 0.42, 1.0 },
+  rarity = "epic",
+  desc = "EPIC: hold the guns in slots 1 and 2 at once, one in each hand: they fire together. You lose the third weapon slot, and reloads take 10% longer.",
+  fx = { reload = 1.1 },
+  gated = true, -- (rolled only once unlocked on the profile: perks.isAvailable)
+}
+
 perks.order = {
   "thick_skin", "iron_will", "second_wind", "scar_tissue", "last_stand", "regeneration", "bloodthirst", "adrenaline",
   "springheel", "fleet_foot", "slick_soles", "double_jump",
   "prospector", "haggler", "lucky_find", "magnetic_pockets",
-  "sharp_eyes", "heavy_hitter", "quick_hands", "momentum", "pyromaniac", "ricochet_master", "needle_sight",
+  "sharp_eyes", "heavy_hitter", "quick_hands", "momentum", "pyromaniac", "needle_sight",
   "death_burst", "juggler", "kicker",
   "glass_cannon", "devils_bargain", "greedy_hands", "berserker", "pact_of_pain",
+  "akimbo",
 }
+
+-- Set by src.meta: function(id) -> may this perk be rolled? (gated ones wait
+-- for their unlock on the profile)
+perks.isAvailable = nil
+-- Set by src.game: called with the perk's id whenever one is taken
+perks.onAdd = nil
 
 -- The run's perks live in its inventory (inv.perks = { id, ... }); this
 -- module reads whichever inventory was bound last (see inventory.new)
@@ -346,8 +359,14 @@ end
 
 -- Adds a perk to the run
 function perks.add(id)
+  if perks.defs[id].gated and perks.has(id) then
+    return -- (one Akimbo is all there is)
+  end
   owned[#owned + 1] = id
   perks.version = perks.version + 1
+  if perks.onAdd then
+    perks.onAdd(id)
+  end
 end
 
 -- A fresh perk instance for UI code (same shape as an item: name, short,
@@ -362,7 +381,7 @@ function perks.roll(count, random)
   random = random or love.math.random
   local pool = {}
   for _, id in ipairs(perks.order) do
-    if not perks.has(id) then
+    if not perks.has(id) and (not perks.defs[id].gated or (perks.isAvailable and perks.isAvailable(id))) then
       pool[#pool + 1] = id
     end
   end

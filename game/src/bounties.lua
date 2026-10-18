@@ -127,13 +127,16 @@ local function roll(p, d, random)
   return nil
 end
 
--- Fills the board back up to three posters (when a run starts)
+-- A fresh board of three posters (when a run starts): last run's posters,
+-- taken or not, are gone
 function bounties.refresh(random)
   local p = save.profile()
   local d = data(p)
   if not d then
     return
   end
+  d.list = {}
+  bounties.reset()
   while #d.list < bounties.POSTED do
     local b = roll(p, d, random)
     if not b then
@@ -207,7 +210,7 @@ local function place(b)
   local a = info.area
   local want = a.y0 + (a.y1 - a.y0) * ((b.depth - 0.5) / 3)
   local best, bestD
-  for _, e in ipairs(enemies.all()) do
+  for _, e in ipairs(enemies.every()) do
     if e.kind == b.kind and not e.dead and not e.def.boss and not e.bounty and catacombs.levelAt(e.body.y, e.body.x) == b.area then
       local dd = math.abs(e.body.y - want)
       if not bestD or dd < bestD then

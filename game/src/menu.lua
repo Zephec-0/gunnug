@@ -56,6 +56,7 @@ local RARITY = {
   rare = { 0.45, 0.72, 1.0 },
   cursed = { 0.95, 0.30, 0.32 },
   fused = { 0.25, 1.0, 0.82 },
+  epic = { 0.78, 0.50, 1.0 },
 }
 
 -- Layout: a 400 x 225 unit space (the game's 640x360 area) centred in the window
@@ -981,6 +982,95 @@ PAGES.camp = function()
     end
   end
 
+  -- The Sawbone: patch-ups and the parts he will take (src.meta LIMBS)
+  if campNpc == "sawbone" then
+    local game = require("src.game")
+    local player, inv = game.player(), game.inventory()
+    local x, y, w = X(200), Y(36), math.floor(186 * u)
+    shadowPrint("Patch up", x, y, F.body, WARM)
+    y = y + F.body:getHeight() + 2 * u
+    local hurt = player and not player.dead and player.hp < player.maxHp
+    local function healRow(id, label, price, color, can, mode)
+      local h = math.floor(12 * u)
+      local focused = widget({ id = id, x = x, y = y, w = w, h = h, activate = function()
+        if can and meta.sawHeal(player, inv, mode) then
+          audio.play("heal")
+          act("refresh")
+        else
+          audio.play("deny")
+        end
+      end })
+      panel(x, y, w, h, focused and 0.95 or 0.82)
+      if focused then
+        focusFrame(x, y, w, h)
+      end
+      shadowPrint(label, x + 5 * u, y + 3 * u, F.body, can and (focused and TEXT or DIM) or FAINT)
+      shadowPrint(price, x + w - 5 * u - F.body:getWidth(price), y + 3 * u, F.body, can and color or FAINT)
+      y = y + h + 2.5 * u
+    end
+    if player and inv then
+      local hHalf, gHalf = meta.sawHealQuote(player, 0.5)
+      local hFull, gFull = meta.sawHealQuote(player, 1)
+      healRow("camp:saw:half", "Half heal (+" .. hHalf .. ")", gHalf .. "g", WARM, hurt and inv.gold >= gHalf, "half")
+      -- One tab for the full heal, with two ways to pay at its right: gold, or marks
+      local h = math.floor(14 * u)
+      panel(x, y, w, h, 0.82)
+      shadowPrint("Full heal (+" .. hFull .. ")", x + 5 * u, y + 4 * u, F.body, hurt and DIM or FAINT)
+      local bw, bh = math.floor(34 * u), math.floor(10 * u)
+      local gx = x + w - 2 * u - bw * 2 - 2 * u
+      local canGold = hurt and inv.gold >= gFull
+      local canMarks = hurt and marks >= meta.SAW_MARKS
+      local function payButton(id, bx, can, mode, draw)
+        local focused = widget({ id = id, x = bx, y = y + 2 * u, w = bw, h = bh, activate = function()
+          if can and meta.sawHeal(player, inv, mode) then
+            audio.play("heal")
+            act("refresh")
+          else
+            audio.play("deny")
+          end
+        end })
+        panel(bx, y + 2 * u, bw, bh, focused and 0.98 or 0.7)
+        if focused then
+          focusFrame(bx, y + 2 * u, bw, bh)
+        end
+        draw(bx, y + 2 * u, bw, bh, can)
+      end
+      payButton("camp:saw:fullgold", gx, canGold, "full", function(bx, by, bw2, bh2, can)
+        local t = gFull .. "g"
+        shadowPrint(t, bx + (bw2 - F.body:getWidth(t)) / 2, by + (bh2 - F.body:getHeight()) / 2, F.body, can and WARM or FAINT)
+      end)
+      payButton("camp:saw:fullmarks", gx + bw + 2 * u, canMarks, "marks", function(bx, by, bw2, bh2, can)
+        local t = tostring(meta.SAW_MARKS)
+        local tw = F.body:getWidth(t) + 9 * u
+        local tx = bx + (bw2 - tw) / 2
+        shadowPrint(t, tx, by + (bh2 - F.body:getHeight()) / 2, F.body, can and meta.SIGIL_COLOR or FAINT)
+        meta.drawSigil(math.floor(tx + F.body:getWidth(t) + 1 * u), math.floor(by + bh2 / 2 - 3.5 * 0.8 * u / 1), math.max(1, math.floor(u * 0.8)), can and 1 or 0.4)
+      end)
+      y = y + h + 2.5 * u
+    end
+    y = y + 2 * u
+    shadowPrint("Take a part", x, y, F.body, WARM)
+    y = y + F.body:getHeight() + 2 * u
+    for _, limb in ipairs(meta.LIMBS) do
+      local on = meta.limbOn(limb.id)
+      local h = math.floor(17 * u)
+      local focused = widget({ id = "camp:limb:" .. limb.id, x = x, y = y, w = w, h = h, activate = function()
+        meta.toggleLimb(limb.id)
+        audio.play(on and "back" or "select")
+        act("refresh") -- (max health may have changed)
+      end })
+      panel(x, y, w, h, focused and 0.95 or 0.82, on and DANGER or nil)
+      if focused then
+        focusFrame(x, y, w, h, on and DANGER or ACCENT)
+      end
+      shadowPrint(limb.name, x + 5 * u, y + 2 * u, F.body, on and { 1, 0.7, 0.6 } or (focused and TEXT or DIM))
+      shadowPrint(on and "TAKEN" or "kept", x + w - 5 * u - F.small:getWidth(on and "TAKEN" or "kept"), y + 2 * u, F.small, on and DANGER or FAINT)
+      shadowPrint("+ " .. limb.gain, x + 5 * u, y + 2 * u + F.body:getHeight(), F.small, { 0.6, 0.9, 0.6 })
+      shadowPrint("- " .. limb.loss, x + 5 * u, y + 2 * u + F.body:getHeight() + F.small:getHeight(), F.small, { 0.95, 0.6, 0.55 })
+      y = y + h + 2 * u
+    end
+  end
+
   -- The Bartender's house rules: switches for the next run
   if campNpc == "bartender" then
     local x, y, w = X(14), Y(36), math.floor(372 * u)
@@ -1126,10 +1216,11 @@ PAGES.camp = function()
         audio.play("deny")
         return
       end
+      local gun = e.category == "weapon"
       confirm({
-        text = "Teach him the " .. e.name .. "?",
-        detail = "It joins the pool for every run. " .. cost .. " marks.",
-        yesLabel = "Teach",
+        text = gun and ("Have him craft the " .. e.name .. "?") or ("Teach him the " .. e.name .. "?"),
+        detail = (gun and "Once he has made one it joins the pool for every run: chests, drops and shops. " or "It joins the pool for every run. ") .. cost .. " marks.",
+        yesLabel = gun and "Craft" or "Teach",
         yes = function()
           if meta.teach(e.category, e.id) then
             audio.play("buy")
@@ -1165,7 +1256,11 @@ PAGES.camp = function()
       local text = (e.desc or "") .. (marks >= cost and "" or "  (Not enough marks.)")
       wrapped(text, gx, dy + F.body:getHeight() + u, gw, F.small, DIM)
     else
-      wrapped("Not seen yet. Bosses, and now and then a chest, give out things he doesn't make; find one and he can learn it.", gx, dy + F.body:getHeight() + u, gw, F.small, FAINT)
+      local hint = "Not seen yet. Bosses, and now and then a chest, give out things he doesn't make; find one and he can learn it."
+      if e.category == "weapon" and meta.SPECIAL_GUNS[e.id] == "queen" then
+        hint = "Not seen yet. The Queen of the Sulfur Vents guards one; bring it back and he can craft it."
+      end
+      wrapped(hint, gx, dy + F.body:getHeight() + u, gw, F.small, FAINT)
     end
   elseif #list > 0 then
     wrapped("Choose something you have seen to teach him.", gx, dy, gw, F.small, FAINT)
@@ -1883,10 +1978,17 @@ PAGES.pause = function()
   love.graphics.setColor(0.03, 0.02, 0.05, 0.62)
   love.graphics.rectangle("fill", 0, 0, ww, wh)
   pageTitle("Paused", ww / 2, Y(34), true)
-  local slot = save.activeSlot()
-  if slot then
-    local who = save.profile() and save.profile().name
-    printCentered((who and (who .. " - ") or "") .. "Slot " .. slot .. " - progress is saved as you play", ww / 2, Y(34) + F.head:getHeight() + 5 * u, F.small, FAINT)
+  local y0 = Y(34) + F.head:getHeight() + 5 * u
+  local okc, catacombs = pcall(require, "src.scenes.catacombs")
+  local sd = okc and catacombs.seed and catacombs.seed()
+  if sd then
+    printCentered("seed - " .. sd, ww / 2, y0, F.small, FAINT)
+    y0 = y0 + F.small:getHeight() + 2 * u
+  end
+  local okr, evs = pcall(require, "src.events")
+  if okr then
+    local secs = math.floor(evs.runTime())
+    printCentered(string.format("Run time  %d:%02d:%02d", math.floor(secs / 3600), math.floor(secs / 60) % 60, secs % 60), ww / 2, y0, F.small, { 0.8, 0.85, 1 })
   end
   local w, h, gap = math.floor(96 * u), math.floor(12 * u), math.floor(3.5 * u)
   local x, y = math.floor((ww - w) / 2), Y(70)

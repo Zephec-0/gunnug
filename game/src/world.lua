@@ -407,10 +407,37 @@ function World:flushRepaints()
   end
 end
 
+-- Cloud: lit from above, white through its body with soft lumps of billow,
+-- going blue in its belly (where open air lies a little way below) rather
+-- than one flat mass darkening inward
+local cloudNoise = love.math.noise
+local function cloudColor(world, def, x, y, depth)
+  if not world:isSolid(x, y - 1) then
+    local c = def.topColor
+    return c[1], c[2], c[3], 1
+  end
+  local puff = cloudNoise(x * 0.035, y * 0.05) * 0.6 + cloudNoise(x * 0.11, y * 0.13, 3.1) * 0.4
+  local lit = 0.72 + (puff - 0.5) * 0.5 - math.min(depth, 20) * 0.006
+  if not world:isSolid(x, y + 3) then
+    lit = lit - 0.45
+  elseif not world:isSolid(x, y + 8) then
+    lit = lit - 0.28
+  elseif not world:isSolid(x, y + 14) then
+    lit = lit - 0.12
+  end
+  lit = math.max(0, math.min(1, lit))
+  local c, s = def.color, def.shadow
+  local v = (noise(x, y) - 0.5) * def.variation
+  return s[1] + (c[1] - s[1]) * lit + v, s[2] + (c[2] - s[2]) * lit + v, s[3] + (c[3] - s[3]) * lit + v, 1
+end
+
 function World:colorAt(x, y, depth)
   local def = defs[self:get(x, y)]
   if not def.solid then
     return 0, 0, 0, 0
+  end
+  if def.cloud then
+    return cloudColor(self, def, x, y, depth or self:depthAt(x, y))
   end
   local base = def.color
   if def.topColor and not self:isSolid(x, y - 1) then
@@ -420,7 +447,7 @@ function World:colorAt(x, y, depth)
   if def.bands then
     v = v + math.sin(y * 0.7 + math.sin(x * 0.05) * 2) * def.bands
   end
-  if def.flecks and noise(x * 3.1, y * 1.7) > 0.58 then
+  if def.flecks and noise(x * 3.1, y * 1.7) > (def.fleckMin or 0.58) then
     local s = shadeFactor(depth or self:depthAt(x, y))
     return def.flecks[1] * s, def.flecks[2] * s, def.flecks[3] * s, 1
   end

@@ -60,7 +60,7 @@ meta.PEOPLE = {
   },
   prospector = {
     name = "The Prospector",
-    found = "Buried under a cave-in in the Catacombs",
+    found = "Buried under a cave-in in the Old Mine",
     blurb = "Upgrades last for every run. His strongbox keeps your gold safe between runs, even through death.",
     held = "rubble", -- (how he is found: src.npcs)
     greeting = {
@@ -86,7 +86,7 @@ meta.PEOPLE.apothecary = {
 }
 meta.PEOPLE.cartographer = {
   name = "The Cartographer",
-  found = "Caged in the Old Quarry",
+  found = "Caged in the Quarry",
   held = "cage",
   blurb = "Upgrades last for every run. The survey map shows what you have walked, and later, what is worth walking to.",
   greeting = {
@@ -105,6 +105,18 @@ meta.PEOPLE.bartender = {
     "Back from the Queen? Then you can handle a stiffer drink.",
     "Rules of the house: you die, you pay. I just add flavour.",
     "A harder room, a fatter purse. Fair deal.",
+  },
+}
+meta.PEOPLE.sawbone = {
+  name = "The Sawbone",
+  found = "Floating on the surface in the Flooded Caverns",
+  held = "float",
+  blurb = "Patches you up between descents, cheaper than the shops, and will take a part of you in exchange for a gift and a price.",
+  greeting = {
+    "Hold still. This will only hurt a bit. Later it will hurt more.",
+    "Everyone's got a spare of something. Mind if I borrow it?",
+    "Gold, marks or a limb. I take all three.",
+    "You look terrible. Sit. Let's talk about your arm.",
   },
 }
 meta.PEOPLE.taxidermist = {
@@ -142,6 +154,18 @@ meta.RULES = {
   { id = "powderkeg", name = "Powder Keg", desc = "Monsters hit 30% harder.", marks = 1.3, enemyDmg = 1.3 },
   { id = "lean", name = "Lean Times", desc = "Shops charge 30% more, healing too.", marks = 1.2, shop = 1.3 },
 }
+-- The Sawbone's trades: each part taken gives a bonus and a penalty (fx tables
+-- like a perk's: multipliers for speed/reload/jump/spread/fireDelay/damage/
+-- dmgTaken/gold/maxHpMult, sums for crit/regen)
+meta.LIMBS = {
+  { id = "arm", name = "An Arm", gain = "Fire rate +30%", loss = "Reloading takes 35% longer", fx = { fireDelay = 0.77, reload = 1.35 } },
+  { id = "leg", name = "A Leg", gain = "Spread -30%, jump +20%", loss = "Move 20% slower, no rolling or kicking", fx = { spread = 0.7, jump = 1.2, speed = 0.8 } },
+  { id = "eye", name = "An Eye", gain = "Critical hits +20%", loss = "Spread +30%, blurred vision", fx = { spread = 1.3, crit = 0.2 } },
+  { id = "ear", name = "An Ear", gain = "Damage +20%", loss = "Sounds are muffled and quiet", fx = { damage = 1.2 } },
+  { id = "spleen", name = "The Spleen", gain = "Slowly mends: 1 health every 3 s", loss = "Take 15% more damage", fx = { regen = 0.33, dmgTaken = 1.15 } },
+  { id = "kidney", name = "A Kidney", gain = "+25% gold from everything", loss = "Max health -15%", fx = { gold = 1.25, maxHpMult = 0.85 } },
+}
+meta.LIMB_MULT = { fireDelay = true, reload = true, spread = true, jump = true, speed = true, damage = true, dmgTaken = true, gold = true, maxHpMult = true }
 meta.MOUNT_ORDER = { "ghoul", "bat", "spitter", "hopper", "bloater", "miner", "roller" }
 
 -- The Prospector's strongbox: how much it holds, by Bigger Strongbox tier
@@ -149,6 +173,20 @@ meta.BANK_CAP = { 100, 250, 600 }
 
 -- Upgrades sold at camp: each has tiers, bought in order with marks
 meta.UPGRADES = {
+  {
+    id = "cheapcuts",
+    npc = "sawbone",
+    name = "Cheap Cuts",
+    desc = "His patch-ups cost 25% less per tier.",
+    costs = { 4, 8 },
+  },
+  {
+    id = "sharpsaw",
+    npc = "sawbone",
+    name = "A Sharper Saw",
+    desc = "What he takes from you pays 20% more per tier (the bonuses grow, the penalties stay).",
+    costs = { 6, 12 },
+  },
   {
     id = "grades",
     npc = "gunsmith",
@@ -255,6 +293,9 @@ function meta.isSeen(category, id, p)
   if (p.found[category] and p.found[category][id] or 0) > 0 then
     return true
   end
+  if category == "weapon" and meta.SPECIAL_GUNS[id] == "gunsmith" and p.camp.gunsmith then
+    return true -- (he handed one over when he was freed, so he can make it)
+  end
   return p.seen[category] ~= nil and p.seen[category][id] == true
 end
 
@@ -288,6 +329,7 @@ function meta.teach(category, id)
     return false
   end
   p.marks = p.marks - cost
+  p.unlocked[category] = p.unlocked[category] or {}
   p.unlocked[category][id] = true
   save.touch()
   save.flush()
@@ -329,12 +371,11 @@ function meta.lockedItem(random)
   return items.new(pool[random(1, #pool)])
 end
 
--- The Gatling gun is the first boss's prize: it turns up nowhere else until
--- a boss has fallen
-function meta.gatlingOpen()
-  local p = profile()
-  return p == nil or (p.stats.bosses or 0) > 0
-end
+-- Guns that never turn up at random until the Gunsmith crafts them (and so
+-- joins them to the pool): each has one source, the first time
+--   automatic  the Gunsmith's gift, the first time he is freed
+--   gatling    the Queen's prize
+meta.SPECIAL_GUNS = { automatic = "gunsmith", gatling = "queen" }
 
 -- No boss has been slain yet on this profile (checked as the first one drops its prize)
 function meta.firstBoss()
@@ -342,12 +383,13 @@ function meta.firstBoss()
   return p ~= nil and (p.stats.bosses or 0) == 0
 end
 
--- A random locked gun archetype (nil if none are left)
+-- A random locked gun archetype (nil if none are left). The special guns
+-- are never among them: they only come from their own source.
 function meta.lockedArchetype(random)
   random = random or love.math.random
   local pool = {}
   for _, id in ipairs(meta.locked("weapon")) do
-    if id ~= "gatling" or meta.gatlingOpen() then
+    if not meta.SPECIAL_GUNS[id] then
       pool[#pool + 1] = id
     end
   end
@@ -355,6 +397,25 @@ function meta.lockedArchetype(random)
     return nil
   end
   return pool[random(1, #pool)]
+end
+
+-- Gated perks (Akimbo): rolled only once the profile has unlocked them
+function meta.perkUnlocked(id, p)
+  p = p or profile()
+  return p ~= nil and p.unlocked.perk ~= nil and p.unlocked.perk[id] == true
+end
+
+-- Unlocks a gated perk for good. Returns true the first time.
+function meta.unlockPerk(id)
+  local p = profile()
+  if not p or meta.perkUnlocked(id, p) then
+    return false
+  end
+  p.unlocked.perk = p.unlocked.perk or {}
+  p.unlocked.perk[id] = true
+  save.touch()
+  save.flush()
+  return true
 end
 
 -- Marks ------------------------------------------------------------------------------
@@ -614,6 +675,56 @@ function meta.toggleRule(id)
 end
 
 -- A run starts: the chosen rules apply to it (and nothing mid-run changes them)
+function meta.limbOn(id)
+  local p = profile()
+  return p ~= nil and p.limbs ~= nil and p.limbs[id] == true
+end
+
+function meta.toggleLimb(id)
+  local p = profile()
+  if not p then
+    return
+  end
+  p.limbs = p.limbs or {}
+  p.limbs[id] = not p.limbs[id] or nil
+  meta.mountsDirty = true
+  save.touch()
+end
+
+-- The Sawbone's patching up: how much a heal of `frac` of max health restores
+-- (at most what is missing) and what it costs in gold
+function meta.sawHealQuote(player, frac)
+  local missing = math.max(0, player.maxHp - player.hp)
+  local heal = math.min(missing, math.ceil(player.maxHp * frac))
+  local p = profile()
+  local disc = 1 - 0.25 * ((p and p.upgrades.cheapcuts) or 0)
+  local gold = heal > 0 and math.max(5, math.floor(heal * 0.9 * disc / 5 + 0.5) * 5) or 0
+  return heal, gold
+end
+
+meta.SAW_MARKS = 2 -- a full heal paid in marks
+
+-- mode: "half", "full" (gold) or "marks" (a full heal for marks). Returns true if done
+function meta.sawHeal(player, inv, mode)
+  if player.dead then
+    return false
+  end
+  if mode == "marks" then
+    if player.hp >= player.maxHp or not spend(meta.SAW_MARKS) then
+      return false
+    end
+    player.hp = player.maxHp
+    return true
+  end
+  local heal, gold = meta.sawHealQuote(player, mode == "half" and 0.5 or 1)
+  if heal <= 0 or inv.gold < gold then
+    return false
+  end
+  inv.gold = inv.gold - gold
+  player.hp = math.min(player.maxHp, player.hp + heal)
+  return true
+end
+
 function meta.beginRun()
   meta.mountsDirty = true
   activeRules = {}
@@ -658,6 +769,27 @@ function meta.mountFx()
     local shop = meta.shopMul()
     if shop ~= 1 then
       out.shopPrice, out.healPrice = shop, shop
+    end
+    -- what the Sawbone has taken: a bonus, and a price (the sharper saw grows the bonus)
+    local sharp = 1 + 0.2 * (p.upgrades.sharpsaw or 0)
+    for _, limb in ipairs(meta.LIMBS) do
+      if p.limbs and p.limbs[limb.id] then
+        for k, v in pairs(limb.fx) do
+          local good
+          if meta.LIMB_MULT[k] then
+            good = (k == "fireDelay" and v < 1) or (k == "spread" and v < 1) or (k == "damage" and v > 1) or (k == "gold" and v > 1) or (k == "jump" and v > 1)
+            if good then
+              v = 1 + (v - 1) * sharp
+              if k == "fireDelay" or k == "spread" then
+                v = math.max(0.2, v)
+              end
+            end
+            out[k] = (out[k] or 1) * v
+          else
+            out[k] = (out[k] or 0) + v * ((k == "crit" or k == "regen") and sharp or 1)
+          end
+        end
+      end
     end
     for kind in pairs(p.mounted) do
       local m = meta.MOUNTS[kind]
@@ -728,6 +860,7 @@ function meta.install()
   guns.isAvailable = function(id)
     return meta.isUnlocked("weapon", id)
   end
+  require("src.perks").isAvailable = meta.perkUnlocked
   guns.rollBoost = function()
     return 1 + 0.15 * meta.tier("grades")
   end

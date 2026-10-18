@@ -30,6 +30,7 @@ local W, H = config.VIRTUAL_W, config.VIRTUAL_H
 local canvas, hazeCanvas, maskCanvas
 local glow -- radial falloff sprite (fallback path)
 local white -- 1x1 sprite the shader quads are drawn with
+local creatureMaskShader
 local lightShader, maskShader, terrainShader, softShader
 local fogGather, fogBlur, fogApply -- fog shaders (nil if unavailable)
 local fogA, fogB -- quarter-size fog canvases, ping-ponged by the blur
@@ -81,6 +82,12 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
   float f = 1.0 - dist / radius;
   float a = pow(f, power) + 0.25 * pow(f, 6.0);
   float vis = 1.0;
+  // A light inside a creature (its own glow) is not shadowed by that creature
+  vec2 lq = lightPos / canvasSize;
+  float creatureGate = 1.0;
+  if (lq.x > 0.0 && lq.y > 0.0 && lq.x < 1.0 && lq.y < 1.0 && Texel(mask, lq).b > 0.0) {
+    creatureGate = 0.0;
+  }
   if (dist > 6.0) {
     float occ = 0.0;
     // Each pixel starts its ray at a different offset, so the shadow edges
@@ -91,7 +98,8 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
       float along = t * dist;
       if (along > 3.0 && along < dist - 3.0) {
         vec2 q = (p + (lightPos - p) * t) / canvasSize;
-        occ += Texel(mask, q).r;
+        vec4 m = Texel(mask, q);
+        occ += max(m.r, m.b * creatureGate);
       }
     }
     occ = occ * dist / 24.0;
@@ -203,7 +211,15 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
 local MASK_SOURCE = [[
 vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
   float a = Texel(tex, uv).a * color.a;
-  return vec4(a, a, a, 1.0);
+  return vec4(a, a, 0.0, 1.0);
+}
+]]
+
+-- Creatures are written to the blue channel only (see the light shader)
+local CREATURE_MASK_SOURCE = [[
+vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
+  float a = Texel(tex, uv).a * color.a;
+  return vec4(0.0, 0.0, a, 1.0);
 }
 ]]
 
@@ -308,6 +324,10 @@ function lighting.load()
   local ok2, b = pcall(love.graphics.newShader, MASK_SOURCE)
   if ok and ok2 then
     lightShader, maskShader = a, b
+    local okC, cm = pcall(love.graphics.newShader, CREATURE_MASK_SOURCE)
+    if okC then
+      creatureMaskShader = cm
+    end
     local okS, sf = pcall(love.graphics.newShader, SOFT_SOURCE)
     if okS then
       softShader = sf
@@ -445,7 +465,10 @@ function lighting.render(camX, camY, drawTerrain, drawOccluders)
     if drawOccluders then
       -- Creatures cast soft shadows too: partial blockers, never darker than rock
       love.graphics.setBlendMode("lighten", "premultiplied")
-      drawOccluders()
+      if creatureMaskShader then
+        love.graphics.setShader(creatureMaskShader)
+        drawOccluders()
+      end
       love.graphics.setBlendMode("alpha")
     end
     love.graphics.pop()

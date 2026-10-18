@@ -264,6 +264,34 @@ function anim.muzzle(player)
   return sx + dx * len, sy + dy * len
 end
 
+-- Akimbo: the second gun, held out in the other hand from the far shoulder,
+-- set off below the first (across the line of aim) and a little back, so the
+-- two guns read as a pair instead of one on top of the other
+local OFFHAND_OFFSET, OFFHAND_BACK = 3, 1.5
+
+local function offhandGrip(player, sx, sy, reach)
+  local f = player.facing
+  local dx, dy = math.cos(player.aimAngle), math.sin(player.aimAngle)
+  local px, py = -dy * f, dx * f
+  if py < 0 then
+    px, py = -px, -py -- (always the lower side of the barrel)
+  end
+  return sx - f * 0.6 + dx * (reach - OFFHAND_BACK) + px * OFFHAND_OFFSET, sy + dy * (reach - OFFHAND_BACK) + py * OFFHAND_OFFSET
+end
+
+function anim.muzzle2(player)
+  local sx, sy = anim.shoulder(player)
+  local gun = player.gun2
+  local hold = HOLDS[gun and gun.def.model or "revolver"] or HOLDS.revolver
+  return offhandGrip(player, sx, sy, hold.reach + (gun and gun.def.length or 8.8))
+end
+
+-- The off-hand gun's kick (its own, so the two guns jump in turn)
+function anim.onShoot2(player)
+  local a = player.anim
+  a.recoil2 = math.max(a.recoil2 or 0, player.gun2 and player.gun2.def.kick or 0.5)
+end
+
 -- Mantle tail: a short verlet chain of cloth hanging from the back of the mantle
 local function updateMantleTail(player, dt)
   local a, b = player.anim, player.body
@@ -413,7 +441,8 @@ local STEP_SOUND = {
   [materials.BEDROCK] = "step_rock", [materials.WOOD] = "step_wood", [materials.BRICK] = "step_rock", [materials.STONEBRICK] = "step_rock",
   [materials.GOLDORE] = "step_rock", [materials.IRON] = "step_metal", [materials.SLATE] = "step_rock", [materials.BLUECLAY] = "step_dirt",
   [materials.SULFUR] = "step_dirt", [materials.BILECLAY] = "step_dirt", [materials.TAILINGS] = "step_dirt", [materials.BASALT] = "step_rock",
-  [materials.ASH] = "step_ash",
+  [materials.ASH] = "step_ash", [materials.DIAMONDORE] = "step_rock", [materials.ICE] = "step_rock",
+  [materials.CLOUD] = "step_sand", [materials.CLOUDBANK] = "step_sand",
 }
 
 -- One footstep: the sound of what is underfoot, and a little puff of it
@@ -464,6 +493,7 @@ function anim.update(player, dt)
   end
   a.squash = math.max(0, a.squash - dt * 6)
   a.recoil = math.max(0, a.recoil - dt * 7)
+  a.recoil2 = math.max(0, (a.recoil2 or 0) - dt * 7)
   a.hurt = math.max(0, a.hurt - dt * 4.5)
   if a.flip then
     a.flip = a.flip + dt / 0.38
@@ -924,12 +954,26 @@ local function drawFigure(player)
     supX, supY = cx + f * 2.4, fy - 3.0
   end
 
+  -- Akimbo: the other hand holds out a second gun instead of steadying the first
+  local gun2 = player.gun2
+  local off = gun2 and not dead and not player.rollT and not k0
+  local off2Angle
+  if off then
+    local hold2 = HOLDS[gun2.def.model] or HOLDS.revolver
+    local r2 = a.recoil2 or 0
+    supX, supY = offhandGrip(player, sx, sy, hold2.reach - r2 * hold2.pull)
+    off2Angle = aim - f * (r2 * hold2.tip + a.hurt * 0.5)
+  end
+
   local fx1, fy1, fx2, fy2, bend = footTargets(player, cx, fy)
 
   -- Back to front: mantle tail, back arm, legs, coat over the thighs, mantle,
   -- head, gun, front arm
   if not player.rollT then
     drawMantleTail(player) -- (its cloth trails in the world, so it would flail in a somersault)
+  end
+  if off then
+    drawGun(gun2, supX, supY, off2Angle, f) -- (behind the body, in the far hand)
   end
   drawArm(sx - f * 0.6, sy, supX, supY, COLORS.coatDark)
   drawLeg(hipX - f * 0.6, hipY, fx2, fy2, bend, COLORS.trousersDark, COLORS.bootsDark)
@@ -947,6 +991,44 @@ local function drawFigure(player)
     pixel(carryX + f, carryY - 1, name == "shotgun" and { 0.72, 0.17, 0.13 } or { 0.85, 0.66, 0.25 })
     pixel(carryX + f, carryY, name == "shotgun" and { 0.85, 0.66, 0.25 } or COLORS.gunMid)
   end
+  -- What the Sawbone has taken: a little blood where it was
+  if player.noWounds then
+    return
+  end
+  local meta = require("src.meta")
+  local BL, BD = { 0.78, 0.06, 0.08 }, { 0.46, 0.03, 0.06 }
+  local hx, hy = headOrigin(neckX, neckY, f)
+  local left = f > 0 and hx - 2 or hx
+  if meta.limbOn("arm") then
+    -- the arm ends in a red bandage, and drips
+    local mx, my = sx + (supX - sx) * 0.55, sy + (supY - sy) * 0.55
+    pixel(mx, my, BL)
+    pixel(mx + f * 0.5, my + 0.5, BL)
+    pixel(mx, my + 1, BD)
+    pixel(sx - f * 0.6, sy + 0.5, BL)
+  end
+  if meta.limbOn("leg") then
+    local mx, my = hipX + (fx1 - hipX) * 0.55, hipY + (fy1 - hipY) * 0.55
+    pixel(mx, my, BL)
+    pixel(mx + f * 0.5, my + 0.5, BD)
+    pixel(mx, my + 1, BL)
+  end
+  if meta.limbOn("eye") then
+    pixel(f > 0 and left + 2 or left, hy + 1, BL)
+    pixel(f > 0 and left + 2 or left, hy + 2, BD)
+  end
+  if meta.limbOn("ear") then
+    pixel(f > 0 and left - 1 or left + 3, hy + 1, BL)
+    pixel(f > 0 and left - 1 or left + 3, hy + 2, BD)
+  end
+  if meta.limbOn("spleen") then
+    pixel(hipX - f * 0.8, neckY + 3, BL)
+    pixel(hipX - f * 0.8, neckY + 4, BD)
+  end
+  if meta.limbOn("kidney") then
+    pixel(hipX - f * 1.4, hipY - 1.5, BL)
+    pixel(hipX - f * 1.4, hipY - 0.5, BD)
+  end
 end
 
 -- Draws the hunter. A dying hunter topples over from the feet; a double
@@ -954,6 +1036,34 @@ end
 function anim.draw(player)
   turned(player, function()
     drawFigure(player)
+  end)
+end
+
+-- Draws a figure built like the hunter in other colours: palette maps
+-- COLORS keys (coat, hat, eye, ...) to colours for this one drawing (the
+-- Dark Hunter, src.darkhunter). eyesOnly draws just the glowing eyes.
+local function styled(palette, fn)
+  local saved = {}
+  for k, c in pairs(palette) do
+    saved[k] = COLORS[k]
+    COLORS[k] = c
+  end
+  local ok, err = pcall(fn)
+  for k, c in pairs(saved) do
+    COLORS[k] = c
+  end
+  if not ok then
+    error(err, 0)
+  end
+end
+
+function anim.drawStyled(player, palette, eyesOnly)
+  styled(palette, function()
+    if eyesOnly then
+      anim.drawEyes(player)
+    else
+      anim.draw(player)
+    end
   end)
 end
 

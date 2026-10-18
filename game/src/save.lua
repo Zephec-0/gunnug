@@ -130,6 +130,7 @@ local function fresh()
     trophies = {}, -- monster kind -> elites of it slain
     bank = 0, -- gold in the Prospector's strongbox
     rules = {}, -- the Bartender's house rules switched on: id -> true
+    limbs = {}, -- what the Sawbone has taken (and paid for in bonuses): id -> true
     mounted = {}, -- monster kind -> level the Taxidermist has mounted its trophy to (0 or absent: not yet)
     board = false, -- the bounty board has gone up (an elite slain, then a death)
   }

@@ -316,6 +316,17 @@ local function step(b, dt, w)
       return finish(b, w, b.x, b.y, true)
     end
 
+    -- Shock rounds charge the water they enter, frost rounds freeze its surface
+    if not b.child and not b.watered and (has(fx, "shock") or has(fx, "freeze")) and fluids.waterAt(nx, ny) then
+      b.watered = true
+      if has(fx, "shock") then
+        fluids.zap(nx, ny, b.damage)
+      end
+      if has(fx, "freeze") then
+        fluids.freeze(nx, ny)
+      end
+    end
+
     local prop = props.hitTest(nx, ny)
     if prop then
       b.x, b.y = nx, ny
@@ -434,6 +445,13 @@ local function steer(b, dt)
     b.dx, b.dy = -b.dx, -b.dy
     b.hit = {}
     b.life = math.max(b.life, 0.8)
+  end
+end
+
+-- Calls fn(bullet) for every bullet in flight (for the fog to be pushed by)
+function bullets.each(fn)
+  for _, b in ipairs(list) do
+    fn(b)
   end
 end
 

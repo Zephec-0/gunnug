@@ -16,6 +16,16 @@ local DEFAULTS = {
   fullscreen = false,
   vsync = true,
   postfx = true, -- bloom, colour grading and the menu's warp
+  dither = 0, -- anti-banding noise: 0 off ... 5 (see render.DITHER_NAMES)
+  -- The visuals panel (F4, see src.visuals)
+  visDitherAmt = 1,
+  visBloom = 0.6,
+  visBright = 1,
+  visGamma = 1,
+  visContrast = 0,
+  visSat = 1,
+  visVig = 1,
+  visAberr = 1,
   showFps = false,
   pauseOnFocusLoss = true,
   lastSlot = false, -- the profile played last (Continue on the title screen)
@@ -34,6 +44,12 @@ local values = {}
 local function apply()
   audio.setVolumes(values.masterVolume, values.musicVolume, values.sfxVolume)
   require("src.render").post = values.postfx
+  local render = require("src.render")
+  render.dither = values.dither
+  render.bloom = values.visBloom
+  local adj = render.adj
+  adj.ditherAmt, adj.bright, adj.gamma = values.visDitherAmt, values.visBright, values.visGamma
+  adj.contrast, adj.sat, adj.vig, adj.aberr = values.visContrast, values.visSat, values.visVig, values.visAberr
   local overlay = package.loaded["lib.overlayStats"]
   if overlay then
     overlay.isActive = values.showFps
@@ -82,6 +98,23 @@ end
 -- Changes a setting, applies it and writes the file
 function settings.set(key, value)
   values[key] = value
+  apply()
+  settings.save()
+end
+
+-- Changes a setting and applies it without writing the file (a slider mid-drag)
+function settings.preview(key, value)
+  values[key] = value
+  apply()
+end
+
+-- Puts the visuals panel's sliders back to their defaults
+function settings.resetVisuals()
+  for k, v in pairs(DEFAULTS) do
+    if k == "dither" or k:sub(1, 3) == "vis" then
+      values[k] = v
+    end
+  end
   apply()
   settings.save()
 end

@@ -87,6 +87,7 @@ fluids.exposure = 0
 
 function fluids.clear()
   gas, water, fire, smoke, vents, braziers, columns = {}, {}, {}, {}, {}, {}, {}
+  fluids.gasDwell = 0
   oil, oilActive, oilRows = {}, {}, {}
   lavaFlow.active, lavaFlow.rows, lavaFlow.tick, lavaFlow.moved = {}, {}, 0, false
   addJobs = {}
@@ -600,6 +601,108 @@ end
 
 function fluids.waterAt(x, y)
   return water[cellOf(x, y)] == true
+end
+
+local lastPlayer, lastEnemies -- set each frame by fluids.update (for zap)
+
+-- Shock rounds into water: the whole connected body of it (up to a cap of
+-- cells) is charged, hurting everything standing or swimming in it
+local ZAP_CELLS = 2500
+function fluids.zap(x, y, damage)
+  local start = cellOf(x, y)
+  if not water[start] then
+    return
+  end
+  local set, queue, head, n = { [start] = true }, { start }, 1, 1
+  while head <= #queue and n < ZAP_CELLS do
+    local k = queue[head]
+    head = head + 1
+    for _, d in ipairs({ 1, -1, K, -K }) do
+      local nk = k + d
+      if water[nk] and not set[nk] then
+        set[nk] = true
+        queue[#queue + 1] = nk
+        n = n + 1
+      end
+    end
+  end
+  local r = love.math.random
+  -- crackling sparks over the water's cells
+  for _ = 1, math.min(60, #queue) do
+    local gx, gy = coords(queue[r(#queue)])
+    effects.particle(gx * C + HALF, gy * C + HALF, (r() - 0.5) * 30, -10 - r() * 30, 0.35, { 0.65, 0.8, 1 }, 0, true)
+  end
+  effects.ring(x, y, 18, { 0.6, 0.7, 1 })
+  audio.playAt("steam_hiss", x, y, 0.5)
+  local dmg = math.max(6, math.floor(damage * 1.5 + 0.5))
+  local function wet(body)
+    return set[cellOf(body.x + body.w / 2, body.y + body.h - 2)] or set[cellOf(body.x + body.w / 2, body.y + body.h / 2)]
+  end
+  for _, e in ipairs(lastEnemies and lastEnemies.nearby() or {}) do
+    if not e.dead and wet(e.body) then
+      lastEnemies.damage(e, dmg, 0, 0, 0, false, nil)
+      e.zap = 0.5
+    end
+  end
+  local p = lastPlayer
+  if p and not p.dead and wet(p.body) then
+    p:hurtOverTime(math.max(2, math.floor(dmg / 3)), { 0.65, 0.8, 1 }, "shock")
+  end
+end
+
+-- Frost rounds into water: the surface around the hit freezes into a skin of
+-- ice the hunter can stand on (it can be dug through)
+function fluids.freeze(x, y)
+  local k0 = cellOf(x, y)
+  if not water[k0] then
+    return
+  end
+  local top = k0
+  while water[top - K] do
+    top = top - K
+  end
+  local frozen = false
+  local ix0, iy0, ix1, iy1 = math.huge, math.huge, -math.huge, -math.huge
+  for dx = -7, 7 do
+    local k = top + dx
+    -- the surface at that column: up or down a few cells to find it
+    local found
+    for off = -3, 3 do
+      local kk = k + off * K
+      if water[kk] and not water[kk - K] then
+        found = kk
+        break
+      end
+    end
+    if found then
+      for layer = 0, 1 do
+        local kk = found + layer * K
+        if water[kk] then
+          setWater(kk, nil)
+          local gx, gy = coords(kk)
+          for py = gy * C, gy * C + C - 1 do
+            for px = gx * C, gx * C + C - 1 do
+              world:set(px, py, materials.ICE)
+            end
+          end
+          ix0, iy0 = math.min(ix0, gx * C), math.min(iy0, gy * C)
+          ix1, iy1 = math.max(ix1, gx * C + C), math.max(iy1, gy * C + C)
+          frozen = true
+        end
+      end
+    end
+  end
+  if frozen then
+    local r = love.math.random
+    for _ = 1, 14 do
+      effects.particle(ix0 + r() * (ix1 - ix0), iy0, (r() - 0.5) * 24, -8 - r() * 20, 0.6, { 0.78, 0.93, 1 }, 60, true)
+    end
+    effects.ring(x, y, 14, { 0.75, 0.92, 1 })
+    pcall(function()
+      world:repaintRegion(ix0 - 2, iy0 - 2, ix1 + 2, iy1 + 2)
+      require("src.physics").rebuildRegion(ix0 - 2, iy0 - 2, ix1 + 2, iy1 + 2)
+    end)
+  end
 end
 
 -- Is any part of the box (head, middle or feet) in water?
@@ -1232,6 +1335,7 @@ function fluids.update(dt, player, enemies)
   if not world then
     return
   end
+  lastPlayer, lastEnemies = player, enemies
   clock = clock + dt
   fluids.runJobs(ADD_BUDGET)
   local b = player.body
@@ -1361,17 +1465,20 @@ function fluids.update(dt, player, enemies)
   local inCol = fluids.inColumn(px, py)
   local inGas = not player.dead and (inCol or math.max(gas[headK] or 0, gas[midK] or 0) > 0.12)
   if inGas then
+    fluids.gasDwell = math.min(8, (fluids.gasDwell or 0) + dt)
     gasTimer = gasTimer - dt
     if gasTimer <= 0 then
       gasTimer = TICK
       local c = math.max(gas[headK] or 0, gas[midK] or 0)
-      player:hurtOverTime(inCol and COLUMN_DAMAGE or math.floor(GAS_DAMAGE * (0.6 + c) + 0.5), GAS_COLOR, "gas")
+      local ramp = 1 + (fluids.gasDwell or 0) * 0.25
+      player:hurtOverTime(math.floor((inCol and COLUMN_DAMAGE or GAS_DAMAGE * (0.6 + c)) * ramp + 0.5), GAS_COLOR, "gas")
       audio.play("hurt", 0.35)
     end
     if love.math.random() < dt * 6 then
       effects.particle(px + player.facing * 3, b.y + 5, player.facing * 14, -10, 0.6, GAS_COLOR, -20, true)
     end
   else
+    fluids.gasDwell = math.max(0, (fluids.gasDwell or 0) - dt * 2)
     gasTimer = math.min(TICK, gasTimer + dt)
   end
   fluids.exposure = fluids.exposure + ((inGas and 1 or 0) - fluids.exposure) * math.min(1, dt * 4)
@@ -1517,8 +1624,8 @@ end
 -- they come back); they flash red once he is drowning
 local function drawBreath(t)
   local p = breathPlayer
-  if not p or p.dead then
-    return
+  if not p or p.dead or perks.sum("diving") > 0 then
+    return -- (the Diving Helm breathes for him: no bubbles)
   end
   local breath = p.breath or BREATH_BUBBLES
   if breath >= BREATH_BUBBLES - 0.001 and not p.submerged then
@@ -2082,13 +2189,18 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
   }
   vec3 col = mix(vec3(0.13, 0.31, 0.42), vec3(0.27, 0.54, 0.56), near);
   vec2 wp = floor(sc + cam);
+  // the Flooded Caverns' water (the west) is tinged purple
+  if (wp.x < -380.0) {
+    col = mix(col, col * vec3(1.45, 0.82, 1.6) + vec3(0.03, 0.0, 0.05), 0.65);
+  }
   if (hash(floor(wp / 2.0)) < 0.07) {
     col = mix(col, vec3(0.32, 0.56, 0.58), 0.15);
   }
   if (hash(wp + floor(time * 2.0) * 7.0) > 0.9993) {
     col = vec3(0.8, 0.92, 0.95);
   }
-  return vec4(col, 0.74);
+  // (the west's water is 40% more see-through)
+  return vec4(col, wp.x < -380.0 ? 0.444 : 0.74);
 }
 ]]
 local waterBody

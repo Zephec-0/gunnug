@@ -44,7 +44,7 @@ function compare.keypressed(key)
     return
   end
   local n = tonumber(key)
-  if n and n >= 1 and n <= inventory.WEAPON_SLOTS then
+  if n and n >= 1 and n <= inventory.weaponSlots() then
     choose(n)
   elseif key == "escape" or input.is("interact", key) or input.is("inventory", key) or key == "backspace" then
     compare.close()
@@ -132,7 +132,7 @@ function compare.draw(inv, u)
 
   hitboxes = {}
   local carriedH = 34 * u
-  for i = 1, inventory.WEAPON_SLOTS do
+  for i = 1, inventory.weaponSlots() do
     local gun = inv.weapons[i]
     if gun then
       local isHover = hovered == i

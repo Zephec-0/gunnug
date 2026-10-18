@@ -234,6 +234,10 @@ function hud.draw(player, scale)
   local hpText = tostring(math.floor(player.hp))
   shadowText(hpText, x - f:getWidth(hpText) - 4 * u, y + barH / 2 - f:getHeight() / 2, f)
 
+  if player.gun2 then
+    -- Akimbo: the other hand's magazine sits behind the first's, faded to a purple-grey
+    hud.drawGunStatus(player.gun2, ww, margin, y + barH, u, f, { behind = true })
+  end
   if player.gun then
     hud.drawGunStatus(player.gun, ww, margin, y + barH, u, f)
   end
@@ -425,8 +429,31 @@ local function drawPoof(kind, cx, cy, q, age, seed)
   end
 end
 
--- Pips, name and reload bar of the held gun, right-aligned below the health bar
-function hud.drawGunStatus(gun, ww, margin, top, u, f)
+-- A faded purple-grey wash over whatever is drawn while it is set (the off-hand gun's magazine)
+local BEHIND = [[
+vec4 effect(vec4 c, Image t, vec2 uv, vec2 sc) {
+  vec4 p = Texel(t, uv) * c;
+  float g = dot(p.rgb, vec3(0.4, 0.4, 0.2));
+  vec3 col = mix(vec3(g), vec3(0.50, 0.42, 0.72) * (0.55 + g * 0.8), 0.65);
+  return vec4(col, p.a * 0.5);
+}
+]]
+local behindShader
+
+-- Pips, name and reload bar of the held gun, right-aligned below the health bar.
+-- opts.behind: the off-hand gun of Akimbo, drawn behind and to the lower left, faded, with no name
+function hud.drawGunStatus(gun, ww, margin, top, u, f, opts)
+  local behind = opts and opts.behind
+  if behind then
+    if behindShader == nil then
+      local ok, sh = pcall(love.graphics.newShader, BEHIND)
+      behindShader = ok and sh or false
+    end
+    if behindShader then
+      love.graphics.setShader(behindShader)
+    end
+    ww, top = ww - 5 * u, top + 4 * u
+  end
   local count = gun:maxChambers()
   local kind = pipKind(gun, count)
   local q = math.max(1, math.floor(u * 0.5 + 0.5))
@@ -481,6 +508,10 @@ function hud.drawGunStatus(gun, ww, margin, top, u, f)
   end
 
   love.graphics.setColor(1, 1, 1)
+  if behind then
+    love.graphics.setShader()
+    return
+  end
   shadowText(gun.name, x0 - f:getWidth(gun.name) - 4 * u, cy - f:getHeight() / 2, f)
 
   -- Reloading: the word waves, filling from red to gold as the reload goes

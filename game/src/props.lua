@@ -212,6 +212,29 @@ local function drawGeode(p)
   end
 end
 
+-- Things of the sea floor: a frond of kelp, and a tube sponge
+local function drawKelp(p)
+  local x, y = topLeft(p)
+  local t = love.timer.getTime() + (p.seed or 0)
+  for k = 0, 17 do
+    local sway = math.floor(math.sin(t * 1.6 + k * 0.35) * (k / 17) * 1.6 + 0.5)
+    rects(x, y, { { 2 + sway, 17 - k, 1, 1 } }, k % 4 == 0 and { 0.42, 0.55, 0.20 } or { 0.24, 0.40, 0.18 })
+    if k % 5 == 2 then
+      rects(x, y, { { 3 + sway, 17 - k, 2, 1 }, { 0 + sway, 16 - k, 2, 1 } }, { 0.30, 0.48, 0.20 })
+    end
+  end
+end
+
+local function drawSeaSponge(p)
+  local x, y = topLeft(p)
+  local c1, c2 = { 0.86, 0.44, 0.52 }, { 0.62, 0.26, 0.38 }
+  rects(x, y, { { 1, 3, 3, 5 }, { 4, 1, 3, 7 }, { 7, 4, 3, 4 } }, c1)
+  rects(x, y, { { 1, 3, 1, 5 }, { 4, 1, 1, 7 }, { 7, 4, 1, 4 } }, { 0.98, 0.66, 0.70 })
+  rects(x, y, { { 3, 3, 1, 5 }, { 6, 1, 1, 7 }, { 9, 4, 1, 4 } }, c2)
+  rects(x, y, { { 1, 3, 2, 1 }, { 4, 1, 2, 1 }, { 7, 4, 2, 1 } }, { 0.30, 0.10, 0.18 }) -- the open tops
+  rects(x, y, { { 0, 7, 10, 1 } }, { 0.50, 0.22, 0.30 })
+end
+
 local function drawEmberPot(p)
   local x, y = topLeft(p)
   rects(x, y, { { 1, 2, 7, 1 }, { 0, 3, 9, 4 }, { 1, 7, 7, 2 }, { 2, 9, 5, 1 } }, { 0.24, 0.20, 0.20 })
@@ -396,6 +419,18 @@ props.defs = {
     light = { radius = 64, intensity = 0.8 }, -- (colour: the area's)
     gravityScale = 0.35, friction = 0.6, restitution = 0.1, linearDamping = 0.4, angularDamping = 0.6,
     showDamage = true, draw = drawSporePod, emit = emitSporePod,
+  },
+  kelp = {
+    width = 5, height = 18, mass = 0.15, hp = 4, gold = { 0, 2 }, itemChance = 0.02,
+    shard = { 0.28, 0.46, 0.20 },
+    gravityScale = 0.15, friction = 0.8, restitution = 0.05, linearDamping = 1.2, angularDamping = 1.5,
+    showDamage = false, draw = drawKelp,
+  },
+  seaSponge = {
+    width = 10, height = 8, mass = 0.3, hp = 8, gold = { 1, 5 }, itemChance = 0.05,
+    shard = { 0.86, 0.44, 0.52 },
+    gravityScale = 0.3, friction = 0.8, restitution = 0.05, linearDamping = 0.8, angularDamping = 1.0,
+    showDamage = true, draw = drawSeaSponge,
   },
   geode = {
     width = 11, height = 9, mass = 2.5, hp = 26, gold = { 4, 11 }, itemChance = 0.15,

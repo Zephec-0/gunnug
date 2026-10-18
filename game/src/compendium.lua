@@ -148,8 +148,7 @@ local function build()
     })
   end
 
-  -- Commons first (each followed by its +1 to +4, a row of five in the
-  -- grid), then the rare and cursed ones, then the fused
+  -- Commons first, then the rare and cursed ones, then the fused
   local itemOrder = {}
   for _, id in ipairs(items.order) do
     if items.levelable(id) then
@@ -168,7 +167,8 @@ local function build()
     local d = items.defs[id]
     local thing = items.new(id)
     local a, b = items.recipe(id)
-    add(d.kind == "ammo" and "ammo" or "attachment", {
+    local cat = d.kind == "ammo" and "ammo" or "attachment"
+    local entry = {
       id = id,
       name = d.name,
       desc = d.desc or "",
@@ -181,22 +181,29 @@ local function build()
         { items.defs[a].kind, a, items.defs[a].name },
         { items.defs[b].kind, b, items.defs[b].name },
       } or nil,
-    })
-    -- Common ones can be fused with themselves, up to +4: each level gets its own entry
+    }
+    add(cat, entry)
+    -- Common ones can be fused with themselves, up to +4. They share the one
+    -- tile (greyed tier bars that light as each is collected); each level still
+    -- has an entry of its own to look up, but isn't listed
     if items.levelable(id) then
+      entry.tiers = {}
       for level = 1, items.MAX_LEVEL do
         local lv = items.new(id, level)
-        add(d.kind == "ammo" and "ammo" or "attachment", {
-          id = items.key(id, level),
+        local key = items.key(id, level)
+        entry.tiers[level] = key
+        byKey[cat .. ":" .. key] = {
+          category = cat,
+          id = key,
           name = lv.name,
           desc = lv.desc,
           rarity = d.rarity,
           color = d.color,
-          image = icons.get(thing),
+          image = entry.image,
           short = d.short,
           level = level,
           base = { d.kind, id, d.name },
-        })
+        }
       end
     end
   end

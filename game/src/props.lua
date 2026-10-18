@@ -103,38 +103,91 @@ end
 local function drawCrate(p)
   local w, h = p.width, p.height
   local x, y = -math.floor(w / 2), -math.floor(h / 2)
-  love.graphics.setColor(0.52, 0.37, 0.24)
-  love.graphics.rectangle("fill", x, y, w, h)
-  -- Plank seams
-  love.graphics.setColor(0.40, 0.28, 0.18)
-  love.graphics.rectangle("fill", x, y + math.floor(h / 3), w, 1)
-  love.graphics.rectangle("fill", x, y + math.floor(2 * h / 3), w, 1)
-  -- Diagonal brace, one pixel per step
-  love.graphics.setColor(0.32, 0.22, 0.14)
-  for i = 2, w - 3 do
-    love.graphics.rectangle("fill", x + i, y + math.floor(i * (h - 1) / (w - 1)), 1, 1)
+  local seed = math.floor((p.seed or 0) * 100)
+  local function R(c, rx, ry, rw, rh)
+    love.graphics.setColor(c)
+    love.graphics.rectangle("fill", x + rx, y + ry, rw, rh)
   end
-  love.graphics.setColor(0.22, 0.15, 0.10)
+  local WOOD, WOOD_L, WOOD_D, WOOD_DD = { 0.54, 0.38, 0.24 }, { 0.66, 0.49, 0.32 }, { 0.40, 0.28, 0.18 }, { 0.24, 0.16, 0.11 }
+  -- Three boards, each lit along its top edge and shaded under
+  local bh = (h - 2) / 3
+  for i = 0, 2 do
+    local by = 1 + math.floor(i * bh)
+    local bb = 1 + math.floor((i + 1) * bh)
+    R(WOOD, 1, by, w - 2, bb - by)
+    R(WOOD_L, 1, by, w - 2, 1)
+    R(WOOD_D, 1, bb - 1, w - 2, 1)
+    -- grain: a few dashes, different on every crate
+    for k = 0, 2 do
+      local gx = 2 + (seed * 7 + i * 5 + k * 4) % (w - 6)
+      R(WOOD_D, gx, by + 1, 2, 1)
+    end
+    -- a knot now and then
+    if (seed + i) % 3 == 0 then
+      R(WOOD_DD, 3 + (seed * 3 + i) % (w - 7), by + math.floor((bb - by) / 2), 1, 1)
+    end
+  end
+  -- Upright slats at both ends hold the boards together
+  R(WOOD_D, 1, 1, 2, h - 2)
+  R(WOOD_D, w - 3, 1, 2, h - 2)
+  R(WOOD_L, 1, 1, 1, h - 2)
+  R(WOOD, w - 3, 1, 1, h - 2)
+  -- Diagonal brace, one pixel per step, lit on its upper edge
+  for i = 3, w - 4 do
+    local by = 1 + math.floor((i - 3) * (h - 3) / (w - 7))
+    R(WOOD_DD, i, by, 1, 1)
+    R(WOOD_L, i, by - 1 < 1 and 1 or by - 1, 1, 1)
+  end
+  -- Nails at the slats' ends
+  for _, c in ipairs({ { 1, 1 }, { w - 2, 1 }, { 1, h - 2 }, { w - 2, h - 2 } }) do
+    R({ 0.72, 0.70, 0.66 }, c[1], c[2], 1, 1)
+  end
+  -- Dark outline, with the corners left a shade lighter so it reads as rounded
+  love.graphics.setColor(0.17, 0.11, 0.08)
   frame(x, y, w, h, 1)
+  R({ 0.30, 0.20, 0.13 }, 0, 0, 1, 1)
+  R({ 0.30, 0.20, 0.13 }, w - 1, 0, 1, 1)
+  R({ 0.30, 0.20, 0.13 }, 0, h - 1, 1, 1)
+  R({ 0.30, 0.20, 0.13 }, w - 1, h - 1, 1, 1)
 end
 
 local function drawIronCrate(p)
   local w, h = p.width, p.height
   local x, y = -math.floor(w / 2), -math.floor(h / 2)
-  love.graphics.setColor(0.30, 0.31, 0.36)
-  love.graphics.rectangle("fill", x, y, w, h)
-  love.graphics.setColor(0.41, 0.42, 0.48)
-  love.graphics.rectangle("fill", x + 2, y + 2, w - 4, 1) -- top highlight
-  -- Brass band across the middle
-  love.graphics.setColor(0.56, 0.44, 0.24)
-  love.graphics.rectangle("fill", x + 1, y + math.floor(h / 2) - 1, w - 2, 2)
-  love.graphics.setColor(0.14, 0.14, 0.17)
-  frame(x, y, w, h, 1)
-  -- Corner rivets
-  love.graphics.setColor(0.58, 0.60, 0.66)
-  for _, c in ipairs({ { 2, 2 }, { w - 3, 2 }, { 2, h - 3 }, { w - 3, h - 3 } }) do
-    love.graphics.rectangle("fill", x + c[1], y + c[2], 1, 1)
+  local seed = math.floor((p.seed or 0) * 100)
+  local function R(c, rx, ry, rw, rh)
+    love.graphics.setColor(c)
+    love.graphics.rectangle("fill", x + rx, y + ry, rw, rh)
   end
+  local IRON, IRON_L, IRON_D = { 0.30, 0.31, 0.36 }, { 0.43, 0.44, 0.50 }, { 0.19, 0.20, 0.24 }
+  local BRASS, BRASS_L, BRASS_D = { 0.58, 0.45, 0.24 }, { 0.78, 0.64, 0.36 }, { 0.38, 0.28, 0.14 }
+  R(IRON, 0, 0, w, h)
+  -- Four riveted panels, each with a lit top-left edge and a shaded bottom-right
+  local half = math.floor(w / 2)
+  for _, q in ipairs({ { 1, 1 }, { half + 1, 1 }, { 1, math.floor(h / 2) + 1 }, { half + 1, math.floor(h / 2) + 1 } }) do
+    local pw, ph = half - 2, math.floor(h / 2) - 2
+    R(IRON_L, q[1], q[2], pw, 1)
+    R(IRON_L, q[1], q[2], 1, ph)
+    R(IRON_D, q[1] + 1, q[2] + ph - 1, pw - 1, 1)
+    R(IRON_D, q[1] + pw - 1, q[2] + 1, 1, ph - 1)
+  end
+  -- Scuffs and a streak of rust
+  R({ 0.50, 0.51, 0.57 }, 3 + seed % (w - 8), 3 + (seed * 3) % (h - 8), 2, 1)
+  R({ 0.46, 0.27, 0.18 }, 2 + (seed * 5) % (w - 6), h - 4, 1, 3)
+  -- Brass band across the middle with a bolt in it, and brackets on the corners
+  R(BRASS, 0, math.floor(h / 2) - 1, w, 2)
+  R(BRASS_L, 0, math.floor(h / 2) - 1, w, 1)
+  R(BRASS_D, 0, math.floor(h / 2), w, 1)
+  R(BRASS_D, half - 1, math.floor(h / 2) - 1, 2, 2)
+  R(BRASS_L, half - 1, math.floor(h / 2) - 1, 1, 1)
+  for _, c in ipairs({ { 0, 0, 1, 1 }, { w - 3, 0, -1, 1 }, { 0, h - 3, 1, -1 }, { w - 3, h - 3, -1, -1 } }) do
+    R(BRASS, c[1], c[2], 3, 3)
+    R(BRASS_L, c[1], c[2], 3, 1)
+    R(BRASS_D, c[1] + 2, c[2], 1, 3)
+    R({ 0.18, 0.13, 0.08 }, c[1] + 1, c[2] + 1, 1, 1)
+  end
+  love.graphics.setColor(0.10, 0.10, 0.13)
+  frame(x, y, w, h, 1)
 end
 
 -- Breakable pots, pouches and lamps found about the areas. Each is drawn from
@@ -401,7 +454,7 @@ props.defs = {
   lantern = {
     width = 7, height = 11, mass = 0.5, hp = 10, gold = { 0, 3 }, itemChance = 0.05,
     shard = { 0.95, 0.75, 0.35 },
-    light = { radius = 80, color = { 1, 0.68, 0.34 }, intensity = 0.9 },
+    light = { radius = 68, color = { 1, 0.68, 0.34 }, intensity = 0.6 },
     gravityScale = 0.4, friction = 0.5, restitution = 0.15, linearDamping = 0.3, angularDamping = 0.5,
     showDamage = true, draw = drawLantern, emit = emitLantern,
     oil = 24, -- cells of lamp oil inside: spilt as it is shot, the rest when it breaks (src.fluids)
@@ -409,14 +462,14 @@ props.defs = {
   skullCandle = {
     width = 8, height = 10, mass = 0.5, hp = 12, gold = { 1, 5 }, itemChance = 0.06,
     shard = { 0.80, 0.78, 0.70 },
-    light = { radius = 62, color = { 1, 0.7, 0.36 }, intensity = 0.8 },
+    light = { radius = 54, color = { 1, 0.7, 0.36 }, intensity = 0.52 },
     gravityScale = 0.4, friction = 0.6, restitution = 0.1, linearDamping = 0.3, angularDamping = 0.6,
     showDamage = true, draw = drawSkullCandle, emit = emitSkullCandle,
   },
   sporePod = {
     width = 10, height = 10, mass = 0.4, hp = 8, gold = { 0, 3 }, itemChance = 0.08,
     glowShard = true, -- bursts into the area's glow colour
-    light = { radius = 64, intensity = 0.8 }, -- (colour: the area's)
+    light = { radius = 55, intensity = 0.52 }, -- (colour: the area's)
     gravityScale = 0.35, friction = 0.6, restitution = 0.1, linearDamping = 0.4, angularDamping = 0.6,
     showDamage = true, draw = drawSporePod, emit = emitSporePod,
   },
@@ -435,14 +488,14 @@ props.defs = {
   geode = {
     width = 11, height = 9, mass = 2.5, hp = 26, gold = { 4, 11 }, itemChance = 0.15,
     glowShard = true,
-    light = { radius = 58, intensity = 0.75 },
+    light = { radius = 50, intensity = 0.5 },
     gravityScale = 0.6, friction = 0.8, restitution = 0.05, linearDamping = 0.3, angularDamping = 0.6,
     showDamage = true, draw = drawGeode, emit = emitGeode,
   },
   emberPot = {
     width = 9, height = 10, mass = 0.9, hp = 12, gold = { 1, 5 }, itemChance = 0.08,
     shard = { 0.28, 0.23, 0.22 },
-    light = { radius = 66, color = { 1, 0.5, 0.2 }, intensity = 0.85 },
+    light = { radius = 56, color = { 1, 0.5, 0.2 }, intensity = 0.55 },
     ignites = true, -- the coals spill out in flames when it breaks
     gravityScale = 0.45, friction = 0.6, restitution = 0.1, linearDamping = 0.3, angularDamping = 0.5,
     showDamage = true, draw = drawEmberPot, emit = emitEmberPot,
@@ -451,7 +504,7 @@ props.defs = {
   tntBarrel = {
     width = 13, height = 16, mass = 1.8, hp = 12, itemChance = 0,
     shard = { 0.50, 0.31, 0.17 },
-    explosive = { count = 3, scale = 2.0, dig = 13, digPower = 3 }, -- a big blast and a real crater
+    explosive = { count = 3, scale = 3.2, dig = 26, digPower = 4, fuse = 3.0 }, -- a huge blast and a real crater; the first hit lights a fuse
     gravityScale = 0.5, friction = 0.6, restitution = 0.15, linearDamping = 0.3, angularDamping = 0.5,
     showDamage = true, draw = drawTntBarrel, emit = emitTntBarrel,
   },
@@ -645,6 +698,19 @@ function props.damage(p, amount)
       local x, y = p.body:getPosition()
       p.oil = p.oil - require("src.fluids").addOil(x, y + 2, spill)
     end
+  end
+  if p.def.explosive then
+    -- Powder: the first hit lights a long fuse; every hit after it burns the
+    -- fuse down faster, but it always goes off in the end
+    if not p.broken then
+      if not p.lit then
+        p.lit = true
+        p.fuse = p.def.explosive.fuse or 3
+      else
+        p.fuse = math.max(0.12, p.fuse - amount * 0.12)
+      end
+    end
+    return
   end
   local hp = p.hp or p.def.hp
   if hp and p.total >= hp and not p.broken then

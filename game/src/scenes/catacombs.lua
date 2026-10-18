@@ -1054,9 +1054,17 @@ function catacombs.spawnProps()
       end
       -- A prisoner's cage, with two of the things that keep them
       local pr = info.prisoner
+      local fl = lv.theme.prisoner and lv.entry and lv.entry.lake and require("src.meta").PEOPLE[lv.theme.prisoner].held == "float"
+      if fl then
+        -- Floats on the lake over the cave's entrance: on the surface water
+        -- right beside the neck that drops down into the caverns
+        local x0, x1 = lv.entry.x - lv.entry.half + 6, lv.entry.x + lv.entry.half - 6
+        local rim = math.min(world:findGround(x0, -400), world:findGround(x1, -400))
+        pr = { id = lv.theme.prisoner, x = lv.entry.x + 24, y = rim + 36, held = "float" }
+      end
       if pr and require("src.meta").canFind(pr.id) then
         npcs.spawnCage(pr.id, pr.x, pr.y, pr.held, pr.top)
-        for _, dx in ipairs({ -46, 52 }) do
+        for _, dx in ipairs(pr.held == "float" and {} or { -46, 52 }) do
           local gx = pr.x + dx
           if not world:isSolid(gx, pr.y - 12) then
             enemies.spawn("ghoul", gx, world:findGround(gx, pr.y - 20), 1 + (lv.row - 1) * 0.6, lv.row)
@@ -1475,31 +1483,49 @@ local function stepZoom(dt)
 end
 
 updateBossCamera = function(player, dt)
-  local fight
-  for _, lv in ipairs(levels) do
-    if lv.boss and lv.boss.state == "fight" and lv.boss.e and not lv.boss.e.dead then
-      fight = lv.boss.e
+  local fightLv
+  for i, lv in ipairs(levels) do
+    if lv.boss and lv.boss.state == "fight" then
+      fightLv = fightLv or i
     end
   end
   local camera = require("src.camera")
-  if fight then
-    -- (a split Queen: the nearest living piece of her)
-    local px, py = player:center()
-    local best, bd
+  -- The boss pieces alive in the fight (a split Queen is several of them: the
+  -- original may be gone while her remnants fight on)
+  local pieces = {}
+  if fightLv then
     for _, e in ipairs(enemies.all()) do
-      if not e.dead and e.areaIndex == fight.areaIndex and e.def.boss then
-        local d = (e.body.x - px) ^ 2 + (e.body.y - py) ^ 2
-        if not bd or d < bd then
-          best, bd = e, d
-        end
+      if not e.dead and e.def.boss and (e.areaIndex == nil or e.areaIndex == fightLv) then
+        pieces[#pieces + 1] = e
       end
     end
-    best = best or fight
+  end
+  if #pieces > 0 then
+    -- Look at the middle of those near enough to be on screen (else the nearest)
+    local px, py = player:center()
+    local config = require("src.config")
+    local rx, ry = config.VIRTUAL_W * 0.75, config.VIRTUAL_H * 0.75
+    local sx, sy, n = 0, 0, 0
+    local best, bd
+    for _, e in ipairs(pieces) do
+      local ex, ey = e.body.x + e.body.w / 2, e.body.y + e.body.h / 2
+      if math.abs(ex - px) < rx and math.abs(ey - py) < ry then
+        sx, sy, n = sx + ex, sy + ey, n + 1
+      end
+      local d = (ex - px) ^ 2 + (ey - py) ^ 2
+      if not bd or d < bd then
+        best, bd = e, d
+      end
+    end
     if best.kind == "bigfish" then
       camera.setFocus(nil) -- (the camera stays on the hunter: only a wider view)
       zoomWant = 1.3
     else
-      camera.setFocus(best.body.x + best.body.w / 2, best.body.y + best.body.h / 2)
+      if n > 0 then
+        camera.setFocus(sx / n, sy / n)
+      else
+        camera.setFocus(best.body.x + best.body.w / 2, best.body.y + best.body.h / 2)
+      end
       zoomWant = FIGHT_ZOOM
     end
   else
@@ -1626,7 +1652,7 @@ function catacombs.addLights(lighting, view)
     if info then
       for i, c in ipairs(candles(info)) do
         if visible(view, c[1], c[2], 120) then
-          lighting.add(c[1], c[2] - c[3] - 2, 120, 1, 0.68, 0.36, 1.0 + flicker(i) * 0.07)
+          lighting.add(c[1], c[2] - c[3] - 2, 100, 1, 0.68, 0.36, 0.65 + flicker(i) * 0.05)
         end
       end
       if info.mine then
@@ -2041,6 +2067,17 @@ end
 
 function catacombs.seed()
   return baseSeed
+end
+
+-- The areas that have a boss arena (for the dev panel)
+function catacombs.arenaAreas()
+  local out = {}
+  for i = 1, #levels do
+    if THEMES[i] and THEMES[i].arena then
+      out[#out + 1] = i
+    end
+  end
+  return out
 end
 
 function catacombs.areaName(i)

@@ -834,6 +834,20 @@ local function stepGas(gx0, gy0, gx1, gy1)
     local v = (gas[k] or 0) + d
     setGas(k, (v >= 0.012) and math.min(1, v) or nil)
   end
+  -- Gas also slowly thins out on its own: without this, a big cloud in a
+  -- closed room (the Queen's arena) levels off at a faint plateau and never goes
+  for gy = gy0, gy1 do
+    if (gasRows[gy] or 0) > 0 then
+      for gx = gx0, gx1 do
+        local k = gy * K + KOFF + gx
+        local c = gas[k]
+        if c then
+          local v = c - c * 0.006 - 0.0006
+          setGas(k, (v >= 0.012) and v or nil)
+        end
+      end
+    end
+  end
 end
 
 -- Flames: ignite neighbouring gas (reaching two cells, so a burning cloud
@@ -901,7 +915,7 @@ local function stepSmoke(gx0, gy0, gx1, gy1)
   for _, k in ipairs(cells) do
     local v = smoke[k]
     if v then
-      v = v * 0.9875 - 0.002
+      v = v * 0.965 - 0.005 -- (fades quickly: thick smoke was a lag source)
       if v < 0.05 then
         smoke[k] = nil
       else
@@ -2304,22 +2318,22 @@ function fluids.drawFront(view)
     local gx, gy = coords(k)
     if gx >= gx0 and gx <= gx1 and gy >= gy0 and gy <= gy1 then
       do
-        local density = math.min(0.9, sm)
-        for oy = 0, C - 1 do
-          for ox = 0, C - 1 do
-            local px, py = gx * C + ox, gy * C + oy
-            local h = (px * 73856093 + py * 19349663 + frame * 83492791) % 1000 / 1000
-            if h < density and not world:isSolid(px, py) then
-              local g = 0.26 + h * 0.18
-              np = np + 1
-              local pt = smokePool[np]
-              if not pt then
-                pt = {}
-                smokePool[np] = pt
-              end
-              pt[1], pt[2], pt[3], pt[4], pt[5], pt[6] = px + 0.5, py + 0.5, g, g * 0.97, g * 1.03, 0.45 + 0.3 * (1 - h)
-              points[np] = pt
+        -- One grit pixel per cell at most (a quarter of the old cost), still
+        -- dithered by density and re-rolled a few times a second
+        local h = (gx * 73856093 + gy * 19349663 + frame * 83492791) % 1000 / 1000
+        if h < math.min(0.9, sm * 1.5) then
+          local px = gx * C + floor(h * 997) % C
+          local py = gy * C + floor(h * 331) % C
+          if not world:isSolid(px, py) then
+            local g = 0.26 + h * 0.18
+            np = np + 1
+            local pt = smokePool[np]
+            if not pt then
+              pt = {}
+              smokePool[np] = pt
             end
+            pt[1], pt[2], pt[3], pt[4], pt[5], pt[6] = px + 0.5, py + 0.5, g, g * 0.97, g * 1.03, 0.45 + 0.3 * (1 - h)
+            points[np] = pt
           end
         end
       end

@@ -13,6 +13,7 @@
 -- "[E] Talk to ..." and E opens their page in the menu (npcs.onTalk).
 local audio = require("src.audio")
 local effects = require("src.effects")
+local fluids = require("src.fluids")
 local guns = require("src.guns")
 local input = require("src.input")
 local meta = require("src.meta")
@@ -149,10 +150,19 @@ function npcs.update(dt, player)
       c.state = "empty" -- already freed in an earlier run
       c.door = 1
     end
-    if c.state == "locked" and c.held == "float" then
-      -- Floating on the water: freed by swimming up to him
-      if math.abs(px - c.x) < 22 and math.abs(py - (c.y - 4)) < 24 and not player.dead then
-        npcs.breakLock(c)
+    if c.held == "float" and c.state == "locked" then
+      -- Rides the water's real surface (the lake settles and fills as the area
+      -- streams in, so it isn't always where the area was planned to flood)
+      c.y0 = c.y0 or c.y
+      local surf
+      for yy = c.y0 - 40, c.y0 + 120, 2 do
+        if fluids.waterAt(c.x, yy) then
+          surf = yy
+          break
+        end
+      end
+      if surf then
+        c.y = c.y + (surf - c.y) * math.min(1, dt * 4)
       end
     end
     if c.state == "locked" and c.held == "rubble" then
@@ -176,7 +186,7 @@ function npcs.update(dt, player)
     end
     if c.state == "locked" then
       local d = math.abs(px - c.x) + math.abs(py - (c.y - 10)) * 1.5
-      c.alert = d < CALL_RANGE and not player.dead
+      c.alert = d < CALL_RANGE and not player.dead and c.held ~= "float" -- (the floater is out cold: E wakes him)
       c.facing = px < c.x and -1 or 1
       if c.alert then
         c.callT = c.callT - dt
@@ -262,6 +272,17 @@ local function nearBoard(player)
   return math.abs(px - board.x) < TALK_REACH and math.abs(py - (board.y - 10)) < 24
 end
 
+-- Someone out cold on the water, next to the hunter
+local function nearFloat(player)
+  local px, py = player:center()
+  for _, c in ipairs(cages) do
+    if c.state == "locked" and c.held == "float" and math.abs(px - c.x) < 30 and math.abs(py - (c.y - 6)) < 30 then
+      return c
+    end
+  end
+  return nil
+end
+
 -- E: talk to whoever is next to the hunter. Returns true if it handled the key.
 function npcs.interact(player)
   if nearBoard(player) then
@@ -272,6 +293,11 @@ function npcs.interact(player)
     if npcs.onTalk then
       npcs.onTalk("board")
     end
+    return true
+  end
+  local fl = nearFloat(player)
+  if fl then
+    npcs.breakLock(fl)
     return true
   end
   local s = nearestCamp(player)
@@ -485,7 +511,7 @@ end
 local function drawFloat(c)
   local t = love.timer.getTime()
   local bob = math.floor(math.sin(t * 1.6 + c.x) * 1.2 + 0.5)
-  local x, g = c.x, c.y + bob
+  local x, g = c.x, math.floor(c.y + 0.5) + bob
   R(WOOD_D, x - 14, g - 1, 28, 3)
   R(WOOD, x - 14, g - 2, 28, 1)
   R(WOOD_D, x - 6, g - 2, 1, 4)
@@ -941,6 +967,17 @@ function npcs.drawScreen(toScreen, font, player)
     love.graphics.print(text, x, y)
   end
   if player and not player.dead then
+    local fl = nearFloat(player)
+    if fl then
+      local text = "[" .. input.label("interact") .. "] Wake him"
+      local sx, sy = toScreen(fl.x, fl.y + 8)
+      love.graphics.setFont(font)
+      local x, y = math.floor(sx - font:getWidth(text) / 2), math.floor(sy)
+      love.graphics.setColor(0, 0, 0, 0.85)
+      love.graphics.print(text, x + 2, y + 2)
+      love.graphics.setColor(1, 0.88, 0.6)
+      love.graphics.print(text, x, y)
+    end
     local s = nearestCamp(player)
     if s then
       local name = meta.PEOPLE[s.id] and meta.PEOPLE[s.id].name or s.id

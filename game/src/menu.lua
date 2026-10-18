@@ -448,7 +448,7 @@ end
 local PAGES = {}
 local WASH_STEPS = 24
 local washMesh
-local DEFAULT_FOCUS = { compendium = "comp:cell:", slots = "slots:", settings = "set:tab", recap = "recap:new", name = "name:confirm", camp = "camp:up:", board = "board:", ghost = "ghost:" }
+local DEFAULT_FOCUS = { compendium = "comp:cell:", slots = "slots:", settings = "set:tab", recap = "recap:new", name = "name:confirm", camp = "camp:up:", board = "board:", ghost = "ghost:", dialog = "dlg:" }
 
 PAGES.title = function()
   local ww, wh = love.graphics.getDimensions()
@@ -688,6 +688,33 @@ local function lockState(profile, cat, entry)
   return not meta.isUnlocked(cat, entry.id, profile), meta.isSeen(cat, entry.id, profile)
 end
 
+-- The +1 to +4 tiers of a common item as a column of small bars in a box
+-- (top = +4, bottom = +1): grey until that tier has been collected
+local ROMAN = { "I", "II", "III", "IV", "V" }
+local function drawTierBars(entry, got, x, y, w, h)
+  local n = #entry.tiers
+  local gap = math.max(1, math.floor(u * 0.6))
+  local bh = math.max(1, math.floor((h - gap * (n - 1)) / n))
+  local c = RARITY.fused
+  local f = F.small
+  local sc = math.min(1, (bh - 1) / f:getHeight(), (w - 2) / f:getWidth("III")) * 0.72
+  love.graphics.setFont(f)
+  for level = 1, n do
+    local by = y + (n - level) * (bh + gap)
+    local have = (got[entry.tiers[level]] or 0) > 0
+    if have then
+      love.graphics.setColor(c[1] * 0.85, c[2] * 0.85, c[3] * 0.85, 1)
+    else
+      love.graphics.setColor(0.17, 0.16, 0.21, 1)
+    end
+    love.graphics.rectangle("fill", x, by, w, bh)
+    local t = ROMAN[level]
+    local tw, th = f:getWidth(t) * sc, f:getHeight() * sc
+    love.graphics.setColor(have and 0.02 or 0.4, have and 0.1 or 0.38, have and 0.1 or 0.46, 1)
+    love.graphics.print(t, math.floor(x + (w - tw) / 2), math.floor(by + (bh - th) / 2), 0, sc, sc)
+  end
+end
+
 local function drawDetail(entry, profile, cat, x, y, w, h)
   panel(x, y, w, h, 0.92)
   if not entry then
@@ -745,6 +772,24 @@ local function drawDetail(entry, profile, cat, x, y, w, h)
     end
     padlock(tx, ty + u, math.max(1, math.floor(u * 0.7)))
     ty = ty + wrapped(text, tx + 6 * u, ty, tw - 6 * u, F.small, DANGER) + 2 * u
+  end
+  if entry.tiers and known then
+    -- A common item: its higher tiers, lit as they are collected
+    local got = profile and profile.found[cat.id] or {}
+    local bar = math.max(2, math.floor(u * 1.2))
+    local label = "Tiers"
+    shadowPrint(label, tx, ty, F.small, FAINT)
+    local lx = tx + F.small:getWidth(label) + 4 * u
+    for level = 1, #entry.tiers do
+      local have = (got[entry.tiers[level]] or 0) > 0
+      local t = ROMAN[level]
+      local c = have and RARITY.fused or FAINT
+      shadowPrint(t, lx, ty, F.small, c)
+      love.graphics.setColor(have and RARITY.fused[1] or 0.2, have and RARITY.fused[2] or 0.19, have and RARITY.fused[3] or 0.24, 1)
+      love.graphics.rectangle("fill", lx, ty + F.small:getHeight() + u * 0.5, F.small:getWidth(t), bar)
+      lx = lx + F.small:getWidth(t) + 4 * u
+    end
+    ty = ty + F.small:getHeight() + bar + 2 * u
   end
   if entry.base then
     -- A levelled common item: how it is made
@@ -827,8 +872,8 @@ PAGES.compendium = function()
   local gx, gy, gw, gh = X(14), Y(44), math.floor(234 * u), math.floor(166 * u)
   panel(gx, gy, gw, gh, 0.85)
   local wide = cat.id == "weapon" or cat.id == "enemy"
-  -- (item tabs are 10 wide, so a common item and its +1 to +4 fill half a row)
-  local cellW = math.floor((wide and 36 or 19) * u)
+  -- (item tiles carry a column of tier bars on their right edge)
+  local cellW = math.floor((wide and 36 or 28) * u)
   local cellH = math.floor((wide and 26 or 19) * u)
   local gap = math.floor(3 * u)
   local pad = math.floor(4 * u)
@@ -873,15 +918,18 @@ PAGES.compendium = function()
     love.graphics.setLineWidth(math.max(1, u * 0.4))
     love.graphics.setColor(edge[1], edge[2], edge[3], known and 0.8 or 0.6)
     love.graphics.rectangle("line", cx, cy, cellW, cellH, u * 0.6, u * 0.6)
-    compendium.drawIcon(e, cx + 2 * u, cy + 2 * u, cellW - 4 * u, cellH - 4 * u, not known, (seen and not known) and 1 or nil)
+    compendium.drawIcon(e, cx + 2 * u, cy + 2 * u, cellW - (e.tiers and 12 or 4) * u, cellH - 4 * u, not known, (seen and not known) and 1 or nil)
     if seen and not known then
       -- Seen but not collected: the silhouette has a faint rim
       love.graphics.setColor(0.55, 0.5, 0.65, 0.5)
       love.graphics.rectangle("line", cx + u, cy + u, cellW - 2 * u, cellH - 2 * u, u * 0.6, u * 0.6)
     end
+    if e.tiers then
+      drawTierBars(e, got, cx + cellW - 9 * u, cy + 2 * u, 7 * u, cellH - 4 * u)
+    end
     if locked then
       local s = math.max(1, math.floor(u * 0.5))
-      padlock(cx + cellW - 6 * s - u, cy + u + s, s, known and 1 or 0.7)
+      padlock(cx + cellW - 6 * s - u - (e.tiers and 8 * u or 0), cy + u + s, s, known and 1 or 0.7)
     end
     if focused then
       focusFrame(cx, cy, cellW, cellH)
@@ -1668,6 +1716,65 @@ PAGES.ghost = function()
   end
 end
 
+-- A generic dialog (random events: src.randevents): a title, some lines of text,
+-- an optional custom-drawn area and a stack of buttons. A button's fn(dialog)
+-- returns true to keep the dialog open (it is drawn fresh every frame, so it can
+-- change its own lines and buttons), anything else closes it.
+local dialog
+
+-- (for tests)
+function menu.dialogState()
+  return dialog
+end
+
+function menu.openDialog(dlg)
+  dialog = dlg
+  menu.open("dialog")
+end
+
+PAGES.dialog = function()
+  local ww, wh = love.graphics.getDimensions()
+  love.graphics.setColor(0.015, 0.012, 0.03, 0.93)
+  love.graphics.rectangle("fill", 0, 0, ww, wh)
+  if not dialog then
+    return
+  end
+  if dialog.refresh then
+    dialog.refresh()
+  end
+  pageTitle(dialog.title or "", X(14), Y(9))
+  if dialog.subtitle then
+    shadowPrint(dialog.subtitle, X(14), Y(26), F.small, dialog.subtitleColor or FAINT)
+  end
+  local x, y, w = X(14), Y(40), math.floor(372 * u)
+  if dialog.draw then
+    local h = math.floor((dialog.drawH or 50) * u)
+    panel(x, y, w, h, 0.85, dialog.edge)
+    dialog.draw(x, y, w, h, u, { shadowPrint = shadowPrint, printCentered = printCentered, F = F })
+    y = y + h + 4 * u
+  end
+  for _, line in ipairs(dialog.lines or {}) do
+    local text, color = line, DIM
+    if type(line) == "table" then
+      text, color = line.text, line.color or DIM
+    end
+    y = y + wrapped(text, x, y, w, F.body, color) + 2 * u
+  end
+  local bw, bh = math.floor(260 * u), math.floor(15 * u)
+  local bx = X(200) - bw / 2
+  y = math.max(y + 4 * u, Y(150))
+  for i, b in ipairs(dialog.buttons or {}) do
+    button("dlg:" .. i, b.label, bx, y, bw, bh, function()
+      audio.play("select")
+      local keep = b.fn and b.fn(dialog)
+      if not keep then
+        act("resume")
+      end
+    end, { sub = b.sub, disabled = b.disabled })
+    y = y + bh + 3 * u
+  end
+end
+
 -- The survey map (src.surveymap) ---------------------------------------------------------
 
 PAGES.map = function()
@@ -2069,7 +2176,7 @@ local function back()
     audio.play("back")
     return
   end
-  if not pop() and (root == "pause" or root == "camp" or root == "board" or root == "map" or root == "ghost") then
+  if not pop() and (root == "pause" or root == "camp" or root == "board" or root == "map" or root == "ghost" or root == "dialog") then
     act("resume")
   end
 end
@@ -2125,7 +2232,7 @@ function menu.keypressed(key)
       return
     end
   end
-  if (root == "camp" or root == "board" or root == "ghost") and #stack == 0 and input.is("interact", key) then
+  if (root == "camp" or root == "board" or root == "ghost" or root == "dialog") and #stack == 0 and input.is("interact", key) then
     act("resume") -- (the key that opened a camp page closes it again)
     return
   end

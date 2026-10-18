@@ -6,15 +6,17 @@ local gunInfo = {}
 
 -- Grades from worst to best, with the colours they are drawn in
 gunInfo.GRADES = {
+  { letter = "F", color = { 0.55, 0.40, 0.38 } },
   { letter = "D", color = { 0.62, 0.64, 0.70 } },
   { letter = "C", color = { 0.60, 0.88, 0.62 } },
   { letter = "B", color = { 0.50, 0.72, 1.00 } },
   { letter = "A", color = { 0.78, 0.58, 1.00 } },
   { letter = "S", color = { 1.00, 0.55, 0.28 } },
+  { letter = "SS", color = { 1.00, 0.30, 0.45 } },
 }
 
--- Cut-offs on the roll score (see score): below the first is a D, and so on
-local CUTS = { 0.10, 0.19, 0.27, 0.35 }
+-- Cut-offs on the roll score (see score): below the first is an F, and so on
+local CUTS = { -0.08, 0.10, 0.28, 0.45, 0.72, 1.10 }
 
 -- Which way is better for each rolled stat (+1 higher, -1 lower)
 local ROLLED = { damage = 1, bulletSpeed = 1, impactForce = 1, chambers = 1, fireDelay = -1, reloadTime = -1, spread = -1 }
@@ -34,7 +36,7 @@ function gunInfo.score(gun)
   return s
 end
 
--- 1 (D) to 5 (S)
+-- 1 (F) to 7 (SS); 3 is C, the usual weapon
 function gunInfo.gradeIndex(gun)
   local s = gunInfo.score(gun)
   for i, cut in ipairs(CUTS) do

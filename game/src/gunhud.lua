@@ -418,6 +418,90 @@ local function drawGatling(R, rp, gun)
   end
 end
 
+-- Crossbow ---------------------------------------------------------------------
+
+local function drawCrossbow(R, rp)
+  -- The string is hauled back along the rail while it is wound, then the bolt
+  -- is laid in
+  local wind = rp and (ease((rp - 0.1) / 0.3) - ease((rp - 0.78) / 0.1)) or 0
+  local bolt = (not rp) or rp > 0.62
+  local sx = 9 + floor(11 * wind + 0.5)
+  -- The prod (the bow): two limbs sweeping forward from the front of the rail
+  R(7, 0, 2, 3, WOOD_D)
+  R(8, 3, 2, 3, WOOD)
+  R(9, 6, 2, 3, WOOD_D)
+  R(8, 9, 2, 3, WOOD)
+  R(7, 12, 2, 3, WOOD_D)
+  R(9, 5, 1, 5, STEEL)
+  -- The string, from limb tip to limb tip through the nock
+  love.graphics.setColor(0.9, 0.88, 0.8)
+  local function line(x1, y1, x2, y2)
+    R(x1, y1, 1, 1, { 0.9, 0.88, 0.8 })
+    local n = math.max(math.abs(x2 - x1), math.abs(y2 - y1))
+    for i = 1, n do
+      R(x1 + (x2 - x1) * i / n, y1 + (y2 - y1) * i / n, 1, 1, { 0.9, 0.88, 0.8 })
+    end
+  end
+  line(7, 1, sx, 7)
+  line(7, 14, sx, 8)
+  -- The tiller: a long wooden rail with a steel track, stirrup at the front
+  R(9, 6, 20, 3, WOOD)
+  R(9, 6, 20, 1, WOOD_L)
+  R(9, 8, 20, 1, WOOD_D)
+  R(10, 5, 17, 1, STEEL_D)
+  R(4, 4, 3, 1, STEEL)
+  R(4, 5, 1, 3, STEEL)
+  R(4, 8, 3, 1, STEEL)
+  -- The bolt on the rail
+  if bolt then
+    R(sx - 1, 5, 17, 1, STEEL_L)
+    R(sx - 3, 5, 2, 1, HULL)
+    R(sx + 14, 5, 3, 1, STEEL)
+  end
+  -- Lock, trigger and the stock
+  R(26, 5, 3, 2, STEEL_D)
+  R(27, 9, 1, 3, STEEL_D)
+  R(25, 11, 4, 1, STEEL_D)
+  R(29, 6, 8, 3, WOOD)
+  R(29, 6, 8, 1, WOOD_L)
+  R(29, 8, 8, 1, WOOD_D)
+  R(33, 9, 4, 2, WOOD)
+  R(36, 5, 1, 7, INK)
+end
+
+-- Flare pistol -----------------------------------------------------------------
+
+local function drawFlare(R, rp)
+  local open = rp and (ease(rp / 0.2) - ease((rp - 0.82) / 0.1)) or 0
+  local shell = (not rp) or rp > 0.55
+  local lift = floor(open * 3 + 0.5)
+  -- The fat barrel, hinged at the back so it tips up to be loaded
+  R(0, 3 - lift, 15, 4, STEEL)
+  R(0, 3 - lift, 15, 1, STEEL_L)
+  R(0, 6 - lift, 15, 1, STEEL_D)
+  R(0, 2 - lift, 2, 5, HULL) -- the muzzle band
+  R(1, 2 - lift, 1, 5, HULL_L)
+  if shell then
+    R(3, 4 - lift, 7, 2, BRASS)
+    R(3, 4 - lift, 7, 1, BRASS_L)
+    R(9, 4 - lift, 1, 2, HULL)
+  end
+  -- Frame and trigger guard
+  R(14, 5, 8, 4, STEEL_D)
+  R(15, 5, 7, 1, STEEL)
+  R(14, 9, 7, 1, STEEL_D)
+  R(21, 6, 1, 4, STEEL_D)
+  R(16, 7, 1, 2, INK)
+  R(22, 4, 2, 2, STEEL)
+  -- The wooden grip
+  local grip = { { 21, 25 }, { 22, 26 }, { 22, 26 }, { 23, 27 }, { 23, 27 }, { 24, 27 } }
+  for r, g in ipairs(grip) do
+    local c = r == #grip and WOOD_D or WOOD
+    R(g[1], 5 + r, g[2] - g[1] + 1, 1, c)
+    R(g[1], 5 + r, 1, 1, WOOD_L)
+  end
+end
+
 -- Entry points ----------------------------------------------------------------
 
 local MODELS = {
@@ -426,6 +510,8 @@ local MODELS = {
   automatic = { w = 39, h = 15, shiftX = 0, shiftY = 0 },
   pistol = { w = 34, h = 18, shiftX = 0, shiftY = 0 },
   gatling = { w = 42, h = 17, shiftX = 0, shiftY = 0 },
+  crossbow = { w = 38, h = 16, shiftX = 0, shiftY = 0 },
+  flare = { w = 30, h = 13, shiftX = 0, shiftY = 2 },
 }
 
 -- The gun's model at half size, for guns lying on the ground or on a shop
@@ -504,6 +590,10 @@ function gunhud.drawModel(gun, ox, oy, q, alpha)
     drawAutomatic(R, rp)
   elseif model == "gatling" then
     drawGatling(R, rp, gun)
+  elseif model == "crossbow" then
+    drawCrossbow(R, rp)
+  elseif model == "flare" then
+    drawFlare(R, rp)
   else
     drawPistol(R, rp)
   end

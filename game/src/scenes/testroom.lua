@@ -20,12 +20,32 @@ local testroom = {
   ambient = { 0.5, 0.5, 0.62 },
 }
 
-local WIDTH, HEIGHT = 1024, 576
+-- The original room sits OX px in from the left; the item hall fills the space
+-- to its left (see itemHall)
+local OX = 700
+local WIDTH, HEIGHT = 1024 + OX, 576
 local BORDER = 10
 local FLOOR_Y = 499
 
 local function floorTop(x)
+  if x < OX then
+    return FLOOR_Y
+  end
+  x = x - OX
   return FLOOR_Y + math.floor(math.sin(x * 0.031) * 3.2 + math.sin(x * 0.081) * 2.4)
+end
+
+-- The platforms of the item hall: { x0, x1, y } (y is the top of the platform),
+-- each stepped in from the other end so the one above can be jumped onto
+local HALL_SPACING = 12
+local HALL_X0, HALL_X1 = BORDER + 24, OX - 40
+function testroom.hallTiers()
+  local w = HALL_X1 - HALL_X0
+  return {
+    { x0 = HALL_X0, x1 = HALL_X1 - 70, y = FLOOR_Y - 34 },
+    { x0 = HALL_X0 + 70, x1 = HALL_X1, y = FLOOR_Y - 68 },
+    { x0 = HALL_X0, x1 = HALL_X1 - 70, y = FLOOR_Y - 102 },
+  }
 end
 
 function testroom.build()
@@ -44,40 +64,46 @@ function testroom.build()
   end
 
   -- Floating platform (left)
-  world:fillRect(96, 429, 240, 440, DIRT)
-  world:fillRect(112, 441, 224, 445, ROCK)
+  world:fillRect(OX + 96, 429, OX + 240, 440, DIRT)
+  world:fillRect(OX + 112, 441, OX + 224, 445, ROCK)
 
   -- Ramp up to a plateau, then a cliff back down
-  for x = 304, 528 do
-    local top = x < 432 and math.floor(FLOOR_Y - (x - 304) * 0.5) or FLOOR_Y - 64
+  for x = OX + 304, OX + 528 do
+    local top = x < OX + 432 and math.floor(FLOOR_Y - (x - OX - 304) * 0.5) or FLOOR_Y - 64
     world:fillRect(x, top, x, FLOOR_Y + 16, DIRT)
   end
 
   -- Small stairs (each step within the walkable step height)
   for i = 0, 4 do
-    local x0 = 552 + i * 10
-    world:fillRect(x0, FLOOR_Y - 3 * (i + 1), 598, FLOOR_Y + 16, ROCK)
+    local x0 = OX + 552 + i * 10
+    world:fillRect(x0, FLOOR_Y - 3 * (i + 1), OX + 598, FLOOR_Y + 16, ROCK)
   end
 
   -- Pillar too tall to jump: clear it with recoil
-  world:fillRect(632, 419, 651, FLOOR_Y + 16, ROCK)
+  world:fillRect(OX + 632, 419, OX + 651, FLOOR_Y + 16, ROCK)
 
   -- High ledge on the right
-  world:fillRect(800, 371, WIDTH - BORDER - 1, 390, ROCK)
-  world:fillRect(800, 365, WIDTH - BORDER - 1, 370, DIRT)
+  world:fillRect(OX + 800, 371, WIDTH - BORDER - 1, 390, ROCK)
+  world:fillRect(OX + 800, 365, WIDTH - BORDER - 1, 370, DIRT)
 
   -- Stalactites
   for _, s in ipairs({ { 192, 64 }, { 416, 96 }, { 528, 48 }, { 720, 128 }, { 896, 72 } }) do
-    local cx, len = s[1], s[2]
+    local cx, len = OX + s[1], s[2]
     for y = BORDER, BORDER + len do
       local half = math.floor((1 - (y - BORDER) / len) * 11)
       world:fillRect(cx - half, y, cx + half, y, ROCK)
     end
   end
 
+  -- The item hall: three stepped platforms to the left of the room (see populate)
+  for _, t in ipairs(testroom.hallTiers()) do
+    world:fillRect(t.x0, t.y, t.x1, t.y + 5, ROCK)
+    world:fillRect(t.x0, t.y - 2, t.x1, t.y - 1, DIRT)
+  end
+
   world:repaintAll()
 
-  local spawnX = 48
+  local spawnX = OX + 48
   return world, spawnX, world:findGroundUnder(spawnX, config.player.width, BORDER) - config.player.height
 end
 
@@ -85,11 +111,13 @@ end
 function testroom.populate(world)
   targets.clear()
   for _, x in ipairs({ 168, 264, 480, 752, 928 }) do
+    x = x + OX
     targets.addDummy(x, world:findGround(x, BORDER + 160))
   end
 
   props.clear()
   local function onGround(name, x, stackLevel, fromY)
+    x = x + OX
     local h = props.defs[name].height
     local ground = world:findGround(math.floor(x), fromY or BORDER + 160)
     return props.spawn(name, x, ground - h / 2 - (stackLevel or 0) * h - 0.5)
@@ -113,29 +141,45 @@ function testroom.populate(world)
   onGround("ironCrate", 456)
   onGround("ironCrate", 864)
 
-  -- Every ammo type and attachment, lined up on the floor near the start
-  -- (only 7 fit in the loose slots at a time: fit some, then grab the rest)
-  for i, id in ipairs(items.order) do
-    local x = 40 + (i - 1) * 8
-    pickups.dropItem(x, world:findGround(x, BORDER + 160) - 6, items.new(id))
+  -- Every ammo type and attachment (fused ones last), spaced out along the
+  -- item hall's platforms, filling each tier from its left end
+  local ids = {}
+  for _, id in ipairs(items.order) do
+    ids[#ids + 1] = id
+  end
+  for _, id in ipairs(items.fusedOrder or {}) do
+    ids[#ids + 1] = id
+  end
+  local tiers = testroom.hallTiers()
+  local tier, slot = 1, 0
+  for _, id in ipairs(ids) do
+    local t = tiers[tier]
+    local x = t.x0 + 10 + slot * HALL_SPACING
+    if x > t.x1 - 8 and tiers[tier + 1] then
+      tier, slot = tier + 1, 0
+      t = tiers[tier]
+      x = t.x0 + 10
+    end
+    pickups.dropItem(x, t.y - 8, items.new(id))
+    slot = slot + 1
   end
 
   -- A chest and a ready-made weapon on the floor to try finding weapons with
-  chests.spawn(150, world:findGround(150, BORDER + 160), 0.5)
-  pickups.dropWeapon(190, world:findGround(190, BORDER + 160) - 8, guns.generate(), 0, 0)
+  chests.spawn(OX + 150, world:findGround(OX + 150, BORDER + 160), 0.5)
+  pickups.dropWeapon(OX + 190, world:findGround(OX + 190, BORDER + 160) - 8, guns.generate(), 0, 0)
 
   -- One of each monster to practise on: a ghoul on the floor past the
   -- pillar, and a bat and a spitter hanging under the high ledge
-  enemies.spawn("ghoul", 760, world:findGround(760, BORDER + 160))
-  enemies.spawn("bat", 880, 391)
-  enemies.spawn("spitter", 960, 391)
+  enemies.spawn("ghoul", OX + 760, world:findGround(OX + 760, BORDER + 160))
+  enemies.spawn("bat", OX + 880, 391)
+  enemies.spawn("spitter", OX + 960, 391)
   -- The deeper monsters, near the start so they are easy to try: a skeleton
   -- miner, a cave roller, and a worm coiled in the dirt under the floor
-  enemies.spawn("miner", 560, world:findGround(560, BORDER + 160))
-  enemies.spawn("roller", 672, world:findGround(640, BORDER + 160))
-  enemies.spawn("worm", 880, 510)
+  enemies.spawn("miner", OX + 560, world:findGround(OX + 560, BORDER + 160))
+  enemies.spawn("roller", OX + 672, world:findGround(OX + 640, BORDER + 160))
+  enemies.spawn("worm", OX + 880, 510)
   -- A DPS dummy, like the one in every shop
-  enemies.spawn("dummy", 290, world:findGround(290, BORDER + 160))
+  enemies.spawn("dummy", OX + 290, world:findGround(OX + 290, BORDER + 160))
 end
 
 return testroom

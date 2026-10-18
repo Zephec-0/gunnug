@@ -604,10 +604,22 @@ function cavegen.generate(world, area, seed, tick)
     -- into the dark rather than being a hole in a cliff
     -- The passage runs about half the mountain's width in, lined with rock so
     -- the caves don't break into it: it only opens up at the chamber
+    -- The mouth is flared and arched: taller at the face and easing down to the
+    -- passage over ~70 px, with a ragged edge, and its floor follows the desert
+    -- ground in so there is no lip to step over
     local function passage(x)
       local t = math.max(0, math.min(1, (x - edgeX) / math.max(1, ex - edgeX)))
       local r = 22 - 6 * math.min(1, t * 3)
       local mid = cy + math.sin((x - edgeX) * 0.011) * 7 * math.min(1, t * 4) * math.min(1, (1 - t) * 6)
+      local mouth = math.max(0, 1 - (x - edgeX) / 70) -- 1 at the face, 0 inside
+      if mouth > 0 then
+        local ragged = love.math.noise(x * 0.09, noiseSeed + 77) * 5
+        local extra = (16 * mouth * mouth + ragged * mouth)
+        local floorY = mid + r - 4 * mouth -- (the floor settles to the desert ground; the roof lifts)
+        r = r + extra / 2
+        mid = floorY - r
+        r = math.max(r, 1)
+      end
       return mid, r
     end
     for x = edgeX + 4, ex - 60 do
@@ -755,8 +767,28 @@ function cavegen.generate(world, area, seed, tick)
     local x1, y1 = x0 + w - 1, floorY - 1
     world:fillRect(x0 - 8, y0 - 8, x1 + 8, y1 + 8, BRICK)
     world:fillRect(x0, y0, x1, y1, AIR)
-    -- Opening in the ceiling, with a short drop shaft up to where the tunnels end
-    world:fillRect(math.floor(cx) - 21, y0 - 54, math.floor(cx) + 21, y0 - 1, AIR)
+    -- Opening in the ceiling, with a short drop shaft up to where the tunnels
+    -- end: it flares wider toward the top, like a funnel, so the way in is not
+    -- a slot with square edges, and the flat brick roof is heaped over with
+    -- rubble that fades out away from the opening
+    local fcx = math.floor(cx)
+    for dy = 0, 53 do
+      local half = 21 + math.floor((dy / 53) ^ 1.6 * 16 + love.math.noise(dy * 0.2, noiseSeed + 55) * 3)
+      world:fillRect(fcx - half, y0 - 1 - dy, fcx + half, y0 - 1 - dy, AIR)
+    end
+    for x = x0 - 8, x1 + 8 do
+      local d = math.abs(x - fcx)
+      if d > 24 then
+        local near = math.max(0, 1 - (d - 24) / 90)
+        local ends = math.max(0, 1 - math.min(x - (x0 - 8), (x1 + 8) - x) / 60)
+        local hgt = math.floor((near * 7 + ends * 6) * (0.6 + love.math.noise(x * 0.07, noiseSeed + 56) * 0.8))
+        for k = 1, hgt do
+          if not world:isSolid(x, y0 - 8 - k) then
+            world:setRaw(x, y0 - 8 - k, ROCKID)
+          end
+        end
+      end
+    end
     local room = { x = x0, y = y0, w = w, h = h, cx = math.floor(cx) }
     if area.hasNext then
       local hx = x0 + w - 28

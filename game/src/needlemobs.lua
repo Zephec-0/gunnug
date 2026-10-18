@@ -15,6 +15,7 @@ local audio = require("src.audio")
 local config = require("src.config")
 local effects = require("src.effects")
 
+local flowDirection = enemies.flowDirection
 local H = enemies.helpers
 local center, collider = H.center, H.collider
 
@@ -148,6 +149,12 @@ local function updateCrow(e, dt, world, player, px, py)
   local tx, ty = px + math.cos(e.orbA) * R, py - 24 + math.sin(e.orbA) * R * 0.55
   local wantx = math.max(-def.speed, math.min(def.speed, (tx - cx) * 3))
   local wanty = math.max(-def.speed, math.min(def.speed, (ty - cy) * 3)) + math.sin(e.phase * 0.2) * 14
+  if not e.seesPlayer then
+    local fx, fy = flowDirection(world, cx, cy, px, py - 4) -- (round the rock, not into it)
+    if fx then
+      wantx, wanty = fx * def.speed, fy * def.speed
+    end
+  end
   if e.state == "spit" then
     wantx, wanty = wantx * 0.2, wanty * 0.2
     e.timer = e.timer - dt
@@ -425,6 +432,12 @@ local function updateDevil(e, dt, world, player, px, py)
   local tx, ty = px - sign(px - cx) * 70, py - 18
   local wantx = math.max(-def.speed, math.min(def.speed, (tx - cx) * 1.5))
   local wanty = math.max(-def.speed, math.min(def.speed, (ty - cy) * 1.5)) + math.sin(e.phase * 0.3) * 12
+  if not e.seesPlayer then
+    local fx, fy = flowDirection(world, cx, cy, px, py - 4)
+    if fx then
+      wantx, wanty = fx * def.speed, fy * def.speed
+    end
+  end
   if e.state == "spin" then
     wantx, wanty = wantx * 0.2, wanty * 0.2
     e.timer = e.timer - dt
@@ -585,6 +598,12 @@ local function updateGargoyle(e, dt, world, player, px, py)
   local steer = true
   if e.state == "fly" then
     tx, ty = (px - cx) / d * def.speed, (py - 4 - cy) / d * def.speed + math.sin(e.phase * 0.4) * 24
+    if not e.seesPlayer then
+      local fx, fy = flowDirection(world, cx, cy, px, py - 4)
+      if fx then
+        tx, ty = fx * def.speed, fy * def.speed
+      end
+    end
     if e.seesPlayer and dist < 190 and e.attackCd <= 0 and e.stun <= 0 then
       e.state, e.timer = "stone", 0.7
       audio.playAt("gargoyle_grind", cx, cy, 1, 1.2)

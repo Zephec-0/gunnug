@@ -101,3 +101,45 @@ Check items off as they land; append new ones at the bottom.
 - [x] Sky dungeon: remove the indestructible layer
 
 (Batch 5 notes: the one-way platforms could not be made to fail in the headless tests (landing from above, jumping up through and climbing a ladder pair all worked), so the lookup was made faster and nothing else changed: if they still fail in play, say where. Not played: boss/mob feel, fog readability, the blended borders at real speed.)
+
+## Tools (2026-10-18)
+- [x] Sprite + animation editor, separate from the game (`spriteeditor/`, run `editor.bat`): game characters as presets with hitbox guides and in-game reference images, paint tools and modes, effects, timeline with onion skin/tags/preview, puppet bones with FK/IK keys, PNG sheet + Lua metadata export (headless-tested, not yet used by hand)
+
+## Batch 3 (2026-10-18, headless-tested: doctor wake, compendium tiers, grade spread, AI runs; not played)
+- [x] Sawbone floats on the real water surface; E wakes him (no more swim-to-free)
+- [x] Ghoul digs toward the hunter nonstop whenever not in pounce range (claw animation while digging)
+- [x] Swarm bats: staggering orbit plus random bolt when stuck on terrain
+- [x] Miner dynamite bites terrain (about half the hunter dynamite crater), same blast
+- [x] Weapon grades F-D-C-B-A-S-SS: tier rolled first, much wider spread (C is typical; F ~4%, SS ~0.5%)
+- [x] Lamp/candle light radius and strength toned down
+- [x] Diamond ore gold x2
+- [x] Icons for all batch-2 ammo, attachments and fused items
+- [x] Compendium: one tile per common item with grey tier bars (+1..+4) that light when collected
+
+## Batch 4 (2026-10-18, headless-tested; not played)
+- [x] Sawbone floats on the surface lake above the Flooded Caverns entrance; E wakes him
+- [x] Compendium: tier text removed, tiers shown as roman numerals (I-IV) in tile blocks
+- [x] Ghoul bite sized to its body; digging is silent unless terrain actually breaks
+- [~] Swarm bat flow-field pathing round walls (verify in play; revisit if still stuck)
+- [x] TNT barrel: first hit lights a 3s fuse, more hits shorten it, bigger blast/crater
+- [x] Bloater gas x2; all gas now slowly decays (Queen arena gas); boss camera centres on on-screen boss pieces
+- [x] Slot order: split/cluster/explosive/gravity before bounce fire on first impact (pieces inherit bounces)
+- [ ] Item rarity weights are per item, so epic/cursed are far rarer than the table says (see reply); decide on per-tier weighting
+- [x] F2 now opens a dev panel (toggles: no damage, one-hit kills, fly/no clip; teleports: camp, test room, every area, every boss arena)
+
+## Batch 5 (2026-10-18)
+- [x] Ghoul dig bigger; regular bats use flow pathing + orbit + unstick; roman numerals smaller; smoke fades faster and draws 1 pixel per cell
+- [~] Needle doorway mouth flared/flush floor; shop ceiling opening flared + rubble on roof (verify look in play)
+- [ ] Barrens set dressing (buried skeletons, rock formations, mirage oasis)
+- [ ] 5 more random events (carnival aim test, gambler den, +3)
+- [ ] 2 new weapons
+
+## Batch 6 (2026-10-18, headless-tested; not played)
+- [x] Flow pathing for wisps and dread bats; Needle doorway backdrop feathered; shop opening flare
+- [x] Barrens dressing: arches, hoodoos, ruined walls, buried skeletons, a mirage oasis (turns into a dry bed with a coin pouch)
+- [x] Random events (src/randevents.lua): carnival aim room (Easy/Medium/Hard), gambler den (slots + high-low), tinker (weapon re-roll), shrine, cave-in rescue, marked beast hunt; generic menu dialog page
+- [x] New weapons: Crossbow (pierce 2, bolts stick in rock) and Flare Pistol (burning, lit flares that stay lit); both locked until taught/found
+- [ ] Events: tune spawn timing/odds in play; mirage, hunt kinds, tinker price
+
+## Batch 7 (2026-10-18)
+- [x] Water drag: bullets, acid globs and thrown dynamite lose speed in water (bullets sink); flow pathing for dust devils, gargoyles, crows; crate and iron crate art detailed; buried fossil skeletons in the desert ground (replacing surface bones)

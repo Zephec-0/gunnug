@@ -18,6 +18,7 @@
 --     burst rear opener quickdraw mortar       (how the gun fires)
 --     laser bayonet overheat jets steady       (gun / hunter behaviour)
 --     vulnerable                               (curse: damage taken +20% each)
+--     bleed leech ramp lastRound blastSize bounceBoost critBoost far close   (see src.items_batch2)
 --     bgReload                                 (keeps reloading while holstered)
 --
 -- Rarity: "common", "rare" or "cursed" (powerful, with a real downside).
@@ -631,6 +632,17 @@ for id, def in pairs(FUSED) do
   def.rarity = "fused"
   items.defs[id] = def
 end
+-- The second batch (src.items_batch2): defs here, fusions and orders appended below
+local batch2 = require("src.items_batch2")
+for id, def in pairs(batch2.defs) do
+  items.defs[id] = def
+end
+for id, def in pairs(batch2.fused) do
+  items.defs[id] = def
+end
+for _, id in ipairs(batch2.fusedOrder) do
+  items.fusedOrder[#items.fusedOrder + 1] = id
+end
 
 -- What fuses into what: two common items (in either order) -> a fused one
 items.fusions = {
@@ -652,6 +664,10 @@ items.fusions = {
   { "suppressor", "bayonet", "assassin" },
   { "charge", "backblast", "twinblast" },
 }
+
+for _, f in ipairs(batch2.fusions) do
+  items.fusions[#items.fusions + 1] = f
+end
 
 -- The fused item two items make (an id), or nil if they don't fuse
 function items.fuse(a, b)
@@ -687,6 +703,10 @@ items.order = {
   "jets", "mortar", "scavenger", "quickdraw", "glassbarrel", "scope", "stock", "penetrator",
   "stabilizer", "holsterloader", "deadmans", "reckless",
 }
+
+for _, id in ipairs(batch2.order) do
+  items.order[#items.order + 1] = id
+end
 
 -- Levels (design doc §5.7c): two of the same common item fuse into one a
 -- level up, "+1" to "+4". An item at +N works as N+1 copies fitted together
@@ -753,24 +773,36 @@ items.isAvailable = nil
 
 function items.random(random)
   random = random or love.math.random
-  local pool, total = {}, 0
+  -- The rarity is picked first by its weight (among the rarities that have an
+  -- available item), then an item of that rarity at random: so how many items
+  -- a rarity holds doesn't change how often it turns up
+  local byRarity, total = {}, 0
   for _, id in ipairs(items.order) do
     if not items.isAvailable or items.isAvailable(id) then
-      pool[#pool + 1] = id
-      total = total + items.rarities[items.defs[id].rarity].weight
+      local r = items.defs[id].rarity
+      if not byRarity[r] then
+        byRarity[r] = {}
+        total = total + items.rarities[r].weight
+      end
+      table.insert(byRarity[r], id)
     end
   end
-  if #pool == 0 then
-    pool, total = { items.order[1] }, 1
+  if total <= 0 then
+    return items.new(items.order[1])
   end
   local roll = random() * total
-  for _, id in ipairs(pool) do
-    roll = roll - items.rarities[items.defs[id].rarity].weight
-    if roll <= 0 then
-      return items.new(id)
+  local chosen
+  for _, r in ipairs({ "common", "rare", "cursed", "epic", "fused" }) do
+    if byRarity[r] then
+      chosen = chosen or byRarity[r]
+      roll = roll - items.rarities[r].weight
+      if roll <= 0 then
+        chosen = byRarity[r]
+        break
+      end
     end
   end
-  return items.new(pool[#pool])
+  return items.new(chosen[math.floor(random() * #chosen) % #chosen + 1])
 end
 
 return items

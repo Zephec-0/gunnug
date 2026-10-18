@@ -183,12 +183,87 @@ guns.defs.gatling = {
   },
 }
 
+-- Crossbow: one heavy bolt at a time, a slow wind-up between shots. The bolt
+-- is fast and punches through up to two enemies, and it stays stuck in the rock
+-- where it lands. Quiet, and no recoil to speak of.
+guns.defs.crossbow = {
+  name = "Crossbow",
+  chambers = 1,
+  fireDelay = 0.4,
+  reloadTime = 1.35,
+  spread = 0.8,
+  damage = 46,
+  pellets = 1,
+  bulletSpeed = 1250,
+  recoil = 40,
+  impactForce = 420,
+  digRadius = 2,
+  digPower = 2,
+  pierce = 2,
+  bolt = true,
+  slots = 4,
+  slotBias = 0,
+  model = "crossbow",
+  length = 11,
+  kick = 0.6,
+  flash = 0.1,
+  icon = {
+    "     W          ",
+    "     W    wwwwww",
+    "     WLLLLLLLLww",
+    "LLLLLLLLLLLL##Ww",
+    "     W   ##wWWW ",
+    "     W   #  WW  ",
+    "     W          ",
+    "                ",
+  },
+}
+
+-- Flare pistol: a fat-barrelled signal gun. Its flares are slow, burn what they
+-- hit and light the dark as they fly, and one that lands in the rock keeps
+-- burning there for a while, lighting the way.
+guns.defs.flare = {
+  name = "Flare Pistol",
+  chambers = 3,
+  fireDelay = 0.5,
+  reloadTime = 1.7,
+  spread = 3.5,
+  damage = 5,
+  pellets = 1,
+  bulletSpeed = 520,
+  recoil = 70,
+  impactForce = 120,
+  digRadius = 2,
+  digPower = 1,
+  incendiary = 2,
+  glow = 1,
+  flare = true,
+  slots = 4,
+  model = "flare",
+  casing = { size = 3, eject = "shot", hull = { 0.85, 0.3, 0.2 } },
+  length = 8,
+  kick = 1.1,
+  flash = 1.4,
+  icon = {
+    "                ",
+    "   kkkkkk       ",
+    " ooOOOOOOkkkkk  ",
+    " ooOOOOOO###LL# ",
+    "   kkkkkk  #wWW ",
+    "           wWW  ",
+    "           wW   ",
+    "                ",
+  },
+}
+
 -- Short descriptions for the compendium (src.compendium)
 local DESCS = {
   revolver = "Six chambers, a sharp crack and a solid kick. Spent shells stay in the cylinder until it is reloaded.",
   shotgun = "Two shells of buckshot in a wide cone, and a huge kick: the best gun for recoil jumping.",
   semiauto = "A Broomhandle-style pistol. Fast follow-up shots and very little recoil.",
   automatic = "An early drum-fed machine gun: a long hose of weak rounds and a long reload. Fired downward, it slowly lifts the hunter.",
+  crossbow = "One heavy bolt at a time, slow to wind. The bolt is fast, pierces up to two enemies and stays stuck in the rock where it lands.",
+  flare = "A signal pistol. Its slow flares burn what they hit and light the dark, and one that lands in rock keeps burning there for a while.",
   gatling = "Six spinning barrels and a hopper of 150 rounds: the fastest-firing gun there is, once its barrels have spun up. Refilling the hopper takes a long while.",
 }
 for id, def in pairs(guns.defs) do
@@ -240,6 +315,7 @@ local ADDED = {
   "sticky", "homing", "gravity", "split", "cluster",
   "boomerang", "ghost", "execute", "glow", "sneak",
   "bloodCost", "misfire",
+  "bleed", "leech", "ramp", "lastRound", "blastSize", "bounceBoost", "critBoost", "far", "close",
   "burst", "rear", "opener", "quickdraw", "mortar",
   "laser", "bayonet", "overheat", "jets", "steady", "vulnerable", "bgReload",
 }
@@ -247,12 +323,18 @@ local ADDED = {
 local TINTING = {
   "incendiary", "explosive", "freeze", "shock", "poison", "acid", "vamp", "greed", "sticky", "homing", "gravity",
   "split", "cluster", "boomerang", "ghost", "execute", "glow", "concussive", "bloodCost", "misfire",
+  "bleed", "leech", "bounceBoost",
 }
 -- Effects handed to every bullet (see src.bullets)
 local BULLET_FX = {
   "freeze", "shock", "poison", "acid", "concussive", "vamp", "greed", "refill", "sticky", "homing", "gravity",
   "split", "cluster", "boomerang", "ghost", "execute", "glow", "sneak",
+  "bleed", "leech", "bounceBoost", "far", "close",
 }
+
+-- Effects whose order in the slots matters: what a bullet does on impact, against
+-- how many times it bounces first (see src.bullets)
+local ORDERED = { "bounces", "split", "cluster", "explosive", "gravity" }
 
 function Gun:stats()
   local ids = { perks.version }
@@ -295,6 +377,19 @@ function Gun:stats()
       end
     end
   end
+  -- Order of operations: where in the slots each order-sensitive effect sits
+  -- (first slot that carries it), so src.bullets can tell which happens first
+  local order = {}
+  for _, k in ipairs(ORDERED) do
+    for i = 1, self.slotCount do
+      local item = self.slots[i]
+      if item and (item.mods[k] or 0) > 0 then
+        order[k] = i
+        break
+      end
+    end
+  end
+  st.order = order
   perks.modifyStats(st)
   st.chambers = math.max(1, math.floor(st.chambers + 0.5))
   st.damage = math.max(1, st.damage)
@@ -329,7 +424,7 @@ local SLOT_ROLLS = {
   { 0.10, -2 }, { 0.22, -1 }, { 0.50, 0 }, { 0.72, 1 }, { 0.86, 2 }, { 0.94, 3 }, { 0.98, 4 }, { 1.00, 5 },
 }
 local FIT_CHANCE = 0.22 -- chance each slot of a generated gun is already filled
-local ARCHETYPE_ORDER = { "revolver", "shotgun", "semiauto", "automatic", "gatling" }
+local ARCHETYPE_ORDER = { "revolver", "shotgun", "semiauto", "automatic", "gatling", "crossbow", "flare" }
 
 -- How many slots a freshly generated gun of this archetype gets
 local function rollSlots(def, random)
@@ -381,23 +476,48 @@ function guns.generate(archetype, rng, fitChance)
     local j = random(1, i)
     order[i], order[j] = order[j], order[i]
   end
+  -- A quality tier is rolled first (F D C B A S SS: C is the usual weapon, F and
+  -- SS are very rare) and scales how much the good and bad rolls swing. The
+  -- camp's roll-boost upgrade pushes the odds toward the better tiers.
+  local TIERS = {
+    { w = 4, pos = 0.10, neg = 2.5 }, -- F
+    { w = 22, pos = 0.50, neg = 1.6 }, -- D
+    { w = 40, pos = 1.00, neg = 1.0 }, -- C
+    { w = 22, pos = 1.50, neg = 0.7 }, -- B
+    { w = 9, pos = 2.20, neg = 0.4 }, -- A
+    { w = 2.6, pos = 3.20, neg = 0.15 }, -- S
+    { w = 0.4, pos = 5.00, neg = 0 }, -- SS
+  }
+  local total = 0
+  for i, t in ipairs(TIERS) do
+    t.eff = t.w * boost ^ (i - 3)
+    total = total + t.eff
+  end
+  local pick, tier = random() * total, TIERS[3]
+  for _, t in ipairs(TIERS) do
+    pick = pick - t.eff
+    if pick <= 0 then
+      tier = t
+      break
+    end
+  end
   local rolls = {}
   local best
   local function apply(stat, dir, amount)
     -- amount > 0 is better; "lower is better" stats shrink instead
-    rolls[stat] = dir >= 0 and (1 + amount) or (1 - amount * 0.8)
+    rolls[stat] = dir >= 0 and (1 + amount) or (1 - math.min(amount * 0.8, 0.65))
   end
   for rank, idx in ipairs(order) do
     local stat, dir, prefix = ROLL_STATS[idx][1], ROLL_STATS[idx][2], ROLL_STATS[idx][3]
     if dir ~= 0 and rank <= 2 then
-      apply(stat, dir, (0.08 + random() * 0.10) * boost)
+      apply(stat, dir, (0.08 + random() * 0.10) * tier.pos)
       if stat == "chambers" then
         -- Whole chambers only: a "capacious" gun always holds at least one more
         rolls.chambers = math.max(rolls.chambers, (gun.def.chambers + 1) / gun.def.chambers)
       end
       best = best or prefix
     elseif dir ~= 0 and rank == 3 then
-      apply(stat, dir, -(0.05 + random() * 0.07) / boost)
+      apply(stat, dir, -(0.05 + random() * 0.07) * tier.neg)
     else
       apply(stat, dir == 0 and 1 or dir, (random() * 2 - 1) * 0.04)
     end
@@ -495,6 +615,7 @@ function Gun:reload()
   self.reloadTimer = st.reloadTime
   self.reloadTotal = st.reloadTime
   self.burstLeft = 0
+  self.rampCount = 0
   return true
 end
 
@@ -525,6 +646,7 @@ function Gun:fire(angle, ctx)
   end
   self.chambers = self.chambers - 1
   self.shotCount = self.shotCount + 1
+  local lastRound = self.chambers == 0 and st.lastRound > 0
   if def.casing and def.casing.eject == "reload" then
     self.spent = math.min(self.spent + 1, def.chambers)
   end
@@ -536,6 +658,13 @@ function Gun:fire(angle, ctx)
   local mult = ctx.damageMult or 1
   if self.fresh and st.opener > 0 then
     mult = mult * (1 + st.opener) -- Primer Coil
+  end
+  if st.ramp > 0 then
+    mult = mult * (1 + st.ramp * math.min(10, self.rampCount or 0)) -- Rampant Trigger
+    self.rampCount = (self.rampCount or 0) + 1
+  end
+  if lastRound then
+    mult = mult * (1 + st.lastRound) -- Reaper Chamber
   end
   self.fresh = false
   if self.drawn and st.quickdraw > 0 then
@@ -564,6 +693,7 @@ function Gun:fire(angle, ctx)
     self.reloadTimer = st.reloadTime
     self.reloadTotal = st.reloadTime
     self.burstLeft = 0
+    self.rampCount = 0
   end
 
   -- Tracer colour: the last fitted ammo type with an effect
@@ -580,7 +710,7 @@ function Gun:fire(angle, ctx)
     end
   end
 
-  local fx = { gun = self }
+  local fx = { gun = self, order = st.order }
   for _, k in ipairs(BULLET_FX) do
     fx[k] = st[k]
   end
@@ -596,7 +726,7 @@ function Gun:fire(angle, ctx)
   local function makeShot(shotAngle, damageScale)
     local crit = love.math.random() < st.critChance
     local jitter = (def.speedJitter or 0) * (love.math.random() * 2 - 1)
-    local damage = st.damage * mult * damageScale * (crit and 2 or 1)
+    local damage = st.damage * mult * damageScale * (crit and (2 + st.critBoost) or 1)
     shots[#shots + 1] = {
       angle = shotAngle,
       speed = st.bulletSpeed * (1 + jitter),
@@ -611,8 +741,10 @@ function Gun:fire(angle, ctx)
       -- isn't seven full explosions
       explosive = explosive > 0 and {
         count = explosive,
-        scale = pellets > 1 and 1 / math.sqrt(pellets) or (bigBlast and 1.3 or 1),
+        scale = (pellets > 1 and 1 / math.sqrt(pellets) or (bigBlast and 1.3 or 1)) * (1 + st.blastSize),
       } or nil,
+      bolt = def.bolt,
+      flare = def.flare,
       burn = st.incendiary > 0 and { dps = 3 * st.incendiary, time = 2 + st.incendiary } or nil,
       tint = tint,
       fx = fx,

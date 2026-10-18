@@ -402,7 +402,7 @@ end
 function minedecor.addLights(lighting, mine, view)
   for i, l in ipairs(mine.lamps) do
     if not l.broken and inView(view, l.x, l.x, l.y, l.y, 110) then
-      lighting.add(l.x, l.y + 2, 96, 1, 0.66, 0.32, 0.95 + flicker(i) * 0.07)
+      lighting.add(l.x, l.y + 2, 80, 1, 0.66, 0.32, 0.62 + flicker(i) * 0.05)
     end
   end
 end

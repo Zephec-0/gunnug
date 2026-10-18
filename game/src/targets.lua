@@ -26,14 +26,37 @@ end
 
 function targets.hitTest(px, py)
   for _, t in ipairs(list) do
-    if px >= t.x and px < t.x + t.w and py >= t.y and py < t.y + t.h then
+    if not t.hidden and px >= t.x and px < t.x + t.w and py >= t.y and py < t.y + t.h then
       return t
     end
   end
   return nil
 end
 
+-- A target with its own behaviour (the carnival's): t has x, y, w, h and may
+-- carry update(t, dt), draw(t) and onHit(t, damage, x, y); no physics body
+function targets.addCustom(t)
+  t.flash = 0
+  t.total = 0
+  t.custom = true
+  list[#list + 1] = t
+  return t
+end
+
+function targets.remove(t)
+  for i, o in ipairs(list) do
+    if o == t then
+      table.remove(list, i)
+      return
+    end
+  end
+end
+
 function targets.damage(t, amount)
+  if t.onHit then
+    t.onHit(t, amount)
+    return
+  end
   t.flash = 0.08
   t.total = t.total + amount
   effects.popup(t.x + t.w / 2, t.y - 2, tostring(amount), { 1, 0.27, 0.24 })
@@ -50,6 +73,9 @@ end
 function targets.update(dt)
   for _, t in ipairs(list) do
     t.flash = math.max(0, t.flash - dt)
+    if t.update then
+      t.update(t, dt)
+    end
   end
 end
 
@@ -77,7 +103,11 @@ end
 
 function targets.draw()
   for _, t in ipairs(list) do
-    drawDummy(t)
+    if t.draw then
+      t.draw(t)
+    else
+      drawDummy(t)
+    end
   end
 end
 

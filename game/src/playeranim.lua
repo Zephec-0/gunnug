@@ -34,6 +34,8 @@ local HOLDS = {
   shotgun = { reach = 3.4, support = 4.2, pull = 1.6, tip = 0.3 },
   automatic = { reach = 3.4, support = 4.0, pull = 1.4, tip = 0.22 },
   gatling = { reach = 3.0, support = 5.5, pull = 1.0, tip = 0.1 }, -- heavy: hugged in close, barely kicks
+  crossbow = { reach = 3.4, support = 4.6, pull = 0.8, tip = 0.12 },
+  flare = { reach = 5.8, pull = 2.2, tip = 0.4 },
 }
 local TAIL_LINKS, TAIL_LINK = 4, 2.2
 
@@ -63,6 +65,8 @@ local RELOAD_SOUND = {
   gatling = { eject = "gat_rattle", drum = "gat_rattle", click = "gat_spin", snap = "gat_click" }, -- chain rattle, barrels spin, click
   pistol = { eject = "pi_magdrop", click = "pi_magin", snap = "pi_click" }, -- mag drop, mag in, click
   semiauto = { eject = "pi_magdrop", click = "pi_magin", snap = "pi_click" },
+  crossbow = { eject = "pi_click", click = "pi_magin", snap = "pi_click" },
+  flare = { eject = "rev_eject", click = "rev_load", snap = "rev_close" },
 }
 
 local RELOAD = {
@@ -137,6 +141,9 @@ local function smooth(t)
 end
 
 -- The two keyframes around progress p and how far between them (eased)
+RELOAD.crossbow = RELOAD.shotgun -- (cock it, fetch a bolt, lay it on the rail)
+RELOAD.flare = RELOAD.revolver
+
 local function reloadKeys(model, p)
   local keys = (RELOAD[model] or RELOAD.revolver).keys
   for i = 1, #keys - 1 do
@@ -793,6 +800,29 @@ function GUN_DRAW.shotgun(x, y, dx, dy, px, py, len)
   pixel(x + dx * 1, y + dy * 1, COLORS.silver)
   pixel(x + dx * len, y + dy * len, COLORS.silver)
   pixel(x + dx * len - px, y + dy * len - py, COLORS.silver)
+end
+
+function GUN_DRAW.crossbow(x, y, dx, dy, px, py, len)
+  -- Wooden stock into the shoulder, a long tiller, the steel prod across the
+  -- front with its string, and the bolt laid on the rail
+  segment(x, y, x - dx * 4 + px * 1.4, y - dy * 4 + py * 1.4, COLORS.grip)
+  segment(x - dx, y - dy, x + dx * (len - 2), y + dy * (len - 2), COLORS.grip)
+  local fx, fy = x + dx * (len - 3), y + dy * (len - 3)
+  segment(fx - px * 3.2, fy - py * 3.2, fx + px * 3.2, fy + py * 3.2, COLORS.gunMid)
+  segment(fx - px * 3.2 - dx, fy - py * 3.2 - dy, fx - dx * 2, fy - dy * 2, COLORS.silver)
+  segment(fx + px * 3.2 - dx, fy + py * 3.2 - dy, fx - dx * 2, fy - dy * 2, COLORS.silver)
+  segment(x + dx, y + dy - 0.5, x + dx * len, y + dy * len - 0.5, COLORS.silver)
+  pixel(x + dx * len, y + dy * len, COLORS.silver)
+end
+
+function GUN_DRAW.flare(x, y, dx, dy, px, py, len)
+  -- A stubby, fat-barrelled signal pistol with a bright orange muzzle band
+  segment(x, y, x + px * 2.5 - dx * 1.5, y + py * 2.5 - dy * 1.5, COLORS.grip)
+  segment(x, y, x + dx * len, y + dy * len, COLORS.gun)
+  segment(x + dx * 1.5 - px * 0.8, y + dy * 1.5 - py * 0.8, x + dx * len - px * 0.8, y + dy * len - py * 0.8, COLORS.gunMid)
+  pixel(x + dx * (len - 1), y + dy * (len - 1), { 1, 0.55, 0.2 })
+  pixel(x + dx * len, y + dy * len, { 1, 0.8, 0.4 })
+  pixel(x + dx * 3, y + dy * 3 + 0 * py, COLORS.silver)
 end
 
 function GUN_DRAW.automatic(x, y, dx, dy, px, py, len)

@@ -161,9 +161,34 @@ local function shotPistol()
   end)
 end
 
+-- The crossbow: a deep string thrum with a short whistle of the bolt
+local function shotCrossbow()
+  local tail, hi = lp(0.12), hp(0.5)
+  return synth(0.3, function(t, p)
+    local n = noise()
+    return math.sin(t * (150 - 70 * p) * TAU) * math.exp(-p * 9) * 0.6
+      + math.sin(t * (620 + 900 * p) * TAU) * math.exp(-p * 14) * 0.22
+      + hi(n) * math.exp(-p * 40) * 0.35
+      + tail(n) * math.exp(-p * 12) * 0.15
+  end)
+end
+
+-- The flare pistol: a hollow pop and a hiss
+local function shotFlare()
+  local tail, hi = lp(0.25), hp(0.25)
+  return synth(0.4, function(t, p)
+    local n = noise()
+    return math.sin(t * (190 - 110 * p) * TAU) * math.exp(-p * 16) * 0.7
+      + hi(n) * math.exp(-p * 9) * 0.28
+      + tail(n) * math.exp(-p * 5) * 0.18
+  end)
+end
+
 -- Effects -------------------------------------------------------------------------
 
 local DEFS = {
+  shot_crossbow = { gen = shotCrossbow, volume = 0.5 },
+  shot_flare = { gen = shotFlare, volume = 0.5 },
   shot_revolver = { gen = shotRevolver, volume = 0.55 },
   shot_pistol = { gen = shotPistol, volume = 0.45 },
   shot_shotgun = { gen = shotShotgun, volume = 0.75 },

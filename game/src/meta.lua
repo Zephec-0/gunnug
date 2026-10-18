@@ -33,7 +33,7 @@ local GATED = { weapon = true, ammo = true, attachment = true }
 meta.STARTER_WEAPONS = { revolver = true, shotgun = true, semiauto = true }
 
 -- What teaching the Gunsmith costs, by what it is
-local TEACH_COST = { weapon = 6, rare = 4, cursed = 3, common = 2 }
+local TEACH_COST = { weapon = 6, epic = 8, rare = 4, cursed = 3, common = 2 }
 
 -- Marks for things done
 meta.EARN = {

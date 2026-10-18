@@ -133,18 +133,18 @@ local function bossGun()
     if s > bestScore and gun.slotCount >= 2 then
       best, bestScore = gun, s
     end
-    if gunInfo.gradeIndex(gun) >= 5 and gun.slotCount >= 2 then
+    if gunInfo.gradeIndex(gun) >= 6 and gun.slotCount >= 2 then
       break
     end
   end
   gun = best or guns.generate("revolver", nil, 0)
-  if gunInfo.gradeIndex(gun) < 5 then
+  if gunInfo.gradeIndex(gun) < 6 then
     -- (rolls nudged up to an S if the dice never got there)
     gun.rolls = gun.rolls or {}
-    gun.rolls.damage = math.max(gun.rolls.damage or 1, 1.18)
-    gun.rolls.fireDelay = math.min(gun.rolls.fireDelay or 1, 0.86)
-    gun.rolls.reloadTime = math.min(gun.rolls.reloadTime or 1, 0.86)
-    gun.rolls.bulletSpeed = math.max(gun.rolls.bulletSpeed or 1, 1.1)
+    gun.rolls.damage = math.max(gun.rolls.damage or 1, 1.45)
+    gun.rolls.fireDelay = math.min(gun.rolls.fireDelay or 1, 0.75)
+    gun.rolls.reloadTime = math.min(gun.rolls.reloadTime or 1, 0.75)
+    gun.rolls.bulletSpeed = math.max(gun.rolls.bulletSpeed or 1, 1.25)
   end
   gun.slotCount = math.max(2, gun.slotCount)
   gun.slots = {}

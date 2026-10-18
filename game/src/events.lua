@@ -22,6 +22,7 @@ local npcs = require("src.npcs")
 local perks = require("src.perks")
 local pickups = require("src.pickups")
 local save = require("src.save")
+local randevents = require("src.randevents")
 
 local events = {}
 
@@ -34,6 +35,7 @@ local ghostTimer, ghostDone, runTime = 60, false, 0
 events.onGhost = nil
 
 function events.clear()
+  randevents.clear()
   world = nil
   altars, vaults, keys, relics = {}, {}, {}, {}
   wounded, ghost = nil, nil
@@ -147,6 +149,7 @@ function events.update(dt, player, areaIndex)
   if not world then
     return
   end
+  randevents.update(dt, player, areaIndex, world)
   local px, py = player:center()
   local inv = player.inventory
   -- keys fall and are picked up by walking over them
@@ -278,6 +281,9 @@ end
 function events.interact(player)
   if not world or player.dead then
     return false
+  end
+  if randevents.interact(player) then
+    return true
   end
   local px, py = player:center()
   local inv = player.inventory
@@ -510,6 +516,7 @@ function events.draw(view)
   if ghost and inView(view, ghost.x, ghost.y, 60) then
     drawGhost(ghost)
   end
+  randevents.draw(view)
 end
 
 function events.drawEmissive(view)
@@ -555,6 +562,7 @@ function events.addLights(lighting, view)
   if not world then
     return
   end
+  randevents.addLights(lighting, view)
   local t = love.timer.getTime()
   for _, a in ipairs(altars) do
     if inView(view, a.x, a.y, 120) and not a.used then
@@ -591,6 +599,7 @@ function events.drawScreen(toScreen, font, player)
   if not world or require("src.menu").isOpen() then
     return
   end
+  randevents.drawScreen(toScreen, font, player)
   for _, o in ipairs({ wounded, ghost }) do
     if o and o.say then
       npcs.bubble(font, o.say.text, toScreen(o.x, o.y - 22), select(2, toScreen(o.x, o.y - 22)), o.say.age)

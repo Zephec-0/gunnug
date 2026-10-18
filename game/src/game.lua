@@ -27,6 +27,7 @@ local weather = require("src.weather")
 local chests = require("src.chests")
 local compare = require("src.compare")
 local visuals = require("src.visuals")
+local devpanel = require("src.devpanel")
 local config = require("src.config")
 local effects = require("src.effects")
 local deaths = require("src.deaths")
@@ -94,6 +95,27 @@ local DEATH_FADE_START = 0.3 -- the fade to the recap starts this long after the
 
 -- Queues a scene change (a new run, or the test room). Loading happens next
 -- update, after one blank frame.
+-- Dev panel: teleports. The camp, areas and arenas live in the overworld, so
+-- from anywhere else a fresh overworld is loaded first and the jump is made
+-- once it is up.
+local devQueue
+function game.devTeleport(spec)
+  if spec.kind == "test" then
+    game.enter("testroom")
+    return
+  end
+  local function go()
+    scene.devTeleport(player, spec)
+    camera.snap(player:center())
+  end
+  if scene == scenes.overworld and not pending and player then
+    go()
+  else
+    game.enter("overworld", { atCave = true })
+    devQueue = go
+  end
+end
+
 function game.enter(name, opts)
   pending = { name = name, opts = opts }
 end
@@ -123,6 +145,11 @@ local function load(name, opts)
   camera.snap(player:center())
   hud.showBanner(scene.title, scene.subtitle)
   fade = 1
+  if devQueue then
+    local go = devQueue
+    devQueue = nil
+    go()
+  end
 end
 
 -- Starts a fresh run in the overworld
@@ -534,7 +561,7 @@ function game.update(dt)
   -- (with the weapon panel open the area's sound plays on, but muffled; under water too)
   audio.update(dt, underground, menu.isOpen(), area, inShop, itembar.isOpen() or (playing and player.submerged))
   -- The weapon panel and the menus pause the game, like Noita's inventory
-  love.mouse.setVisible(itembar.isOpen() or menu.isOpen() or compare.isOpen() or visuals.isOpen())
+  love.mouse.setVisible(itembar.isOpen() or menu.isOpen() or compare.isOpen() or visuals.isOpen() or require("src.devpanel").isOpen())
   visuals.update()
   menu.update(dt)
   if menu.isFrontEnd() then
@@ -615,7 +642,7 @@ function game.update(dt)
     local ob = player.body
     local ox, oy = ob.x, ob.y
     player:update(dt, aimX, aimY)
-    require("src.dev").fly(player, dt, ox, oy)
+    require("src.dev").flyStep(player, dt, ox, oy)
   end
   player:updateHurt(dt)
   player:syncPhysics(dt)
@@ -869,6 +896,7 @@ drawFrame = function()
   end
   compare.draw(inv, render.uiScale())
   visuals.draw(render.uiScale())
+  devpanel.draw(render.uiScale())
   toasts.draw(render.uiScale())
   menu.draw(render.uiScale())
   love.graphics.setColor(1, 1, 1)
@@ -877,9 +905,12 @@ end
 -- Returns true if the key was handled (main.lua uses this so Escape closes
 -- the weapon panel or opens the pause menu instead of quitting)
 function game.keypressed(key)
+  if devpanel.isOpen() and devpanel.keypressed(key) then
+    return true
+  end
   if key == "f2" then
     if playing and not menu.isOpen() then
-      require("src.dev").toggle(player)
+      require("src.dev").toggle()
     end
     return true
   end
@@ -982,8 +1013,6 @@ function game.keypressed(key)
     -- Testing: straight to the Sulfur Queen's arena
     scene.toArena(player)
     camera.snap(player:center())
-  elseif key == "f2" then
-    showPhysics = not showPhysics
   else
     return false
   end
@@ -991,6 +1020,9 @@ function game.keypressed(key)
 end
 
 function game.mousepressed(x, y, button)
+  if devpanel.isOpen() and devpanel.mousepressed(x, y, button, game) then
+    return
+  end
   if visuals.isOpen() then
     visuals.mousepressed(x, y, button)
     return
@@ -1033,6 +1065,9 @@ function game.mousereleased(x, y, button)
 end
 
 function game.wheelmoved(dx, dy)
+  if devpanel.isOpen() and devpanel.wheelmoved(dy) then
+    return
+  end
   if menu.isOpen() then
     menu.wheelmoved(dx, dy)
     return

@@ -27,6 +27,7 @@ local materials = {
   ASH = 17,
   DIAMONDORE = 18,
   ICE = 19,
+  FOSSIL = 25,
 }
 
 materials.defs = {
@@ -199,7 +200,7 @@ materials.defs = {
     topColor = { 0.46, 0.41, 0.38 },
     variation = 0.08,
   },
-  -- Rock veined with diamond: rarer than gold and worth ten times as much a speck
+  -- Rock veined with diamond: rarer than gold and worth twenty times as much a speck
   [18] = {
     name = "diamond ore",
     solid = true,
@@ -210,7 +211,7 @@ materials.defs = {
     variation = 0.06,
     flecks = { 0.80, 0.95, 1.0 }, -- silver-blue glints, thicker and brighter than gold's
     fleckMin = 0.46,
-    gold = { 10, 20 },
+    gold = { 20, 40 },
   },
   -- A skin of ice on frozen water (frost rounds)
   [19] = {
@@ -277,6 +278,17 @@ materials.defs[24] = {
   shadow = { 0.45, 0.55, 0.80 },
   variation = 0.02,
   cloud = true,
+}
+
+-- Bone buried in the desert's sandstone: skeletons you can see in the cut of the ground
+materials.defs[25] = {
+  name = "fossil",
+  solid = true,
+  hardness = 1.5,
+  density = 1.6,
+  color = { 0.74, 0.62, 0.50 },
+  topColor = { 0.82, 0.72, 0.58 },
+  variation = 0.09, -- (a mottled bone that takes on the ground's colour)
 }
 
 -- Flat lookups for hot paths

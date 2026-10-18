@@ -379,7 +379,7 @@ end
 -- no knockback or invulnerability, and the blink after a hit doesn't stop it
 -- source: what is doing it (an id for src.deaths: an enemy kind, "gas", "fire"...)
 function Player:hurtOverTime(amount, color, source)
-  if self.dead or require("src.dev").on then
+  if self.dead or require("src.dev").noDamage then
     return
   end
   self.lastSource, self.lastEnemy = source, nil
@@ -395,7 +395,7 @@ function Player:hurtOverTime(amount, color, source)
 end
 
 function Player:hurt(amount, fromX, fromY, source)
-  if self.dead or self.invuln > 0 or require("src.dev").on then
+  if self.dead or self.invuln > 0 or require("src.dev").noDamage then
     return false
   end
   if self:isDodging() then
@@ -756,7 +756,7 @@ function Player:update(dt, aimX, aimY)
     end
   end
   pickups.extraMagnet = self:gunStat("magnet")
-  local trigger = love.mouse.isDown(1) and not self.rollT
+  local trigger = love.mouse.isDown(1) and not self.rollT and not require("src.devpanel").overMouse()
   if self.gun and self.gun.def.spoolTime then
     -- Gatling: the barrels wind up while the trigger is held, ratcheting
     -- faster and higher as they go

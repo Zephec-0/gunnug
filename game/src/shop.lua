@@ -85,7 +85,7 @@ local function rollWeapon(entry)
     end
   end
   entry.gun, entry.name = gun, gun.name
-  entry.price = roundTo5(45 + 25 * fitted + 8 * math.max(0, gun.slotCount - gun.def.slots) + 12 * (gunInfo.gradeIndex(gun) - 1) + love.math.random(0, 20))
+  entry.price = roundTo5(45 + 25 * fitted + 8 * math.max(0, gun.slotCount - gun.def.slots) + 12 * (gunInfo.gradeIndex(gun) - 2) + love.math.random(0, 20))
   return entry
 end
 
@@ -468,7 +468,7 @@ function shop.update(dt, player)
       for i = #lying, 1, -1 do
         local p = lying[i]
         if (p.kind == "item" or p.kind == "weapon") and p.x > s.sell.x0 and p.x < s.sell.x1 and p.y > s.floorY - 26 and p.y < s.floorY + 3 and math.abs(p.vy) < 5 and p.age > 0.6 then
-          local value = p.kind == "weapon" and (SELL_GUN_BASE + SELL_GUN_PER_GRADE * gunInfo.gradeIndex(p.gun)) or (SELL_ITEM[p.item.rarity] or SELL_ITEM.common)
+          local value = p.kind == "weapon" and (SELL_GUN_BASE + SELL_GUN_PER_GRADE * (gunInfo.gradeIndex(p.gun) - 1)) or (SELL_ITEM[p.item.rarity] or SELL_ITEM.common)
           table.remove(lying, i)
           player.inventory.gold = player.inventory.gold + value
           effects.popup(p.x, p.y - 12, "Sold +" .. value .. "g", { 1, 0.85, 0.35 })

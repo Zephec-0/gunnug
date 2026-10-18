@@ -59,7 +59,7 @@ enemies.defs = {
     gold = { 3, 6 }, -- gold dropped on death (min, max), scaled by toughness
     pushForce = 300, -- shoves crates in its way (the hunter pushes with 512)
     weight = 3.2, -- how much objects' momentum moves it (speed gained = momentum / weight)
-    clawDig = 4.5, -- its lunge rakes a bite this big out of the terrain in front...
+    clawDig = 6, -- its lunge rakes a bite this big out of the terrain in front...
     clawPower = 2, -- ...at this digging power (earth always gives, rock half the time)
   },
   bat = {
@@ -948,7 +948,7 @@ local function die(e)
     local prize
     for _ = 1, 60 do
       prize = guns.generate(lockedGun, nil, 0.5)
-      if gunInfo.gradeIndex(prize) >= 4 then
+      if gunInfo.gradeIndex(prize) >= 5 then
         break
       end
     end
@@ -992,7 +992,7 @@ local function die(e)
   elseif kind == "bloater" then
     -- Bursts: the poison leaves it as a cloud, and burning gas goes up in flames
     local big = e.def.boss
-    fluids.addGas(cx, cy, big and 1 or 0.9, big and 44 * (e.body.w / e.def.w) or 18)
+    fluids.addGas(cx, cy, big and 1 or 0.9, big and 44 * (e.body.w / e.def.w) or 36)
     for _ = 1, 10 do
       effects.particle(cx, cy, (r() - 0.5) * 80, (r() - 0.5) * 60, 0.6, { 0.72, 0.85, 0.3 }, 100, true)
     end
@@ -1283,7 +1283,7 @@ end
 function enemies.chain(from, damage, fx)
   local skip = { [from] = true }
   local ax, ay = center(from)
-  for _ = 1, 2 do
+  for _ = 1, 1 + math.max(1, math.floor(fx and fx.shock or 1)) do
     local target = enemies.nearest(ax, ay, 48, skip)
     if not target then
       return
@@ -1690,35 +1690,28 @@ local function updateGhoul(e, dt, world, player, px, py)
     e.rakes = 0
     clawDig(e, world, true)
   end
-  -- Locked on but walled off: it digs at the rock toward the hunter in bursts
-  -- (a couple of seconds of hacking, then a breather)
-  if e.state == "chase" and e.stun <= 0 then
-    e.burstCd = math.max(0, (e.burstCd or 0) - dt)
-    if (e.burstT or 0) > 0 then
-      e.burstT = e.burstT - dt
-      e.digTick = (e.digTick or 0) - dt
-      if e.digTick <= 0 then
-        e.digTick = 0.2
-        local d = math.max(1, dist)
-        local nx, ny = (px - cx) / d, (py - cy) / d
-        local k = def.scale or 1
-        destruction.dig(world, cx + nx * (b.w / 2 + 4 * k), cy + ny * (b.h / 2 + 3 * k), def.clawDig * 1.5 * k, def.clawPower + 1, nx, ny)
-        sfx("hit", 0.35, 0.5 + love.math.random() * 0.2)
+  -- Out of pouncing range it is always clawing its way toward the hunter: the
+  -- digging never stops, so walls, floors and ceilings only slow it down
+  e.digging = false
+  if e.state == "chase" and e.stun <= 0 and not e.windT and (e.strikeT or 0) <= 0 and not (dist < def.lungeRange and math.abs(py - cy) < 24) then
+    e.digging = true
+    e.digTick = (e.digTick or 0) - dt
+    if e.digTick <= 0 then
+      e.digTick = 0.2
+      e.digSide = -(e.digSide or 1)
+      local d = math.max(1, dist)
+      local nx, ny = (px - cx) / d, (py - cy) / d
+      local k = def.scale or 1
+      -- (a bite big enough for its whole body to follow through)
+      local r = math.max(def.clawDig * 1.8 * k, b.h * 0.8)
+      local dug = destruction.dig(world, cx + nx * (b.w / 2 + r * 0.7), cy + ny * (b.h / 2 + r * 0.5 - 4), r, def.clawPower + 1, nx, ny)
+      if dug > 0 then
+        sfx("hit", 0.3, 0.5 + love.math.random() * 0.2)
         effects.particle(cx + nx * 8, cy + ny * 8, nx * 40 + (love.math.random() - 0.5) * 40, ny * 40 - 20, 0.3, { 0.5, 0.45, 0.4 }, 200, true)
-        if ny < -0.5 and e.grounded then
-          b.vy = -def.jump * 0.8 -- (clawing upward, it hauls itself up)
-        end
       end
-      if e.burstT <= 0 then
-        e.burstCd = 2.5
+      if ny < -0.5 and e.grounded then
+        b.vy = -def.jump * 0.8 -- (clawing upward, it hauls itself up)
       end
-      if e.seesPlayer then
-        e.burstT = 0
-        e.burstCd = 0.5
-      end
-    elseif not e.seesPlayer and e.burstCd <= 0 and dist < def.forget then
-      e.burstT = 2.2
-      e.digTick = 0
     end
   end
   local want = 0
@@ -1817,12 +1810,95 @@ local function updateGhoul(e, dt, world, player, px, py)
   if e.grounded and b.vy >= 0 then
     Body.snapDown(b, collide, 4)
   end
-  e.phase = e.phase + dt * (math.abs(b.vx) / 7 + 0.8)
+  e.phase = e.phase + dt * (math.abs(b.vx) / 7 + (e.digging and 5 or 0.8))
   -- Dragging hands kick up a little dust
   if e.grounded and math.abs(b.vx) > 8 and love.math.random() < dt * 8 then
     effects.particle(cx - e.facing * (5 + love.math.random() * 3), b.y + b.h - 1, -e.facing * 6, -8 - love.math.random() * 10, 0.4, { 0.42, 0.40, 0.40 }, 60)
   end
 end
+
+-- Swarm bats cannot see through rock, so when the hunter is walled off they
+-- follow a flow field: a breadth-first search over coarse cells out from the
+-- hunter (shared by every bat, rebuilt a couple of times a second) that gives
+-- each open cell the number of steps to him. A bat steps to its lowest neighbour.
+local flowDirection
+do
+local FLOW_CELL, FLOW_RADIUS = 8, 44
+local flow = { t = -1, cx = nil, cy = nil, dist = {}, world = nil, solid = {} }
+local FLOW_DIRS = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 }, { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 } }
+
+local function flowKey(gx, gy)
+  return gx * 65536 + gy
+end
+
+local function flowBlocked(world, gx, gy)
+  local k = flowKey(gx, gy)
+  local v = flow.solid[k]
+  if v == nil then
+    local x, y = gx * FLOW_CELL + FLOW_CELL / 2, gy * FLOW_CELL + FLOW_CELL / 2
+    v = world:isSolid(math.floor(x), math.floor(y)) or world:isSolid(math.floor(x - 3), math.floor(y - 3)) or world:isSolid(math.floor(x + 3), math.floor(y - 3)) or world:isSolid(math.floor(x - 3), math.floor(y + 3)) or world:isSolid(math.floor(x + 3), math.floor(y + 3))
+    flow.solid[k] = v
+  end
+  return v
+end
+
+local function flowRebuild(world, px, py)
+  local pgx, pgy = math.floor(px / FLOW_CELL), math.floor(py / FLOW_CELL)
+  flow.world, flow.cx, flow.cy, flow.t = world, pgx, pgy, love.timer.getTime()
+  flow.solid = {}
+  local dist = {}
+  flow.dist = dist
+  local queue, head = { pgx, pgy }, 1
+  dist[flowKey(pgx, pgy)] = 0
+  while head <= #queue do
+    local gx, gy = queue[head], queue[head + 1]
+    head = head + 2
+    local d = dist[flowKey(gx, gy)]
+    if d < FLOW_RADIUS then
+      for _, dir in ipairs(FLOW_DIRS) do
+        local nx, ny = gx + dir[1], gy + dir[2]
+        local k = flowKey(nx, ny)
+        if not dist[k] and not flowBlocked(world, nx, ny) and (dir[1] == 0 or dir[2] == 0 or (not flowBlocked(world, gx + dir[1], gy) and not flowBlocked(world, gx, gy + dir[2]))) then
+          dist[k] = d + 1
+          queue[#queue + 1] = nx
+          queue[#queue + 1] = ny
+        end
+      end
+    end
+  end
+end
+
+-- The unit direction a bat at (x, y) should fly to get round the rock to the
+-- hunter at (px, py), or nil if there is no known way (too far, or sealed in)
+flowDirection = function(world, x, y, px, py)
+  local pgx, pgy = math.floor(px / FLOW_CELL), math.floor(py / FLOW_CELL)
+  if flow.world ~= world or not flow.cx or love.timer.getTime() - flow.t > 0.45 or math.abs(pgx - flow.cx) + math.abs(pgy - flow.cy) > 3 then
+    flowRebuild(world, px, py)
+  end
+  local gx, gy = math.floor(x / FLOW_CELL), math.floor(y / FLOW_CELL)
+  local here = flow.dist[flowKey(gx, gy)]
+  local best, bx, by = here or math.huge, nil, nil
+  if not here then
+    -- (in rock or off the field: look for any reached neighbour to head for)
+    best = math.huge
+  end
+  for _, dir in ipairs(FLOW_DIRS) do
+    local d = flow.dist[flowKey(gx + dir[1], gy + dir[2])]
+    if d and d < best then
+      best, bx, by = d, dir[1], dir[2]
+    end
+  end
+  if not bx then
+    return nil
+  end
+  -- aim at the next cell's centre (so it hugs corners rather than clipping them)
+  local tx, ty = (gx + bx) * FLOW_CELL + FLOW_CELL / 2 - x, (gy + by) * FLOW_CELL + FLOW_CELL / 2 - y
+  local d = math.max(1, math.sqrt(tx * tx + ty * ty))
+  return tx / d, ty / d
+end
+end
+
+enemies.flowDirection = flowDirection -- (the Needle's fliers use it too: src.needlemobs)
 
 -- Bat: hangs asleep until it sees the hunter and flutters in. Once it has a
 -- clear line of sight and is close enough it locks on: it hangs still and
@@ -1855,6 +1931,38 @@ local function updateBat(e, dt, world, player, px, py)
   local steer = true -- false while the dive fixes its own velocity
   if e.state == "chase" then
     tx, ty = (px - cx) / d * def.speed, (py - 4 - cy) / d * def.speed
+    -- Walled off from the hunter: follow the flow field round the rock (see
+    -- flowDirection); in the open, weave in a staggering orbit like the swarm
+    local fx, fy
+    if not e.seesPlayer then
+      fx, fy = flowDirection(world, cx, cy, px, py - 4)
+    end
+    if fx then
+      tx, ty = fx * def.speed, fy * def.speed
+    else
+      e.orbitT = (e.orbitT or love.math.random() * 2) - dt
+      if e.orbitT <= 0 then
+        e.orbitT = 0.6 + love.math.random() * 1.2
+        e.orbitDir = love.math.random() < 0.5 and -1 or 1
+      end
+      local k = (e.orbitDir or 1) * def.speed * 0.45
+      tx, ty = tx - (py - 4 - cy) / d * k, ty + (px - cx) / d * k
+    end
+    -- Stuck against terrain: bolt off in a random direction for a moment
+    e.stuckT = (e.stuckT or 0) + dt
+    if e.stuckT >= 0.4 then
+      local mx, my = cx - (e.lastX or cx), cy - (e.lastY or cy)
+      e.lastX, e.lastY, e.stuckT = cx, cy, 0
+      if mx * mx + my * my < 16 and dist > 24 and e.stun <= 0 then
+        e.unstickT = 0.5
+        local a = love.math.random() * math.pi * 2
+        e.unstickX, e.unstickY = math.cos(a) * def.speed, math.sin(a) * def.speed
+      end
+    end
+    if (e.unstickT or 0) > 0 then
+      e.unstickT = e.unstickT - dt
+      tx, ty = e.unstickX, e.unstickY
+    end
     if e.seesPlayer and dist < def.chargeRange and e.attackCd <= 0 and e.stun <= 0 then
       e.state = "lock"
       e.timer = def.lockTime
@@ -2016,7 +2124,7 @@ local function updateWanderingBloater(e, dt, world, player, px, py)
     -- Struck: a burst of gas, then away
     e.fleeT = 5
     e.gasUp = 9
-    fluids.addGas(cx, cy, 0.8, 16)
+    fluids.addGas(cx, cy, 0.8, 32)
     local d = math.max(1, dist)
     e.dirX, e.dirY = (cx - px) / d, (cy - py) / d
     e.wanderT = 1.5
@@ -2029,10 +2137,10 @@ local function updateWanderingBloater(e, dt, world, player, px, py)
   if e.puffT <= 0 then
     if e.gasUp > 0 then
       e.puffT = 0.3
-      fluids.addGas(cx, cy + 3, 0.5, 11)
+      fluids.addGas(cx, cy + 3, 0.5, 22)
     else
       e.puffT = 0.55 + love.math.random() * 0.2
-      fluids.addGas(cx, cy + 3, 0.3, 7)
+      fluids.addGas(cx, cy + 3, 0.3, 14)
     end
   end
   e.state = fleeing and "chase" or "wander" -- (chase: the wheeze of a frightened bloater)
@@ -2164,6 +2272,12 @@ local function updateDreadBat(e, dt, world, player, px, py)
   local d = math.max(1, dist)
   if e.state == "chase" then
     local tx, ty = (px - cx) / d * def.speed, (py - 4 - cy) / d * def.speed + math.sin(e.phase * 0.5) * 25
+    if not e.seesPlayer then
+      local fx, fy = flowDirection(world, cx, cy, px, py - 4) -- (round the rock, not into it)
+      if fx then
+        tx, ty = fx * def.speed, fy * def.speed
+      end
+    end
     if e.stun <= 0 then
       local step = def.accel * dt
       b.vx = b.vx < tx and math.min(b.vx + step, tx) or math.max(b.vx - step, tx)
@@ -2268,8 +2382,41 @@ local function updateSwarmBat(e, dt, world, player, px, py)
     end
   else
     tx, ty = (px - cx) / d * def.speed, (py - 4 - cy) / d * def.speed
+    local fx, fy
+    if not e.seesPlayer then
+      fx, fy = flowDirection(world, cx, cy, px, py - 4)
+    end
+    if fx then
+      tx, ty = fx * def.speed, fy * def.speed
+    end
+    -- A staggering orbit, near the hunter or not: a sideways weave that swaps
+    -- direction now and then keeps the bats moving and shakes them off terrain
+    e.orbitT = (e.orbitT or love.math.random() * 2) - dt
+    if e.orbitT <= 0 then
+      e.orbitT = 0.5 + love.math.random() * 1.1
+      e.orbitDir = love.math.random() < 0.5 and -1 or 1
+      e.orbitAmt = 0.5 + love.math.random() * 0.9
+    end
+    local ox, oy = -(py - 4 - cy) / d, (px - cx) / d
+    local k = (e.orbitDir or 1) * (e.orbitAmt or 1) * def.speed * (fx and 0.15 or 0.8)
+    tx, ty = tx + ox * k, ty + oy * k
   end
-  if swarm then
+  -- Stuck on terrain: barely moved for a moment, so it bolts in a random direction
+  e.stuckT = (e.stuckT or 0) + dt
+  if e.stuckT >= 0.35 then
+    local mx, my = cx - (e.lastX or cx), cy - (e.lastY or cy)
+    e.lastX, e.lastY = cx, cy
+    e.stuckT = 0
+    if mx * mx + my * my < 16 and dist > 24 and e.stun <= 0 then
+      e.unstickT = 0.5
+      local a = love.math.random() * math.pi * 2
+      e.unstickX, e.unstickY = math.cos(a) * def.speed, math.sin(a) * def.speed
+    end
+  end
+  if (e.unstickT or 0) > 0 then
+    e.unstickT = e.unstickT - dt
+    tx, ty = e.unstickX, e.unstickY
+  elseif swarm then
     local sx, sy, kx, ky = flock(e, cx, cy)
     tx, ty = tx + sx + kx, ty + sy + ky
   end
@@ -2314,6 +2461,12 @@ local function updateWisp(e, dt, world, player, px, py)
     local d = math.max(1, dist)
     local dx, dy = (px - cx) / d, (py - 4 - cy) / d
     local wob = math.sin(e.phase * 0.8) * 50
+    if not e.seesPlayer then
+      local fx, fy = flowDirection(world, cx, cy, px, py - 4) -- (round the rock, not into it)
+      if fx then
+        dx, dy, wob = fx, fy, wob * 0.3
+      end
+    end
     local tx, ty = dx * def.speed - dy * wob, dy * def.speed + dx * wob
     if swarm then
       local sx, sy, kx, ky = flock(e, cx, cy)
@@ -2988,6 +3141,8 @@ local function throwDynamite(e, px, py)
     fuse = def.fuse,
     spin = 0,
     mul = e.dmgMul * def.blast,
+    dig = 16, -- (about half the bite the hunter's own dynamite takes; same blast)
+    digPower = 2.5,
   }
   sfx("worm_lunge", 0.5, 1.6)
 end
@@ -3864,6 +4019,10 @@ function enemies.update(dt, world, player)
     local s = sticks[i]
     s.fuse = s.fuse - dt
     s.vy = s.vy + s.grav * dt
+    if fluids.waterAt(s.x, s.y) then
+      local k = math.exp(-4.5 * dt) -- (water drags a thrown stick to a slow sink)
+      s.vx, s.vy = s.vx * k, s.vy * k
+    end
     s.spin = s.spin + dt * (s.vx > 0 and 9 or -9)
     local steps = math.max(1, math.ceil(math.max(math.abs(s.vx), math.abs(s.vy)) * dt / 2))
     for _ = 1, steps do
@@ -3894,6 +4053,10 @@ function enemies.update(dt, world, player)
     local g = globs[i]
     g.life = g.life - dt
     g.vy = g.vy + g.gravity * dt
+    if fluids.waterAt(g.x, g.y) then
+      local k = math.exp(-5 * dt) -- (and a glob loses its speed in water)
+      g.vx, g.vy = g.vx * k, g.vy * k
+    end
     -- March so fast globs don't skip through thin walls or the hunter
     local steps = math.max(1, math.ceil(math.max(math.abs(g.vx), math.abs(g.vy)) * dt))
     for _ = 1, steps do
@@ -4013,6 +4176,12 @@ local function ghoulPose(e)
     local hand = pose.hands[i]
     hand[1] = lerp(lerp(restX, backX, wind), fwdX, strike)
     hand[2] = lerp(lerp(restY, backY, wind), fwdY, strike)
+    if e.digging then
+      -- Raking at the rock ahead, one arm then the other
+      local sw = math.sin(t * 2.2 + i * math.pi)
+      hand[1] = sx + f * (6 + sw * 2.5)
+      hand[2] = sy + 1 + (sw * 0.5 + 0.5) * 4 - 1
+    end
   end
   return pose
 end

@@ -24,6 +24,7 @@ local shop = require("src.shop")
 local npcs = require("src.npcs")
 local town = require("src.town")
 local targets = require("src.targets")
+local barrens = require("src.barrens")
 local World = require("src.world")
 
 local SAND, SANDSTONE, WOOD, STONE, AIR, TAILINGS, ROCK, BEDROCK =
@@ -414,6 +415,18 @@ function overworld.build(opts)
     world:fillRect(x1 + 1, surface(e.x) + 3, x1 + 3, SHAFT_BOTTOM, WOOD)
     ::nextEntry::
   end
+  -- Barrens set dressing: rock structures cut into the desert, buried bones, a mirage
+  barrens.build(world, surface, seed, LEFT + 400, 5100, function(x)
+    if x > 560 and x < 2050 then
+      return true -- (the camp, the town and the mine)
+    end
+    for _, e in ipairs(catacombs.entries()) do
+      if math.abs(x - e.x) < (e.half or 100) + 280 then
+        return true
+      end
+    end
+    return false
+  end, SANDSTONE, materials.FOSSIL)
   -- The town's lots (src.town): fixed every run, but a porch only goes up
   -- once its person has moved in
   town.build(world, surface, materials.HARDWOOD, SAND, AIR) -- (the porches' timber can't be broken)
@@ -462,6 +475,24 @@ function overworld.toArena(player)
   local a = catacombs.info(3).arena
   local b = player.body
   b.x, b.y = math.floor(a.cx - 300 - b.w / 2), a.floorY - b.h - 1
+  b.vx, b.vy = 0, 0
+  player.physBody:setPosition(b.x + b.w / 2, b.y + b.h / 2)
+end
+
+-- Dev panel teleports: spec = { kind = "camp" } or { kind = "area" | "arena", i }
+function overworld.devTeleport(player, spec)
+  if spec.kind == "camp" then
+    return overworld.toCamp(player)
+  end
+  catacombs.generate(spec.i)
+  local info = catacombs.info(spec.i)
+  local b = player.body
+  if spec.kind == "arena" and info and info.arena then
+    local a = info.arena
+    b.x, b.y = math.floor(a.cx - math.min(260, a.w * 0.3) - b.w / 2), a.floorY - 130
+  elseif info then
+    b.x, b.y = info.spawnX, info.spawnY
+  end
   b.vx, b.vy = 0, 0
   player.physBody:setPosition(b.x + b.w / 2, b.y + b.h / 2)
 end
@@ -676,6 +707,7 @@ end
 -- changing as the hunter goes underground
 function overworld.update(dt, player, game, effects)
   local px, py = player:center()
+  barrens.update(dt, player, effects, require("src.pickups"))
   town.sync() -- (a person has moved in, or the save file changed)
   smokeTimer = smokeTimer - dt
   if smokeTimer <= 0 then
@@ -754,7 +786,7 @@ function overworld.addLights(lighting, camX, camY)
   catacombs.addLights(lighting, view(camX, camY))
   town.addLights(lighting, view(camX, camY))
   for i, l in ipairs(lanterns()) do
-    lighting.add(l[1], l[2] + 4, 80, 1, 0.7, 0.35, 0.7 + flicker(i) * 0.08)
+    lighting.add(l[1], l[2] + 4, 68, 1, 0.7, 0.35, 0.48 + flicker(i) * 0.05)
   end
   lighting.add(WINCH_X + 26, surface(WINCH_X + 26) - 14, 50, 1, 0.68, 0.32, 0.55)
   lighting.add(CAMPFIRE_X, surface(CAMPFIRE_X) - 5, 110, 1, 0.6, 0.3, 0.85 + flicker(2) * 0.12)
@@ -1192,6 +1224,7 @@ end
 -- horizontal bands, each clipped to the mountain's silhouette at its top edge
 -- (the rock walls are thicker than a band's step, so nothing shows outside)
 local NEEDLE_BAND = 40
+local NEEDLE_FEATHER = 60 -- px over which the backdrop fades in at the mountain's face
 
 local function drawMountainDepth(camX, camY, vx0, vy0, vx1, vy1)
   for _, m in ipairs(catacombs.climbLevels()) do
@@ -1203,10 +1236,27 @@ local function drawMountainDepth(camX, camY, vx0, vy0, vx1, vy1)
         if xa then
           local bx0, bx1 = math.max(xa, vx0), math.min(xb, vx1)
           if bx1 > bx0 then
-            love.graphics.setScissor(math.floor(bx0 - camX), math.floor(y - camY), math.ceil(bx1 - bx0), NEEDLE_BAND)
-            love.graphics.setColor(catacombs.backdrop(y, bx0))
-            love.graphics.rectangle("fill", bx0, y, bx1 - bx0, NEEDLE_BAND)
-            parallax.draw(m.theme.parallax or m.index, camX, camY, bx0, y, bx1, y + NEEDLE_BAND, m.theme.pillars)
+            -- The backdrop eases in over the first FEATHER px past the mountain's
+            -- face (strips that fade up from nothing), so the doorway does not
+            -- show the cave's dark as a hard-edged slab against the sky
+            local feather = xa >= vx0 and math.min(NEEDLE_FEATHER, bx1 - bx0) or 0
+            if feather > 0 then
+              local cr, cg, cb, ca = catacombs.backdrop(y, bx0)
+              local strips = feather / 3
+              love.graphics.setScissor(math.floor(bx0 - camX), math.floor(y - camY), math.ceil(feather), NEEDLE_BAND)
+              for j = 0, strips - 1 do
+                local a = ((j + 0.5) / strips) ^ 1.6
+                love.graphics.setColor(cr, cg, cb, (ca or 1) * a)
+                love.graphics.rectangle("fill", bx0 + j * 3, y, 3, NEEDLE_BAND)
+              end
+            end
+            local sx0 = bx0 + feather
+            if bx1 > sx0 then
+              love.graphics.setScissor(math.floor(sx0 - camX), math.floor(y - camY), math.ceil(bx1 - sx0), NEEDLE_BAND)
+              love.graphics.setColor(catacombs.backdrop(y, sx0))
+              love.graphics.rectangle("fill", sx0, y, bx1 - sx0, NEEDLE_BAND)
+              parallax.draw(m.theme.parallax or m.index, camX, camY, sx0, y, bx1, y + NEEDLE_BAND, m.theme.pillars)
+            end
           end
         end
         y = y + NEEDLE_BAND
@@ -1261,6 +1311,7 @@ function overworld.drawDecor(camX, camY)
   end
   drawGroundClutter(vx0, vx1)
   drawBones()
+  barrens.draw(vx0, vx1, surface)
   drawCamp()
   town.draw({ x = vx0, y = vy0, w = vx1 - vx0, h = vy1 - vy0 }, surface)
   drawRails(vx0, vx1)

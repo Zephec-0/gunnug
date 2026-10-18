@@ -28,7 +28,12 @@ local stuck = {} -- Sticky Bombs waiting to go off: { x, y, enemy, ox, oy, timer
 local world -- the world of the last update (for blasts started outside it)
 local MAX_LIFE = 1.5
 
+-- Things left stuck in the rock: crossbow bolts and burning flares
+-- { x, y, dx, dy, kind, t }
+local marks = {}
+
 function bullets.clear()
+  marks = {}
   list = {}
   stuck = {}
 end
@@ -56,6 +61,8 @@ function bullets.spawn(x, y, shot)
     pierce = shot.pierce or 0,
     bounces = shot.bounces or 0,
     explosive = shot.explosive,
+    bolt = shot.bolt,
+    flare = shot.flare,
     burn = shot.burn,
     tint = shot.tint,
     fx = shot.fx or {},
@@ -118,6 +125,15 @@ function bullets.blast(x, y, count, scale, dig, digPower, cause)
   end
 end
 
+-- Order of operations: is the on-impact effect `key` (split, cluster, explosive,
+-- gravity) fitted in an earlier slot than the bounce? Then it happens on the
+-- first impact (and, for blasts, on every bounce); otherwise the bullet bounces
+-- itself out first and the effect happens when it finally ends.
+local function firstBeforeBounce(b, key)
+  local order = b.fx and b.fx.order
+  return order ~= nil and order[key] ~= nil and order.bounces ~= nil and order[key] < order.bounces
+end
+
 -- Splitting and Cluster Rounds: what a bullet becomes when it ends. `forward`
 -- is true when it ended in an enemy (the pieces carry on through), false for
 -- terrain (they scatter back out of the wall).
@@ -138,6 +154,7 @@ local function spawnChildren(b, x, y, forward)
         digPower = 0,
         tint = b.tint,
         child = true,
+        bounces = firstBeforeBounce(b, "split") and b.bounces or 0, -- (split first: the pieces do the bouncing)
       })
     end
   end
@@ -152,6 +169,7 @@ local function spawnChildren(b, x, y, forward)
         fuse = true,
         life = 0.22 + love.math.random() * 0.14,
         explosive = { count = 1, scale = 0.4 },
+        bounces = firstBeforeBounce(b, "cluster") and b.bounces or 0,
       })
     end
   end
@@ -238,6 +256,11 @@ local function hitFx(b, enemy)
       effects.particle(x, y, (r() - 0.5) * 70, -r() * 50, 0.5, has(fx, "acid") and { 0.8, 1, 0.3 } or { 0.45, 0.9, 0.3 }, 300, true)
     end
   end
+  if has(fx, "bleed") then
+    for _ = 1, 4 do
+      effects.particle(x, y, (r() - 0.5) * 50, -r() * 30, 0.6, { 0.7, 0.05, 0.08 }, 360, true)
+    end
+  end
   if has(fx, "vamp") then
     for _ = 1, 4 do
       effects.particle(x, y, (r() - 0.5) * 60, -r() * 40, 0.5, { 0.8, 0.1, 0.2 }, 320, true)
@@ -269,6 +292,13 @@ local function hurtEnemy(b, enemy)
     if has(fx, "sneak") and enemy.state == "sleep" then
       damage = damage * 3
     end
+    if has(fx, "far") then
+      damage = damage * (1 + fx.far * math.min(1, (b.travel or 0) / 450)) -- Rangefinder, Long Rifle
+    end
+    if has(fx, "close") then
+      damage = damage * (1 + fx.close * math.max(0, 1 - (b.travel or 0) / 80)) -- Sawn Stock, Breacher
+    end
+    damage = math.max(1, math.floor(damage + 0.5))
   end
   enemies.hit(enemy, damage, b.dx, b.dy, b.impact, b.crit, fx)
   audio.play("hit")
@@ -286,6 +316,16 @@ local function hurtEnemy(b, enemy)
   if has(fx, "poison") then
     enemies.poison(enemy, 4 * fx.poison, 5)
   end
+  if has(fx, "bleed") then
+    enemies.poison(enemy, 2.5 * fx.bleed, 8)
+  end
+  if has(fx, "leech") and bullets.player and not bullets.player.dead then
+    bullets.player.leechAcc = (bullets.player.leechAcc or 0) + 0.5 * fx.leech
+    if bullets.player.leechAcc >= 1 then
+      bullets.player.leechAcc = bullets.player.leechAcc - 1
+      bullets.player:heal(1)
+    end
+  end
   if has(fx, "acid") then
     enemies.corrode(enemy, 4)
   end
@@ -301,6 +341,7 @@ end
 local function step(b, dt, w)
   local fx = b.fx
   local distance = b.speed * dt
+  b.travel = (b.travel or 0) + distance
   local steps = math.max(1, math.ceil(distance))
   local sx, sy = b.dx * distance / steps, b.dy * distance / steps
   for _ = 1, steps do
@@ -387,6 +428,21 @@ local function step(b, dt, w)
     if w:isSolid(px, py) and not has(fx, "ghost") then
       local def = materials.defs[w:get(px, py)]
       if b.bounces > 0 then
+        local splitFirst = has(fx, "split") and firstBeforeBounce(b, "split")
+        local clusterFirst = has(fx, "cluster") and firstBeforeBounce(b, "cluster")
+        if not b.child and (splitFirst or clusterFirst) then
+          -- Split / cluster fitted before the bounce: the bullet breaks apart on
+          -- this first impact, and the pieces carry its remaining bounces on
+          local real = b.fx
+          b.fx = setmetatable({ split = splitFirst and real.split or 0, cluster = clusterFirst and real.cluster or 0 }, { __index = real })
+          spawnChildren(b, b.x, b.y, false)
+          b.fx = real
+          effects.impact(b.x, b.y, b.dx, b.dy, nil)
+          if b.explosive then
+            explode(b, w, b.x, b.y)
+          end
+          return true
+        end
         -- Ricochet: reflect off whichever face was struck, from the last open pixel
         local blockedX = w:isSolid(px, math.floor(b.y))
         local blockedY = w:isSolid(math.floor(b.x), py)
@@ -397,7 +453,17 @@ local function step(b, dt, w)
           b.dy = -b.dy
         end
         sx, sy = b.dx * distance / steps, b.dy * distance / steps
+        if b.explosive and firstBeforeBounce(b, "explosive") then
+          explode(b, w, b.x, b.y) -- a blast on every bounce
+        end
+        if has(fx, "gravity") and firstBeforeBounce(b, "gravity") then
+          enemies.pull(b.x, b.y, 50, 150)
+          effects.ring(b.x, b.y, 36, { 0.6, 0.35, 0.95 }, true)
+        end
         b.bounces = b.bounces - 1
+        if has(fx, "bounceBoost") then
+          b.damage = math.max(1, math.floor(b.damage * (1 + fx.bounceBoost) + 0.5)) -- Rebound, Pinball
+        end
         effects.impact(b.x, b.y, b.dx, b.dy, nil)
       else
         -- Spawn effects in the last open pixel so debris isn't stuck in the wall
@@ -409,6 +475,9 @@ local function step(b, dt, w)
           explode(b, w, b.x, b.y) -- the blast does the digging
         elseif b.digRadius > 0 then
           destruction.dig(w, px + 0.5, py + 0.5, b.digRadius, b.digPower, b.dx, b.dy)
+        end
+        if (b.bolt or b.flare) and #marks < 60 then
+          marks[#marks + 1] = { x = b.x + b.dx * 1.5, y = b.y + b.dy * 1.5, dx = b.dx, dy = b.dy, kind = b.bolt and "bolt" or "flare", t = b.bolt and 14 or 16, spark = 0 }
         end
         if not (has(fx, "sticky") and not b.child) then
           spawnChildren(b, b.x, b.y, false)
@@ -455,13 +524,51 @@ function bullets.each(fn)
   end
 end
 
+local function updateMarks(dt)
+  for i = #marks, 1, -1 do
+    local m = marks[i]
+    m.t = m.t - dt
+    if m.kind == "flare" then
+      m.spark = m.spark - dt
+      if m.spark <= 0 then
+        m.spark = 0.12 + love.math.random() * 0.1
+        effects.particle(m.x, m.y - 1, (love.math.random() - 0.5) * 20, -14 - love.math.random() * 22, 0.5, { 1, 0.6 + love.math.random() * 0.3, 0.2 }, -40, true)
+        fluids.ignite(m.x, m.y, 0.4, true) -- (a flare lights any gas it sits in)
+      end
+    end
+    if m.t <= 0 then
+      table.remove(marks, i)
+    end
+  end
+end
+
 function bullets.update(dt, w)
+  updateMarks(dt)
   world = w
   for i = #list, 1, -1 do
     local b = list[i]
     b.prevX, b.prevY = b.x, b.y
     b.life = b.life - dt
     b.age = b.age + dt
+    -- Water robs a bullet of its speed fast: a few body lengths in, it sinks
+    local inWater = not b.child and fluids.waterAt(b.x, b.y) or (b.child and fluids.waterAt(b.x, b.y))
+    if inWater then
+      if not b.wet then
+        b.wet = true
+        for _ = 1, 3 do
+          effects.particle(b.x, b.y, (love.math.random() - 0.5) * 30, -20 - love.math.random() * 30, 0.4, { 0.7, 0.85, 1 }, 200, true)
+        end
+      end
+      b.speed = b.speed * math.exp(-5.5 * dt)
+      if love.math.random() < dt * 25 then
+        effects.particle(b.x, b.y, 0, -22, 0.5, { 0.75, 0.9, 1 }, -30, true) -- bubbles
+      end
+      if b.speed < 140 then
+        b.life = 0 -- spent: it sinks
+      end
+    else
+      b.wet = nil
+    end
     steer(b, dt)
     trailFx(b, dt)
     local done = step(b, dt, w)
@@ -527,6 +634,16 @@ function bullets.draw()
     end
     love.graphics.setColor(c[1], c[2], c[3], alpha)
     love.graphics.line(b.prevX, b.prevY, b.x, b.y)
+    if b.bolt then
+      love.graphics.setColor(0.8, 0.8, 0.88, 0.95)
+      love.graphics.line(b.x, b.y, b.x - b.dx * 8, b.y - b.dy * 8)
+      love.graphics.setColor(0.45, 0.3, 0.17, 0.9)
+      love.graphics.line(b.x - b.dx * 8, b.y - b.dy * 8, b.x - b.dx * 3, b.y - b.dy * 3)
+    end
+    if b.flare then
+      love.graphics.setColor(1, 0.6, 0.2, 0.5)
+      love.graphics.circle("fill", b.x, b.y, 2.5)
+    end
     if has(fx, "boomerang") then
       -- It spins as it flies
       local sa = b.age * 35
@@ -546,6 +663,28 @@ function bullets.draw()
     love.graphics.setColor(1, 1, 0.85)
     love.graphics.rectangle("fill", math.floor(b.x), math.floor(b.y), 1, 1)
   end
+  for _, m in ipairs(marks) do
+    local fade = math.min(1, m.t / 2)
+    if m.kind == "bolt" then
+      -- The shaft sticking out of the rock, fletching at the far end
+      local x2, y2 = m.x - m.dx * 7, m.y - m.dy * 7
+      love.graphics.setColor(0.45, 0.30, 0.17, fade)
+      love.graphics.line(m.x, m.y, x2, y2)
+      love.graphics.setColor(0.85, 0.85, 0.9, fade)
+      love.graphics.rectangle("fill", math.floor(m.x - m.dx * 0.5), math.floor(m.y - m.dy * 0.5), 1, 1)
+      love.graphics.setColor(0.7, 0.2, 0.2, fade)
+      love.graphics.line(x2, y2, x2 - m.dy * 1.5 - m.dx, y2 + m.dx * 1.5 - m.dy)
+      love.graphics.line(x2, y2, x2 + m.dy * 1.5 - m.dx, y2 - m.dx * 1.5 - m.dy)
+    else
+      local f = 0.75 + 0.25 * math.sin(t * 22 + m.x)
+      love.graphics.setColor(1, 0.55, 0.2, 0.18 * fade)
+      love.graphics.circle("fill", m.x, m.y, 7 * f)
+      love.graphics.setColor(1, 0.75, 0.3, 0.5 * fade)
+      love.graphics.circle("fill", m.x, m.y, 3.5 * f)
+      love.graphics.setColor(1, 1, 0.85, fade)
+      love.graphics.rectangle("fill", math.floor(m.x), math.floor(m.y), 1, 1)
+    end
+  end
   for _, s in ipairs(stuck) do
     local on = math.floor(s.timer * 12) % 2 == 0
     love.graphics.setColor(on and 1 or 0.6, on and 0.35 or 0.2, 0.3)
@@ -564,6 +703,11 @@ function bullets.addLights(lighting)
   end
   for _, s in ipairs(stuck) do
     lighting.add(s.x, s.y, 20, 1, 0.3, 0.2, 0.7)
+  end
+  for _, m in ipairs(marks) do
+    if m.kind == "flare" then
+      lighting.add(m.x, m.y, 96, 1, 0.55, 0.25, 0.9 * math.min(1, m.t / 3) * (0.9 + 0.1 * math.sin(love.timer.getTime() * 20 + m.x)))
+    end
   end
 end
 

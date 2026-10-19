@@ -787,41 +787,94 @@ end
 -- Gas diffuses toward emptier neighbours: slowly sideways, faster down, a
 -- little up. Thin traces vanish. (The weights are for 2-px cells.)
 local GAS_OFFSETS = { K, -1, 1, -K }
-local GAS_WEIGHTS = { 0.24, 0.14, 0.14, 0.08 }
+-- (a sweep of the whole cloud every 0.15 s, not 0.1: the weights and the thinning are scaled up to match, so it spreads and
+-- thins at the same speed with a third less work)
+local GAS_SWEEP = 0.15
+local GAS_WEIGHTS = { 0.24 * 1.5, 0.14 * 1.5, 0.14 * 1.5, 0.08 * 1.5 }
+-- The gas is stepped a band of rows at a time, one band a frame (a whole sweep takes 0.1 s, as it always
+-- did): all of it in one go was a spike of 20+ ms ten times a second. The scratch tables are kept, not
+-- rebuilt, so a big cloud makes no garbage either.
+local GAS_SLICES = 6
+local GS = { slice = 0, acc = 0, delta = {}, keys = {}, open = {}, okeys = {}, bounds = {} }
 local function stepGas(gx0, gy0, gx1, gy1)
-  for _, v in ipairs(vents) do
-    local gx, gy = coords(v.k)
-    if gx >= gx0 and gx <= gx1 and gy >= gy0 and gy <= gy1 and not water[v.k] then
-      for _, d in ipairs({ 0, -1, 1, -K }) do
-        if (gas[v.k + d] or 0) < 0.9 and open(v.k + d) then
-          setGas(v.k + d, math.min(0.95, (gas[v.k + d] or 0) + 0.08))
+  GS.slice = GS.slice % GAS_SLICES + 1
+  if GS.slice == 1 then
+    for _, v in ipairs(vents) do
+      local gx, gy = coords(v.k)
+      if gx >= gx0 and gx <= gx1 and gy >= gy0 and gy <= gy1 and not water[v.k] then
+        for _, d in ipairs({ 0, -1, 1, -K }) do
+          if (gas[v.k + d] or 0) < 0.9 and open(v.k + d) then
+            setGas(v.k + d, math.min(0.95, (gas[v.k + d] or 0) + 0.08))
+          end
         end
       end
     end
   end
-  local delta, openCache = {}, {}
-  for gy = gy0, gy1 do
+  if GS.slice == 1 then
+    -- The bands hold equal amounts of gas, not equal numbers of rows: a cloud in one band would
+    -- make that frame several times dearer than the others
+    local total = 0
+    for gy = gy0, gy1 do
+      total = total + (gasRows[gy] or 0)
+    end
+    local per, acc, n, bd = total / GAS_SLICES, 0, 1, GS.bounds
+    bd[0] = gy0 - 1
+    for gy = gy0, gy1 do
+      acc = acc + (gasRows[gy] or 0)
+      if n < GAS_SLICES and acc >= per * n then
+        bd[n] = gy
+        n = n + 1
+      end
+    end
+    for i = n, GAS_SLICES do
+      bd[i] = gy1
+    end
+  end
+  local ra, rb = GS.bounds[GS.slice - 1] + 1, GS.bounds[GS.slice]
+  local delta, keys, nk = GS.delta, GS.keys, 0
+  local openCache, okeys, no = GS.open, GS.okeys, 0
+  for gy = ra, rb do
     if (gasRows[gy] or 0) > 0 then
+      local row = gy * K + KOFF
+      local rowWater = (waterRows[gy] or 0) > 0
       for gx = gx0, gx1 do
-        local k = gy * K + KOFF + gx
+        local k = row + gx
         local c = gas[k]
         if c then
-          if water[k] then
+          if rowWater and water[k] then
             setGas(k, nil)
           else
+            -- (gas also slowly thins out on its own: without this, a big cloud in a closed
+            -- room, the Queen's arena, levels off at a faint plateau and never goes)
+            local dk = delta[k]
+            if dk == nil then
+              nk = nk + 1
+              keys[nk] = k
+              dk = 0
+            end
+            dk = dk - (c * 0.009 + 0.0009)
+            delta[k] = dk
             for i = 1, 4 do
-              local nk = k + GAS_OFFSETS[i]
-              local diff = c - (gas[nk] or 0)
+              local nb = k + GAS_OFFSETS[i]
+              local diff = c - (gas[nb] or 0)
               if diff > 0.012 then
-                local o = openCache[nk]
+                local o = openCache[nb]
                 if o == nil then
-                  o = open(nk)
-                  openCache[nk] = o
+                  o = open(nb)
+                  openCache[nb] = o
+                  no = no + 1
+                  okeys[no] = nb
                 end
                 if o then
                   local f = diff * GAS_WEIGHTS[i]
-                  delta[k] = (delta[k] or 0) - f
-                  delta[nk] = (delta[nk] or 0) + f
+                  delta[k] = delta[k] - f
+                  local dn = delta[nb]
+                  if dn == nil then
+                    nk = nk + 1
+                    keys[nk] = nb
+                    dn = 0
+                  end
+                  delta[nb] = dn + f
                 end
               end
             end
@@ -830,24 +883,29 @@ local function stepGas(gx0, gy0, gx1, gy1)
       end
     end
   end
-  for k, d in pairs(delta) do
-    local v = (gas[k] or 0) + d
+  for i = 1, nk do
+    local k = keys[i]
+    local v = (gas[k] or 0) + delta[k]
     setGas(k, (v >= 0.012) and math.min(1, v) or nil)
+    delta[k] = nil
+    keys[i] = nil
   end
-  -- Gas also slowly thins out on its own: without this, a big cloud in a
-  -- closed room (the Queen's arena) levels off at a faint plateau and never goes
-  for gy = gy0, gy1 do
-    if (gasRows[gy] or 0) > 0 then
-      for gx = gx0, gx1 do
-        local k = gy * K + KOFF + gx
-        local c = gas[k]
-        if c then
-          local v = c - c * 0.006 - 0.0006
-          setGas(k, (v >= 0.012) and v or nil)
-        end
-      end
-    end
+  for i = 1, no do
+    openCache[okeys[i]] = nil
+    okeys[i] = nil
   end
+end
+
+-- Called every frame: steps as many bands as the time allows (one a frame at 60 fps)
+local function stepGasFrame(dt, gx0, gy0, gx1, gy1)
+  GS.acc = GS.acc + dt
+  local steps = 0
+  while GS.acc >= GAS_SWEEP / GAS_SLICES and steps < 3 do
+    GS.acc = GS.acc - GAS_SWEEP / GAS_SLICES
+    steps = steps + 1
+    stepGas(gx0, gy0, gx1, gy1)
+  end
+  GS.acc = math.min(GS.acc, GAS_SWEEP / GAS_SLICES)
 end
 
 -- Flames: ignite neighbouring gas (reaching two cells, so a burning cloud
@@ -1409,6 +1467,7 @@ function fluids.update(dt, player, enemies)
     end
   end
   accWater = math.min(accWater, WATER_STEP)
+  stepGasFrame(dt, gx0 + 20, gy0 + 22, gx1 - 20, gy1 - 22) -- (the gas is stepped a little closer round the hunter than the water: cells past the screen's edge wait)
   accSmoke = accSmoke + dt
   if accSmoke >= 0.05 then
     accSmoke = 0
@@ -1449,7 +1508,6 @@ function fluids.update(dt, player, enemies)
         table.remove(columns, i)
       end
     end
-    stepGas(gx0, gy0, gx1, gy1)
     stepFire(step, true)
     -- Wisps of gas in view drift up as little puffs
     if love.math.random() < 0.3 then
@@ -1677,6 +1735,7 @@ end
 
 local GAS_LEVELS = 8
 local GAS_MAX = 0.58 -- the strongest a gas cell is drawn
+local LEVEL_PER = GAS_LEVELS / GAS_MAX
 local gasPoints = {}
 for i = 1, GAS_LEVELS do
   gasPoints[i] = {}
@@ -1799,22 +1858,38 @@ function fluids.drawEmissive(view)
   for i = 1, GAS_LEVELS do
     counts[i] = 0
   end
-  local sin = math.sin
+  local sin, cos = math.sin, math.cos
+  -- (sin(px * 0.07 + t * 0.5 + wob) = sin(a) cos(wob) + cos(a) sin(wob): a sin and a cos per column and
+  -- per row, not one per cell)
+  local sA, cA = GS.sA or {}, GS.cA or {}
+  GS.sA, GS.cA = sA, cA
+  for gx = gx0, gx1 do
+    local a = gx * C * 0.07 + t * 0.5
+    sA[gx - gx0] = sin(a)
+    cA[gx - gx0] = cos(a)
+  end
   for gy = gy0, gy1 do
     if (gasRows[gy] or 0) > 0 then
       local row = gy * K + KOFF
       local py = gy * C
       local wob = sin(py * 0.05 - t * 0.3) * 1.7
+      local sB, cB = sin(wob), cos(wob)
       for gx = gx0, gx1 do
         local c = gas[row + gx]
         if c and c > 0.03 then
-          local px = gx * C
-          local n = 0.5 + 0.5 * sin(px * 0.07 + t * 0.5 + wob)
-          local a = math.min(0.4, c * 0.3) * (0.55 + n * 0.9)
-          local level = math.min(GAS_LEVELS, floor(a / GAS_MAX * GAS_LEVELS) + 1)
+          local i = gx - gx0
+          local n = 0.5 + 0.5 * (sA[i] * cB + cA[i] * sB)
+          local a = c * 0.3
+          if a > 0.4 then
+            a = 0.4
+          end
+          local level = floor(a * (0.55 + n * 0.9) * LEVEL_PER) + 1
+          if level > GAS_LEVELS then
+            level = GAS_LEVELS
+          end
           local list = gasPoints[level]
           local nn = counts[level]
-          list[nn + 1] = px + HALF
+          list[nn + 1] = gx * C + HALF
           list[nn + 2] = py + HALF
           counts[level] = nn + 2
         end

@@ -30,12 +30,58 @@ function panel.overMouse()
   return mx >= box.x and mx <= box.x + box.w and my >= box.y and my <= box.y + box.h
 end
 
+-- Unlocks everything on the active save file: every weapon, ammo type, attachment
+-- and perk, every camp person, and a complete compendium
+local function unlockEverything()
+  local save = require("src.save")
+  local p = save.profile()
+  if not p then
+    return "No save file in use"
+  end
+  local guns, items, perks = require("src.guns"), require("src.items"), require("src.perks")
+  local meta, compendium = require("src.meta"), require("src.compendium")
+  for _, id in ipairs(guns.archetypes()) do
+    p.unlocked.weapon[id] = true
+    p.seen.weapon[id] = true
+  end
+  for _, id in ipairs(items.order) do
+    local k = items.defs[id].kind
+    p.unlocked[k] = p.unlocked[k] or {}
+    p.seen[k] = p.seen[k] or {}
+    p.unlocked[k][id] = true
+    p.seen[k][id] = true
+  end
+  for id in pairs(perks.defs) do
+    p.unlocked.perk[id] = true
+    p.seen.perk[id] = true
+  end
+  for id in pairs(meta.PEOPLE) do
+    p.camp[id] = true
+  end
+  p.board = true
+  p.stats.bosses = math.max(1, p.stats.bosses or 0) -- (the Bartender moves in with the first boss)
+  for _, c in ipairs(compendium.CATEGORIES) do
+    p.found[c.id] = p.found[c.id] or {}
+    for _, e in ipairs(compendium.entries(c.id)) do
+      p.found[c.id][e.id] = math.max(1, p.found[c.id][e.id] or 0)
+      for _, key in ipairs(e.tiers or {}) do
+        p.found[c.id][key] = math.max(1, p.found[c.id][key] or 0)
+      end
+    end
+  end
+  save.touch()
+  save.flush()
+  return "Everything unlocked"
+end
+
 local function rows()
   local out = {
     { kind = "head", label = "Toggles" },
     { kind = "toggle", label = "No damage", get = function() return dev.noDamage end, set = function(v) dev.noDamage = v end },
     { kind = "toggle", label = "One-hit kills", get = function() return dev.oneHit end, set = function(v) dev.oneHit = v end },
     { kind = "toggle", label = "Fly / no clip (Shift fast)", get = function() return dev.noclip end, set = function(v) dev.noclip = v end },
+    { kind = "head", label = "Save file" },
+    { kind = "action", label = "Unlock everything", fn = unlockEverything },
     { kind = "head", label = "Go to" },
     { kind = "button", label = "Camp", spec = { kind = "camp" } },
     { kind = "button", label = "Test room", spec = { kind = "test" } },
@@ -76,6 +122,9 @@ function panel.mousepressed(x, y, button, game)
       local row = r.row
       if row.kind == "toggle" then
         row.set(not row.get())
+      elseif row.kind == "action" then
+        local msg = row.fn()
+        require("src.toasts").notice("Dev", msg)
       elseif row.kind == "button" then
         game.devTeleport(row.spec)
       end

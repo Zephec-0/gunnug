@@ -497,7 +497,10 @@ function cavegen.generate(world, area, seed, tick)
       world:fillRect(a.x0 - 4, a.floorY, a.x1 + 4, a.floorY + 16, ROCKID)
     end
     if area.arenaShape == "rect" then
-      -- A flat floor: a few layers of packed dirt over the rock, nothing to snag on
+      -- A flat floor: layers of rock and packed dirt, built up in bands, nothing to snag on
+      for y = a.floorY - 24, a.floorY - 6 do
+        world:fillRect(a.x0, y, a.x1, y, (math.floor((y - a.floorY) / 4) % 2 == 0) and ROCKID or DIRTID)
+      end
       world:fillRect(a.x0, a.floorY - 5, a.x1, a.floorY - 1, DIRTID)
       world:fillRect(a.x0, a.floorY - 2, a.x1, a.floorY - 1, ROCKID)
       world:fillRect(a.x0, a.floorY - 1, a.x1, a.floorY, DIRTID)
@@ -1450,6 +1453,10 @@ function cavegen.generate(world, area, seed, tick)
       tick()
     end
     flood = { top = top, runs = runs }
+  end
+  -- Grass along the earth and the mossy clays (the first areas only), stamped into the terrain now so it costs nothing in play
+  if area.grass then
+    require("src.grass").bake(world, X0 + BORDER, Y0 + 40, X1 - BORDER, Y1 - BORDER, { water, lava, acid }, POOL_CELL, flood, tick)
   end
   local result = {
     diamonds = diamonds,

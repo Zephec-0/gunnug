@@ -903,6 +903,8 @@ end
 local placed = {} -- the bubbles already drawn this frame (they never overlap)
 
 local function bubble(font, text, sx, sy, age)
+  -- Speech is italic and has no drop shadow: dark letters on the pale bubble, where a shadow made them run together
+  font = require("src.fonts").like(font, "italic", true)
   local life = 3.2
   if age > life then
     return

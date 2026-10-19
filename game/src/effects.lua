@@ -467,7 +467,10 @@ function effects.drawWeaponCard(sx, sy, gun, font, alpha)
   for _, l in ipairs(info.lines) do
     w = math.max(w, font:getWidth(l))
   end
-  w = w + pad * 3 + font:getWidth(info.grade.letter) + fh * 0.4
+  -- (the title and the grade letter sit together in the middle of the top line, the letter not hugging the edge)
+  local gap = fh * 0.6
+  local head = font:getWidth(info.title) + gap + font:getWidth(info.grade.letter)
+  w = math.max(w, head) + pad * 2
   local h = fh * (1 + #info.lines) + pad * 2
   local x, y = math.floor(sx - w / 2), math.floor(sy - h)
   love.graphics.setFont(font)
@@ -476,10 +479,11 @@ function effects.drawWeaponCard(sx, sy, gun, font, alpha)
   love.graphics.setLineWidth(2)
   love.graphics.setColor(info.grade.color[1], info.grade.color[2], info.grade.color[3], alpha)
   love.graphics.rectangle("line", x, y, w, h, 3, 3)
+  local hx = math.floor(x + (w - head) / 2)
   love.graphics.setColor(0.98, 0.99, 1, alpha)
-  love.graphics.print(info.title, x + pad, y + pad)
+  love.graphics.print(info.title, hx, y + pad)
   love.graphics.setColor(info.grade.color[1], info.grade.color[2], info.grade.color[3], alpha)
-  love.graphics.print(info.grade.letter, x + w - pad - font:getWidth(info.grade.letter), y + pad)
+  love.graphics.print(info.grade.letter, math.floor(hx + font:getWidth(info.title) + gap), y + pad)
   for n, l in ipairs(info.lines) do
     love.graphics.setColor(0.80, 0.85, 0.96, alpha)
     love.graphics.print(l, x + pad, y + pad + fh * n)

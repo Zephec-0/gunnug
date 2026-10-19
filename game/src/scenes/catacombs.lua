@@ -38,6 +38,7 @@ local catacombs = {}
 local THEMES = {
   {
     name = "The Old Mine",
+    grass = true, -- grass along the earth (src.grass); the first three areas only
     subtitle = "Area 1",
     prisoner = "prospector", -- buried by a cave-in in the old mine (src.npcs)
     ambient = { 0.20, 0.18, 0.25 },
@@ -61,6 +62,7 @@ local THEMES = {
   },
   {
     name = "The Sunken Hollows",
+    grass = true,
     subtitle = "Area 2",
     wounded = true, -- a dying hunter lies somewhere in the fen (src.events)
     prisoner = "gunsmith", -- caged somewhere in the fen (src.npcs)
@@ -84,6 +86,7 @@ local THEMES = {
   },
   {
     name = "The Sulfur Vents",
+    grass = true,
     subtitle = "Area 3",
     prisoner = "apothecary", -- caged, coughing, somewhere in the fumes (src.npcs)
     ambient = { 0.22, 0.22, 0.13 }, -- a murky yellow-green
@@ -686,6 +689,7 @@ local function areaFor(i)
   base.mine = lv.theme.mine
   base.stalactites = lv.theme.stalactites
   base.gasPools = lv.theme.gasPools
+  base.grass = lv.theme.grass
   base.waterPools = lv.theme.waterPools
   base.lavaPools = lv.theme.lavaPools
   base.acidPools = lv.theme.acidPools
@@ -1083,6 +1087,17 @@ function catacombs.spawnProps()
           -- An arena's boss isn't there until the hunter steps up to the
           -- pedestal at the middle of the arena (catacombs.interact)
           lv.boss = { m = m, state = "idle" }
+          if m.kind == "golem" then
+            -- the Colossus waits, dormant, in front of the pedestal: dim, no health bar, until it is woken
+            local a = info.arena
+            local gy = world:findGround(math.floor(a.cx), a.floorY - 40)
+            lv.boss.spot = { a.cx, gy }
+            local ge = enemies.spawn("golem", a.cx + 120, gy, m.toughness, lv.row)
+            ge.state, ge.altarLocked, ge.invuln = "sleep", true, true
+            ge.facing = -1 -- (slumped facing the pedestal)
+            ge.areaIndex, ge.arena, ge.reward = i, a, m.reward
+            lv.boss.e = ge
+          end
           if m.kind == "bigfish" then
             -- The fish waits at the bottom middle of its round arena, no pedestal:
             -- the fight starts when it notices the hunter
@@ -1435,6 +1450,16 @@ function catacombs.startBoss(lv, player)
     hud.showBanner(defyTitle(lv), (lv.theme.arenaBanner and lv.theme.arenaBanner[1] or "The Arena") .. ": the way out is sealed until the boss falls")
     return
   end
+  if lv.boss.e and m.kind == "golem" then
+    -- the dormant Colossus wakes: it rises from the heap, and the fight begins
+    local ge = lv.boss.e
+    ge.altarLocked, ge.invuln = false, false
+    ge.state, ge.seesPlayer = "chase", true
+    audio.play("explosion", 1, 0.4)
+    require("src.camera").shake(0.7)
+    hud.showBanner(defyTitle(lv), (lv.theme.arenaBanner and lv.theme.arenaBanner[1] or "The Arena") .. ": the way out is sealed until the boss falls")
+    return
+  end
   local def = enemies.defs[m.kind]
   local ax = altarSpot(lv)
   local x = ax + (def.ground and 190 or 0)
@@ -1553,6 +1578,17 @@ function catacombs.zoneAt(px, py)
     end
   end
   return 0
+end
+
+-- True inside a boss arena (random events keep out of these)
+function catacombs.inArena(x, y)
+  for _, lv in ipairs(levels) do
+    local a = lv.info and lv.info.arena
+    if a and x >= a.x0 - 24 and x <= a.x1 + 24 and y >= a.top - 40 and y <= a.floorY + 24 then
+      return true
+    end
+  end
+  return false
 end
 
 function catacombs.inShop(x, y)

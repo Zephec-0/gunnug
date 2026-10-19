@@ -506,87 +506,153 @@ local function statLine(gun)
   return text
 end
 
--- The weapon panel: one card per carried weapon with its stats and slots
+-- The weapon panel: one tall card per carried weapon, side by side like a hand of cards. Each card has the gun's
+-- model in a picture box with its grade badge, DPS as the headline number, and a radar of the five stats that
+-- compare with the weapon's base (the grey pentagon is the base, the filled shape this gun, in its grade's
+-- colour; each corner carries the stat's name, its value and how it differs), then impact, recoil and crit,
+-- and the gun's own slots.
+local RADAR_AXES = { 1, 2, 3, 4, 5 } -- the rows of gunInfo.rows: Damage, Rate, Reload, Magazine, Spread
+
 local function drawPanel(inv, u)
   local ww, wh = love.graphics.getDimensions()
   love.graphics.setColor(0.02, 0.01, 0.04, 0.6)
   love.graphics.rectangle("fill", 0, 0, ww, wh)
 
-  local cardW, cardH = 196 * u, 55 * u
-  local x = math.floor((ww - cardW) / 2)
-  local y = 34 * u
-  local titleFont, textFont, bigFont = font(5 * u), font(3.4 * u), font(6.4 * u)
+  local cardW, cardH, gap = 96 * u, 162 * u, 4 * u
+  local count = 0
+  for i = 1, inventory.weaponSlots() do
+    if inv.weapons[i] then
+      count = count + 1
+    end
+  end
+  local x0 = math.floor((ww - (count * cardW + math.max(0, count - 1) * gap)) / 2)
+  local y = math.max(30 * u, math.floor((wh - cardH) / 2) - 8 * u) -- (the title stays below the item bar)
+  local titleFont, textFont, bigFont, dpsFont = font(5 * u), font(3.4 * u), font(6.4 * u), font(11 * u)
+  local cx = x0
 
-  shadowPrint("Weapons", x, y - 8 * u, titleFont, { 0.98, 0.99, 1 })
+  shadowPrint("Weapons", x0, y - 8 * u, titleFont, { 0.98, 0.99, 1 })
   for i = 1, inventory.weaponSlots() do
     local gun = inv.weapons[i]
     if gun then
+      local x = cx
+      cx = cx + cardW + gap
       local selected = i == inv.selected or inventory.akimbo()
-      love.graphics.setColor(0.10, 0.07, 0.12, 0.94)
+      local grade = gunInfo.grade(gun)
+      local gc = grade.color
+      love.graphics.setColor(0.10, 0.07, 0.12, 0.96)
       love.graphics.rectangle("fill", x, y, cardW, cardH, 2 * u, 2 * u)
-      love.graphics.setLineWidth(math.max(1, u * 0.5))
-      love.graphics.setColor(selected and { 0.55, 0.75, 1 } or { 0.55, 0.48, 0.42 })
+      -- The header, tinted by the grade
+      love.graphics.setColor(gc[1] * 0.35, gc[2] * 0.35, gc[3] * 0.35, 1)
+      love.graphics.rectangle("fill", x + 0.5 * u, y + 0.5 * u, cardW - u, 16 * u, 1.5 * u, 1.5 * u)
+      shadowPrint(gun.name, x + 4 * u, y + 2 * u, titleFont, { 0.98, 0.99, 1 })
+      shadowPrint(gun.def.name, x + 4 * u, y + 2 * u + titleFont:getHeight(), textFont, { 0.80, 0.84, 0.92 })
+      love.graphics.setLineWidth(math.max(1, u * (selected and 0.8 or 0.5)))
+      local dim = selected and 1 or 0.6
+      love.graphics.setColor(gc[1] * dim, gc[2] * dim, gc[3] * dim)
       love.graphics.rectangle("line", x, y, cardW, cardH, 2 * u, 2 * u)
 
-      -- Big icon on the left, in a framed box, with the weapon's number
-      local iconBox = 34 * u
+      -- The picture box, the weapon's number, and the grade badge in its corner
+      local boxY, boxH = y + 19 * u, 34 * u
       love.graphics.setColor(0.05, 0.04, 0.08, 0.9)
-      love.graphics.rectangle("fill", x + 3 * u, y + 3 * u, iconBox + 2 * u, iconBox + 2 * u, u, u)
-      drawThing(gun, x + 4 * u, y + 4 * u, iconBox, u)
-      shadowPrint("[" .. i .. "]", x + 4 * u, y + 4 * u + iconBox - textFont:getHeight() * 0.9, textFont, { 0.75, 0.78, 0.86 })
-      local tx = x + iconBox + 10 * u
-
-      -- Name, archetype and the grade badge at the right
-      local grade = gunInfo.grade(gun)
-      shadowPrint(gun.name, tx, y + 2 * u, titleFont, { 0.98, 0.99, 1 })
-      local bx, bw = x + cardW - 12 * u, 9 * u
+      love.graphics.rectangle("fill", x + 4 * u, boxY, cardW - 8 * u, boxH, u, u)
+      drawThing(gun, x + (cardW - 32 * u) / 2, boxY + u, 32 * u, u)
+      shadowPrint("[" .. i .. "]", x + 6 * u, boxY + boxH - textFont:getHeight() - 0.5 * u, textFont, { 0.75, 0.78, 0.86 })
+      local bw = 10 * u
+      local bx, by = x + cardW - 4 * u - bw - 1.5 * u, boxY + 1.5 * u
       love.graphics.setColor(0.04, 0.03, 0.07, 0.95)
-      love.graphics.rectangle("fill", bx, y + 2 * u, bw, bw, u, u)
+      love.graphics.rectangle("fill", bx, by, bw, bw, u, u)
       love.graphics.setLineWidth(math.max(1, u * 0.6))
-      love.graphics.setColor(grade.color)
-      love.graphics.rectangle("line", bx, y + 2 * u, bw, bw, u, u)
-      love.graphics.setFont(bigFont)
-      love.graphics.setColor(grade.color)
-      love.graphics.print(grade.letter, math.floor(bx + (bw - bigFont:getWidth(grade.letter)) / 2), math.floor(y + 2 * u + (bw - bigFont:getHeight()) / 2))
-      shadowPrint(gun.def.name, tx, y + 2 * u + titleFont:getHeight(), textFont, { 0.66, 0.70, 0.80 })
+      love.graphics.setColor(gc)
+      love.graphics.rectangle("line", bx, by, bw, bw, u, u)
+      -- The letter is centred on its ink (no drop shadow, and the glyph box has blank rows below the capitals)
+      local letterFont = fontFace.like(bigFont, nil, true)
+      local ix, iy, iw, ih = fontFace.ink(letterFont, grade.letter)
+      love.graphics.setFont(letterFont)
+      love.graphics.setColor(gc)
+      love.graphics.print(grade.letter, math.floor(bx + (bw - iw) / 2 - ix + 0.5), math.floor(by + (bw - ih) / 2 - iy + 0.5))
 
-      -- The stats in three columns: label, value, and how it compares with
-      -- the archetype's base (green is better, red worse)
+      -- DPS, the headline
       local rows = gunInfo.rows(gun)
-      local colW = 49 * u
-      local gy = y + 2 * u + titleFont:getHeight() + textFont:getHeight() + 1.5 * u
-      local rowH = textFont:getHeight() * 0.95
-      for n, row in ipairs(rows) do
-        local cx = tx + ((n - 1) % 3) * colW
-        local cy = gy + math.floor((n - 1) / 3) * rowH
-        shadowPrint(row[1], cx, cy, textFont, { 0.62, 0.66, 0.76 })
-        local lw = textFont:getWidth(row[1] .. " ")
-        shadowPrint(row[2], cx + lw, cy, textFont, { 0.98, 0.99, 1 })
-        if row[3] then
-          local vw = textFont:getWidth(row[2] .. " ")
-          local d = row[3]
-          shadowPrint(string.format("%+d%%", math.floor(d * 100 + (d > 0 and 0.5 or -0.5))), cx + lw + vw, cy, textFont, d > 0 and { 0.5, 1, 0.58 } or { 1, 0.45, 0.4 })
+      local dps = rows[8][2]
+      local dy = boxY + boxH + 1.5 * u
+      love.graphics.setFont(dpsFont)
+      love.graphics.setColor(1, 0.9, 0.6)
+      love.graphics.print(dps, math.floor(x + (cardW - dpsFont:getWidth(dps)) / 2), math.floor(dy))
+      shadowPrint("DPS", math.floor(x + (cardW - textFont:getWidth("DPS")) / 2), dy + dpsFont:getHeight() * 0.92, textFont, { 0.70, 0.74, 0.84 })
+
+      -- The radar
+      local rcx, rcy, R = x + cardW / 2, dy + dpsFont:getHeight() + 38 * u, 19 * u
+      local base, mine = {}, {}
+      for k, n in ipairs(RADAR_AXES) do
+        local a = -math.pi / 2 + (k - 1) / #RADAR_AXES * math.pi * 2
+        local d = rows[n][3] or 0
+        local m = math.max(0.1, math.min(1, 0.5 + d * 0.9))
+        base[#base + 1] = rcx + math.cos(a) * R * 0.5
+        base[#base + 1] = rcy + math.sin(a) * R * 0.5
+        mine[#mine + 1] = rcx + math.cos(a) * R * m
+        mine[#mine + 1] = rcy + math.sin(a) * R * m
+      end
+      love.graphics.setLineWidth(math.max(1, u * 0.3))
+      love.graphics.setColor(0.32, 0.30, 0.40, 0.8)
+      for k = 1, #RADAR_AXES do
+        local a = -math.pi / 2 + (k - 1) / #RADAR_AXES * math.pi * 2
+        love.graphics.line(rcx, rcy, rcx + math.cos(a) * R, rcy + math.sin(a) * R)
+      end
+      love.graphics.setColor(0.4, 0.4, 0.5, 0.28)
+      love.graphics.polygon("fill", base)
+      love.graphics.setColor(0.62, 0.62, 0.72, 0.9)
+      love.graphics.polygon("line", base)
+      love.graphics.setColor(gc[1], gc[2], gc[3], 0.38)
+      love.graphics.polygon("fill", mine)
+      love.graphics.setLineWidth(math.max(1, u * 0.6))
+      love.graphics.setColor(gc)
+      love.graphics.polygon("line", mine)
+      -- The corners' labels: the name, then the value and how it differs from base
+      for k, n in ipairs(RADAR_AXES) do
+        local a = -math.pi / 2 + (k - 1) / #RADAR_AXES * math.pi * 2
+        local lx, ly = rcx + math.cos(a) * (R + 9 * u), rcy + math.sin(a) * (R + 8 * u)
+        local row = rows[n]
+        local name, value = row[1], row[2]
+        local lh = textFont:getHeight()
+        local top = math.floor(ly - lh * (math.sin(a) > 0.3 and 0.25 or (math.sin(a) < -0.3 and 1.7 or 1)))
+        shadowPrint(name, math.floor(lx - textFont:getWidth(name) / 2), top, textFont, { 0.70, 0.74, 0.84 })
+        local d = row[3]
+        local vw = textFont:getWidth(value)
+        local dtext = d and string.format(" %+d%%", math.floor(d * 100 + (d > 0 and 0.5 or -0.5))) or ""
+        local vx = math.floor(lx - (vw + textFont:getWidth(dtext)) / 2)
+        shadowPrint(value, vx, top + lh, textFont, { 0.98, 0.99, 1 })
+        if d then
+          shadowPrint(dtext, vx + vw, top + lh, textFont, d > 0 and { 0.5, 1, 0.58 } or { 1, 0.45, 0.4 })
         end
       end
-      local ey = gy + 3 * rowH + 0.5 * u
-      local line = statLine(gun):match("[^\n]*$")
+
+      -- Impact, recoil and crit, and any special effects of the gun
+      local ry = rcy + R + 12 * u
+      local minor = { rows[6], rows[7], rows[9] }
+      for n, row in ipairs(minor) do
+        local colX = x + 4 * u + (n - 1) * ((cardW - 8 * u) / 3)
+        shadowPrint(row[1], colX, ry, textFont, { 0.62, 0.66, 0.76 })
+        shadowPrint(row[2], colX, ry + textFont:getHeight(), textFont, { 0.98, 0.99, 1 })
+      end
       if statLine(gun):find("\n.*\n") then
-        shadowPrint(line, tx, ey, textFont, { 0.80, 0.86, 1 })
+        local line = statLine(gun):match("[^\n]*$")
+        shadowPrint(line, math.floor(x + (cardW - textFont:getWidth(line)) / 2), ry + textFont:getHeight() * 2.0, textFont, { 0.80, 0.86, 1 })
       end
 
-      -- The gun's own ammo/attachment slots
-      local sy = y + cardH - GUN_SLOT_SIZE * u - 3 * u
-      shadowPrint("Slots", x + 6 * u, sy + (GUN_SLOT_SIZE * u - textFont:getHeight()) / 2, textFont, { 0.95, 0.97, 1 })
-      for s = 1, gun.slotCount do
-        local sx = tx + (s - 1) * (GUN_SLOT_SIZE + 2) * u
-        drawSlot(inv, { kind = "gunSlot", gun = gun, index = s }, sx, sy, GUN_SLOT_SIZE * u, u, false)
+      -- The gun's own ammo/attachment slots, along the bottom
+      local slots = gun.slotCount
+      local step = math.min((GUN_SLOT_SIZE + 2) * u, (cardW - 6 * u) / slots) -- (a gun with many slots has smaller ones)
+      local sw = step - 2 * u
+      local sx0 = x + (cardW - (slots * step - 2 * u)) / 2
+      local sy = y + cardH - sw - 2 * u
+      for s = 1, slots do
+        drawSlot(inv, { kind = "gunSlot", gun = gun, index = s }, sx0 + (s - 1) * step, sy, sw, u, false)
       end
-      y = y + cardH + 4 * u
     end
   end
 
   local hint = "Drag ammo between slots; drag a weapon or item off the bar to drop it.   1-3 / wheel: switch   " .. input.label("inventory") .. ": close"
-  shadowPrint(hint, math.floor((ww - textFont:getWidth(hint)) / 2), y + 2 * u, textFont, { 1, 1, 1, 0.75 })
+  shadowPrint(hint, math.floor((ww - textFont:getWidth(hint)) / 2), y + cardH + 4 * u, textFont, { 1, 1, 1, 0.75 })
 end
 
 -- Holding or hovering an item: a pulsing teal frame on every other item on

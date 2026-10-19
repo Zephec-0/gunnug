@@ -138,17 +138,16 @@ local function drawCrate(p)
     R(WOOD_DD, i, by, 1, 1)
     R(WOOD_L, i, by - 1 < 1 and 1 or by - 1, 1, 1)
   end
-  -- Nails at the slats' ends
-  for _, c in ipairs({ { 1, 1 }, { w - 2, 1 }, { 1, h - 2 }, { w - 2, h - 2 } }) do
-    R({ 0.72, 0.70, 0.66 }, c[1], c[2], 1, 1)
+  -- Nails at the slats' ends: dull rust-brown heads, no bright dots
+  for _, c in ipairs({ { 1, 2 }, { w - 2, 2 }, { 1, h - 3 }, { w - 2, h - 3 } }) do
+    R({ 0.30, 0.20, 0.14 }, c[1], c[2], 1, 1)
   end
-  -- Dark outline, with the corners left a shade lighter so it reads as rounded
-  love.graphics.setColor(0.17, 0.11, 0.08)
-  frame(x, y, w, h, 1)
-  R({ 0.30, 0.20, 0.13 }, 0, 0, 1, 1)
-  R({ 0.30, 0.20, 0.13 }, w - 1, 0, 1, 1)
-  R({ 0.30, 0.20, 0.13 }, 0, h - 1, 1, 1)
-  R({ 0.30, 0.20, 0.13 }, w - 1, h - 1, 1, 1)
+  -- A warm umber edge instead of a near-black frame: lit along the top, deepest along the bottom, the
+  -- corners left a shade lighter so it reads as rounded
+  R({ 0.46, 0.31, 0.19 }, 1, 0, w - 2, 1)
+  R({ 0.28, 0.18, 0.11 }, 0, 1, 1, h - 2)
+  R({ 0.24, 0.15, 0.10 }, w - 1, 1, 1, h - 2)
+  R({ 0.20, 0.12, 0.08 }, 1, h - 1, w - 2, 1)
 end
 
 local function drawIronCrate(p)
@@ -186,8 +185,12 @@ local function drawIronCrate(p)
     R(BRASS_D, c[1] + 2, c[2], 1, 3)
     R({ 0.18, 0.13, 0.08 }, c[1] + 1, c[2] + 1, 1, 1)
   end
-  love.graphics.setColor(0.10, 0.10, 0.13)
-  frame(x, y, w, h, 1)
+  -- A warm rust-black rim (not a cold grey frame), the top lit
+  R({ 0.22, 0.16, 0.13 }, 0, 0, w, 1)
+  R({ 0.17, 0.12, 0.10 }, 0, h - 1, w, 1)
+  R({ 0.20, 0.14, 0.11 }, 0, 1, 1, h - 2)
+  R({ 0.16, 0.11, 0.09 }, w - 1, 1, 1, h - 2)
+  R({ 0.40, 0.32, 0.27 }, 3, 0, w - 6, 1)
 end
 
 -- Breakable pots, pouches and lamps found about the areas. Each is drawn from

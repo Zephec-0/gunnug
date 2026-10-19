@@ -34,6 +34,7 @@ local physics = require("src.physics")
 local materials = require("src.materials")
 local pickups = require("src.pickups")
 local props = require("src.props")
+local queenfig = require("src.queenfig")
 
 local enemies = {}
 
@@ -345,6 +346,7 @@ enemies.defs.queen = giant("bloater", {
   fireproof = true,
   puff = true,
   globSpeed = 210, globGravity = 60, globDamage = 14,
+  dripDamage = 9, dripPeriod = 6, -- slime drips fall from her and hurt; each of her drips lets go every dripPeriod seconds
   holdDist = 60, -- she keeps this far from the hunter (plus her own size); dashes in when further
   splitDepth = 3, -- below 33% health she splits in two, and every piece splits again below half of its own, down to this many splits in a line (like a slime)
   splitDamage = 0.75, -- each split deals this much of the damage of the one before
@@ -366,8 +368,8 @@ enemies.defs.golem = {
   blood = { 0.8, 0.78, 0.84 },
 }
 enemies.defs.minigolem = {
-  ground = true, w = 14, h = 20, hp = 60, speed = 52, jump = 220,
-  lungeRange = 22, lungeSpeed = 120, lungeLift = 90, lungeCooldown = 1.2,
+  ground = true, w = 14, h = 20, hp = 60, speed = 78, jump = 220,
+  lungeRange = 22, lungeSpeed = 180, lungeLift = 90, lungeCooldown = 1.2,
   windup = 0.35, strike = 0.35, sight = 900, forget = 3000,
   damage = 12, knockback = 0.3, gold = { 4, 8 }, pushForce = 120, weight = 5,
   clawDig = 0, clawPower = 0,
@@ -478,9 +480,14 @@ function enemies.drawOccluders(view)
   for _, e in ipairs(near) do
     local b = e.body
     if not e.dead and not e.noShadow and b.x + b.w > view.x and b.x < view.x + view.w and b.y + b.h > view.y and b.y < view.y + view.h then
-      love.graphics.rectangle("fill", b.x + 1, b.y + 1, math.max(1, b.w - 2), math.max(1, b.h - 2))
+      if e.def.occluders then
+        e.def.occluders(e) -- (a creature with a shape of its own casts that, not a box)
+      else
+        love.graphics.rectangle("fill", b.x + 1, b.y + 1, math.max(1, b.w - 2), math.max(1, b.h - 2))
+      end
     end
   end
+  love.graphics.setColor(1, 1, 1, 1)
 end
 
 function enemies.all()
@@ -1108,6 +1115,14 @@ function enemies.damage(e, amount, dx, dy, force, crit, fx)
     if amount <= 0 then
       return
     end
+  end
+  if e.mito or (e.iframes and e.iframes > 0) then
+    -- The Queen splitting (and a moment after): nothing touches her, her skin just shimmers
+    local ax, ay = center(e)
+    for _ = 1, 2 do
+      effects.particle(ax + (love.math.random() - 0.5) * e.body.w, ay + (love.math.random() - 0.5) * e.body.h, (love.math.random() - 0.5) * 60, -love.math.random() * 50, 0.25, { 0.9, 1, 0.6 }, 0, true)
+    end
+    return
   end
   if e.invuln then
     -- The Colossus in its shell: everything glances off
@@ -2535,6 +2550,34 @@ local function fireGlob(e, ang, speed)
   effects.particle(cx, cy, math.cos(ang) * 30, math.sin(ang) * 30, 0.25, { 0.55, 0.95, 0.35 }, 0, true)
 end
 
+-- A drop of her slime lets go and falls (gravity, no gas: it is a projectile like a glob)
+local function dropSlime(e, x, y)
+  local def = e.def
+  globs[#globs + 1] = {
+    isGlob = true,
+    drip = true,
+    x = x,
+    y = y,
+    vx = (e.body.vx or 0) * 0.25,
+    vy = 20,
+    gravity = 520,
+    damage = math.max(1, math.floor(def.dripDamage * e.dmgMul + 0.5)),
+    life = 5,
+    source = e.kind,
+  }
+end
+
+-- Splitting is mitosis: she swells, pinches and pulls apart (queenfig draws it from e.mito) and
+-- cannot be hurt until the halves are free and a moment beyond (e.iframes, see enemies.damage)
+local MITOSIS = 1.5
+local MITOSIS_AFTER = 0.7
+local function startSplit(e)
+  local gen = (e.gen or 0) + 1
+  e.mito = { t = 0, dur = MITOSIS, childW = e.def.spriteW * QUEEN_SCALES[gen + 1] }
+  e.novaWind, e.dashT, e.fanLeft, e.vulnerable = nil, nil, nil, false
+  sfx("bat_screech", 0.9, 0.35)
+end
+
 -- Below a third of her health the Queen splits in two. What she had left is
 -- divided between the halves (no shared pool), each a size smaller and weaker
 -- than her, and each splits again in turn, down to def.splitDepth splits.
@@ -2560,22 +2603,25 @@ local function splitQueen(e)
     q.gen, q.scale, q.hp, q.maxHp = gen, scale, half, half
     q.goldShare, q.dmgMul, q.stage = share, dmgMul, 1
     q.body.w, q.body.h = size, size
-    q.body.x, q.body.y = math.floor(cx - size / 2), math.floor(cy - size / 2)
-    q.body.vx, q.body.vy = (i == 1 and -1 or 1) * 170, -40
+    local side = i == 1 and -1 or 1
+    q.body.x, q.body.y = math.floor(cx + side * size * 0.55 - size / 2), math.floor(cy - size / 2) -- (where the halves of the mitosis ended)
+    q.body.vx, q.body.vy = side * 110, -20
+    q.mito, q.qm, q.qd = nil, nil, nil
+    q.iframes = MITOSIS_AFTER -- (untouchable a moment after, too)
     q.orbit = -math.pi / 2 + (i == 1 and -1 or 1) * (0.35 + love.math.random() * 0.5)
     q.qs, q.qt, q.atk, q.atkI, q.dashT, q.fanLeft, q.recoverSet, q.vulnerable = "hover", 1.5 + love.math.random(), nil, love.math.random(0, 2), nil, nil, nil, nil
-    q.puffT, q.novaWind, q.flash = nil, nil, 0.15
+    q.puffT, q.novaWind, q.flash = nil, nil, 0
     q.minions = {}
     q.phase = love.math.random() * 10
     removePhysics(q) -- (rebuilt at its new size next frame)
     brood[i] = q
   end
   sfx("bat_screech", 1, 0.5)
-  effects.ring(cx, cy, 60, { 0.85, 0.95, 0.35 })
-  fluids.addGas(cx, cy, 1, 30)
-  for _ = 1, 16 do
+  effects.ring(cx, cy, 40, { 0.85, 0.95, 0.35 })
+  fluids.addGas(cx, cy, 0.7, 24)
+  for _ = 1, 10 do
     local ang = love.math.random() * math.pi * 2
-    effects.particle(cx, cy, math.cos(ang) * (40 + love.math.random() * 90), math.sin(ang) * (40 + love.math.random() * 90), 0.7, { 0.72, 0.85, 0.3 }, 100, true)
+    effects.particle(cx, cy, math.cos(ang) * (30 + love.math.random() * 60), math.sin(ang) * (30 + love.math.random() * 60), 0.6, { 0.72, 0.85, 0.3 }, 100, true)
   end
   effects.popup(cx, cy - size / 2 - 6, "SPLIT", { 0.85, 0.95, 0.35 })
 end
@@ -2674,6 +2720,9 @@ local function updateQueen(e, dt, world, player, px, py)
   local frac = e.hp / e.maxHp
   local stage = frac > 0.66 and 1 or (frac > 0.33 and 2 or 3)
   e.phase = e.phase + dt * 2
+  if (e.iframes or 0) > 0 then
+    e.iframes = e.iframes - dt
+  end
   if e.state == "sleep" then
     local inside = not a or (px > a.x0 and px < a.x1 and py > a.top and py < a.floorY)
     if inside and dist < def.sight then
@@ -2687,9 +2736,8 @@ local function updateQueen(e, dt, world, player, px, py)
       return
     end
   end
-  if frac < (gen == 0 and 0.33 or 0.5) and gen < def.splitDepth then
-    splitQueen(e)
-    return
+  if not e.mito and frac < (gen == 0 and 0.33 or 0.5) and gen < def.splitDepth then
+    startSplit(e)
   end
   if stage > (e.stage or 1) then
     -- A new stage: a roar and a burst of gas
@@ -2703,7 +2751,7 @@ local function updateQueen(e, dt, world, player, px, py)
   local timeScale = 1 + gen * 0.35
   local aimAng = math.atan2(py - cy, px - cx)
   e.aimAng = aimAng -- (her eyes follow the hunter)
-  e.vulnerable = e.qs == "recover" and e.qt > 0.2
+  e.vulnerable = e.qs == "recover" and e.qt > 0.2 and not e.mito
 
   -- A faint leak from her sac, no more
   e.puffT = (e.puffT or 1.5) - dt
@@ -2711,10 +2759,45 @@ local function updateQueen(e, dt, world, player, px, py)
     e.puffT = 1.4
     fluids.addGas(cx, cy + 14 * sf, 0.3, 9 * sf)
   end
+  -- Gas trails behind her wherever she goes, thicker the faster she moves
+  local mv = math.sqrt(b.vx * b.vx + b.vy * b.vy)
+  e.trailGas = (e.trailGas or 0) - dt
+  if mv > 25 and e.trailGas <= 0 then
+    e.trailGas = 0.16
+    fluids.addGas(cx - b.vx / mv * b.w * 0.3, cy - b.vy / mv * b.h * 0.3 + 4, 0.3 * math.min(1, mv / 150), 8 * sf)
+  end
+  -- Drips grow on her and let go: each is a falling drop that hurts (queenfig draws the strands from e.qd)
+  e.qd = e.qd or {}
+  for i = 1, queenfig.dripCount(b.w) do
+    local prev = e.qd[i] or queenfig.dripOffset(i)
+    local p = prev + dt / def.dripPeriod
+    if p >= 1 then
+      p = p - 1
+    end
+    if prev < 0.8 and p >= 0.8 and not e.mito then
+      local x, y = queenfig.dripTip(e, i)
+      dropSlime(e, x, y)
+    end
+    e.qd[i] = p
+  end
 
   local wantX, wantY, speed = cx, cy, 0
   local dashing = false
-  if e.qs == "hover" then
+  if e.mito then
+    -- Mitosis: she holds still, swelling and pinching in two, then lets go
+    local m = e.mito
+    m.t = m.t + dt
+    e.novaWind = nil
+    b.vx, b.vy = b.vx * math.max(0, 1 - 6 * dt), b.vy * math.max(0, 1 - 6 * dt)
+    if love.math.random() < dt * 25 then
+      local ang = love.math.random() * math.pi * 2
+      effects.particle(cx + math.cos(ang) * b.w * 0.5, cy + math.sin(ang) * b.h * 0.5, math.cos(ang) * 20, math.sin(ang) * 20, 0.4, { 0.8, 0.92, 0.35 }, 0, true)
+    end
+    if m.t >= m.dur then
+      splitQueen(e)
+      return
+    end
+  elseif e.qs == "hover" then
     -- High over the arena, drifting along it after the hunter
     local ax = px + math.sin(e.phase * 0.35 + (e.orbit or 0)) * 150
     local ay = a and (a.top + 90 + math.sin(e.phase * 0.5) * 18) or (py - 130)
@@ -2791,7 +2874,7 @@ local function updateQueen(e, dt, world, player, px, py)
       end
     end
   end
-  if e.qs == "recover" then
+  if e.qs == "recover" and not e.mito then
     -- Spent: she sinks to the hunter's height, dazed and open to attack. The
     -- first instant after an attack sets how long this lasts.
     if e.qt <= 0.1 and not e.recoverSet then
@@ -4668,41 +4751,6 @@ local function scaled(fn)
   end
 end
 
-local function drawQueenGlow(e)
-  local b = e.body
-  if e.qs == "windup" and e.atk == "dash" and e.dashAng then
-    -- Where she will go: a dotted line that flickers faster once it locks
-    local lock = (e.qt or 0) < 0.3
-    local qx, qy = b.x + b.w / 2, b.y + b.h / 2
-    local t = love.timer.getTime()
-    for d = b.w * 0.6, 800, 7 do
-      local on = math.floor(t * (lock and 30 or 9) + d / 7) % 2 == 0
-      if on then
-        love.graphics.setColor(1, lock and 0.35 or 0.8, 0.2, lock and 0.9 or 0.55)
-        px(qx + math.cos(e.dashAng) * d, qy + math.sin(e.dashAng) * d, 2, 2)
-      end
-    end
-  end
-  local k = b.w / 56
-  local cx, top = math.floor(b.x + b.w / 2), math.floor(b.y) + 2
-  love.graphics.setColor(1, 0.95, 0.5, 0.6 + 0.3 * math.sin(e.phase * 1.7))
-  love.graphics.rectangle("fill", cx - k, top - 3 * k, 3 * k, 4 * k)
-  love.graphics.setColor(1, 1, 0.85)
-  love.graphics.rectangle("fill", cx, top - 2 * k, k, 2 * k)
-  if e.novaWind then
-    -- Swelling up for an attack: the whole sac glows, row by row, in its own outline
-    local pulse = 0.22 + 0.2 * math.sin(love.timer.getTime() * 25)
-    local W, H = b.w, b.h
-    local midx = b.x + W / 2
-    for row = 0, H - 1 do
-      local u = ((row + 0.5) / H - 0.46) / 0.54
-      local ww = math.floor(math.max(0.3, math.sqrt(math.max(0, 1 - u * u))) * W) + 4
-      love.graphics.setColor(0.85, 0.95, 0.35, pulse)
-      px(midx - ww / 2, b.y + row, ww, 1)
-    end
-  end
-end
-
 -- The tunnel worm: a ring-banded pink body that thins to a point, ending in a
 -- round blind head with a ring of teeth around its maw
 local WORM = {
@@ -5618,42 +5666,6 @@ local function drawSacGlow(e)
   px(cx - W * 0.04, cy - W * 0.03, math.max(2, W * 0.08), math.max(2, W * 0.06))
 end
 
--- The Queen's crown: a gold band studded with gems under five faceted spikes,
--- the middle one tallest, with a pale gem set in the middle (it glows, see drawQueenGlow)
-local function drawQueenCrown(e)
-  local b = e.body
-  local k = b.w / 56
-  local cx, top = math.floor(b.x + b.w / 2), math.floor(b.y) + 2
-  local white = e.flash > 0
-  local function col(c)
-    love.graphics.setColor(white and { 1, 1, 1 } or c)
-  end
-  for i = -2, 2 do
-    local h = (11 - math.abs(i) * 3) * k
-    local x = cx + i * 9 * k
-    col({ 0.62, 0.52, 0.16 })
-    px(x - 2 * k, top - h * 0.5, 5 * k, h * 0.5 + 2)
-    col({ 0.90, 0.80, 0.34 })
-    px(x - 2 * k, top - h * 0.7, 2 * k, h * 0.7 + 2) -- the lit facet
-    px(x, top - h, math.max(1, k), h * 0.35)
-    col({ 0.46, 0.38, 0.10 })
-    px(x + k, top - h * 0.6, 2 * k, h * 0.6 + 2) -- the shadowed facet
-    col({ 1, 0.95, 0.6 })
-    px(x - 2 * k, top - h * 0.7, math.max(1, k), math.max(1, k))
-  end
-  -- The band, with a stud for every spike and a stud between
-  col({ 0.78, 0.66, 0.24 })
-  px(cx - 13 * k, top + 1, 27 * k, 3 * k)
-  col({ 0.96, 0.86, 0.40 })
-  px(cx - 13 * k, top + 1, 27 * k, math.max(1, k))
-  col({ 0.50, 0.40, 0.12 })
-  px(cx - 13 * k, top + 1 + 2 * k, 27 * k, math.max(1, k))
-  for i = -3, 3 do
-    col(i % 2 == 0 and { 0.80, 0.14, 0.22 } or { 0.45, 0.85, 0.95 })
-    px(cx + i * 4.5 * k - k / 2, top + 1 + k, math.max(1, k), math.max(1, k))
-  end
-end
-
 -- Piranha: a stubby silver fish, dark back, a red belly and an underbite of
 -- white teeth; its tail beats while it swims, and it thrashes out of water
 local PIRANHA = {
@@ -5699,120 +5711,6 @@ local function drawPiranhaEye(e)
   local r = mirror(e, 8)
   love.graphics.setColor(1, 0.3, 0.2, 0.9)
   r(6, 1, 1, 1)
-end
-
--- How open the Queen's mouth is, 0 (slack) to 1 (wide): open as she spits a
--- volley or dashes, opening as she winds up
-local function queenMouth(e)
-  if e.spitT and e.spitT > 0 then
-    return 1
-  elseif e.qs == "attack" and e.atk == "dash" then
-    return 1
-  elseif e.qs == "windup" then
-    local k = 1 - (e.qt or 0) / math.max(0.01, e.qtTotal or 1)
-    return 0.3 + 0.5 * math.max(0, math.min(1, k))
-  end
-  return 0.08 + 0.06 * math.sin(e.phase * 1.4)
-end
-
--- The Queen's body: a blob of gas that wobbles and breathes, squashes as it
--- moves, and has a face: two eyes that follow the hunter and a mouth that
--- gapes when she shoots (the glow of it is in drawQueenFaceGlow)
-local function drawQueenBlob(e)
-  local b = e.body
-  local W, H = b.w, b.h
-  local x0, y0 = math.floor(b.x), math.floor(b.y)
-  local white = e.flash > 0
-  local function col(c)
-    love.graphics.setColor(white and { 1, 1, 1 } or c)
-  end
-  local ph = e.phase
-  local cell = math.max(1, math.floor(W / 28)) -- one blob "pixel"
-  local speed = math.sqrt((b.vx or 0) ^ 2 + (b.vy or 0) ^ 2)
-  local stretch = 1 + math.min(0.12, speed / 1600) -- (long along the way she is going)
-  local breathe = 1 + 0.045 * math.sin(ph * 1.3)
-  local swell = e.novaWind and 1.07 or 1
-  local cx = x0 + W / 2
-  local open = queenMouth(e)
-  for row = 0, H - 1, cell do
-    local t = (row + cell / 2) / H
-    local wob = 1 + 0.05 * math.sin(ph * 2 + row * 0.18) + 0.03 * math.sin(ph * 3.1 - row * 0.3)
-    local ww = math.floor(sacWidth(t) * W * wob * breathe * swell / cell) * cell
-    local shift = math.floor(math.sin(ph * 1.6 + row * 0.12) * W * 0.018)
-    local xs = math.floor(cx - ww / 2 + shift)
-    col(t < 0.2 and SAC.light or (t > 0.85 and SAC.deep or (t > 0.62 and SAC.dark or SAC.base)))
-    px(xs, y0 + row, ww, cell)
-    if t > 0.08 then
-      col(SAC.light)
-      px(xs, y0 + row, cell, cell)
-    end
-    col(SAC.deep)
-    px(xs + ww - cell, y0 + row, cell, cell)
-  end
-  -- Bubbles rising inside the gas
-  for k = 1, 7 do
-    local rise = (ph * 0.25 + k * 0.37) % 1
-    local bx = cx + math.sin(k * 2.3 + ph * 0.5) * W * 0.28
-    local by = y0 + H * (0.85 - rise * 0.7)
-    col(SAC.pale)
-    px(bx, by, cell, cell)
-    px(bx - cell, by + cell, cell * 3, cell)
-  end
-  -- Blobby drips from the foot, stretching and shrinking
-  for i = 0, 4 do
-    local len = (2 + 2 * math.sin(ph * 1.7 + i * 1.9)) * cell + cell
-    col(SAC.dark)
-    px(cx - W * 0.22 + i * W * 0.11 + math.sin(ph + i) * cell, y0 + H - cell, cell * 2, len)
-  end
-  -- Eyes, looking at the hunter
-  local look = e.aimAng or 0
-  local lx, ly = math.cos(look) * cell, math.sin(look) * cell
-  for side = -1, 1, 2 do
-    local ex, ey = cx + side * W * 0.2, y0 + H * 0.36
-    col({ 0.18, 0.2, 0.08 })
-    px(ex - cell * 2, ey - cell * 2, cell * 4, cell * 4)
-    col({ 0.95, 0.9, 0.45 })
-    px(ex - cell * 1.5, ey - cell * 1.5, cell * 3, cell * 3)
-    col({ 0.12, 0.14, 0.05 })
-    px(ex - cell / 2 + lx, ey - cell / 2 + ly, cell, cell * 2)
-  end
-  -- The mouth: a slack curve, opening into a dark maw with teeth as she shoots
-  local mx, my = cx, y0 + H * 0.62
-  local mw = W * (0.2 + 0.12 * open)
-  local mh = math.max(cell, math.floor(H * (0.04 + 0.2 * open) / cell) * cell)
-  col({ 0.13, 0.05, 0.06 })
-  px(mx - mw / 2, my, mw, mh)
-  if open > 0.4 then
-    col({ 0.92, 0.9, 0.7 })
-    for i = 0, 3 do
-      px(mx - mw / 2 + cell + i * (mw - cell * 2) / 3.2, my, cell, cell) -- upper teeth
-      px(mx - mw / 2 + cell * 2 + i * (mw - cell * 3) / 3.2, my + mh - cell, cell, cell) -- lower teeth
-    end
-  else
-    col({ 0.13, 0.05, 0.06 })
-    px(mx - mw / 2 - cell, my - cell, cell, cell) -- the slack corners
-    px(mx + mw / 2, my - cell, cell, cell)
-  end
-end
-
--- The glow of the Queen's face: her mouth's throat lights up as she spits
-local function drawQueenFaceGlow(e)
-  local b = e.body
-  local W, H = b.w, b.h
-  local cell = math.max(1, math.floor(W / 28))
-  local open = queenMouth(e)
-  if open > 0.3 then
-    local cx, my = b.x + W / 2, b.y + H * 0.62
-    local mw = W * (0.2 + 0.12 * open)
-    local mh = math.max(cell, math.floor(H * (0.04 + 0.2 * open) / cell) * cell)
-    local flick = 0.6 + 0.3 * math.sin(love.timer.getTime() * 30)
-    love.graphics.setColor(0.7, 1, 0.3, (open - 0.2) * flick)
-    px(cx - mw / 2 + cell, my + cell, mw - cell * 2, mh - cell * 2)
-  end
-  for side = -1, 1, 2 do
-    love.graphics.setColor(1, 0.95, 0.4, 0.5)
-    px(b.x + W / 2 + side * W * 0.2 - cell, b.y + H * 0.36 - cell, cell * 2, cell * 2)
-  end
 end
 
 -- The Marble Colossus's sprite --------------------------------------------------
@@ -6153,10 +6051,7 @@ local DRAW = {
   bat = drawBat,
   swarmbat = drawBat,
   dreadbat = drawDreadBat,
-  queen = function(e)
-    drawQueenBlob(e)
-    drawQueenCrown(e)
-  end,
+  queen = queenfig.draw,
   spitter = drawSpitter,
   dummy = drawDummy,
   hopper = drawHopper,
@@ -6177,10 +6072,7 @@ local GLOW = {
   bat = drawBatEyes,
   swarmbat = drawBatEyes,
   dreadbat = drawDreadBatGlow,
-  queen = function(e)
-    drawQueenFaceGlow(e)
-    drawQueenGlow(e)
-  end,
+  queen = queenfig.glow,
   spitter = drawSpitterGlow,
   dummy = function() end,
   hopper = drawHopperEyes,
@@ -6200,7 +6092,7 @@ end
 
 local function onScreen(e, view)
   local b = e.body
-  local m = e.segs and 80 or 8 -- (a worm's tail trails far behind its head)
+  local m = e.segs and 80 or (e.def.drawMargin or 8) -- (a worm's tail trails far behind its head)
   return b.x + b.w > view.x - m and b.x < view.x + view.w + m and b.y + b.h > view.y - m and b.y < view.y + view.h + m
 end
 
@@ -6290,10 +6182,21 @@ function enemies.drawEmissive(view)
     end
   end
   for _, g in ipairs(globs) do
-    love.graphics.setColor(0.45, 0.9, 0.3)
-    px(g.x - 1, g.y - 1, 3, 3)
-    love.graphics.setColor(0.8, 1, 0.6)
-    px(g.x, g.y)
+    if g.drip then
+      -- A drop of the Queen's slime: a falling teardrop with a glint, a little streak above it
+      love.graphics.setColor(0.58, 0.64, 0.27, 0.5)
+      px(g.x, g.y - 4, 1, 2)
+      love.graphics.setColor(0.58, 0.68, 0.27)
+      px(g.x - 1, g.y - 1, 3, 3)
+      px(g.x, g.y - 2, 1, 1)
+      love.graphics.setColor(0.9, 0.97, 0.6)
+      px(g.x - 1, g.y - 1)
+    else
+      love.graphics.setColor(0.45, 0.9, 0.3)
+      px(g.x - 1, g.y - 1, 3, 3)
+      love.graphics.setColor(0.8, 1, 0.6)
+      px(g.x, g.y)
+    end
   end
   if enemies.afterEmissive then
     enemies.afterEmissive(view) -- (bosses in modules of their own: their shots and beams)
@@ -6418,7 +6321,7 @@ function enemies.drawScreen(toScreen, font)
         end
       else
         -- The health bar floats above the head: a red gradient, nothing else
-        local sx, sy = toScreen(b.x + b.w / 2, b.y - 8)
+        local sx, sy = toScreen(b.x + b.w / 2, b.y - 8 - (e.def.barLift or 0))
         sy = math.max(sy, 44 + unit * 2.4) -- (kept on screen when her head is above it)
         local w, h = math.max(b.w * unit * 1.2, (e.gen or 0) > 0 and 48 or 140), math.max(10, unit * 2.4)
         w = math.min(w, sw * 0.55) -- (a boss as big as the screen keeps a bar that fits)

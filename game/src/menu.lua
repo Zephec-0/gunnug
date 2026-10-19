@@ -77,7 +77,7 @@ local function layout(scale)
   oy = (wh - 225 * u) / 2
   F.small = fonts.get(math.max(9, math.floor(u * 3.4))) -- (the face's 1x size is too small to read on a 1080p screen)
   F.body = fonts.get(math.max(9, math.floor(u * 4)))
-  F.head = fonts.get(math.max(12, math.floor(u * 7.5)))
+  F.head = fonts.get(math.max(12, math.floor(u * 7.5)), "bold")
 end
 
 -- Pages ----------------------------------------------------------------------------
@@ -466,7 +466,7 @@ PAGES.title = function()
 
   -- The title, over the wash, at the game's pixel size; its rule and the tag line
   local tx, ty = render.toScreen(TITLE_X, TITLE_Y)
-  titleFont = titleFont or fonts.get(44)
+  titleFont = titleFont or fonts.get(44, "bold")
   love.graphics.setFont(titleFont)
   love.graphics.setColor(1, 1, 1)
   love.graphics.print("GUNNUG", math.floor(tx), math.floor(ty), 0, render.scale, render.scale)

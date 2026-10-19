@@ -417,8 +417,8 @@ function overworld.build(opts)
   end
   -- Barrens set dressing: rock structures cut into the desert, buried bones, a mirage
   barrens.build(world, surface, seed, LEFT + 400, 5100, function(x)
-    if x > 560 and x < 2050 then
-      return true -- (the camp, the town and the mine)
+    if x > 230 and x < 2050 then
+      return true -- (the town starts at 490; structures reach 200 px right of where they start)
     end
     for _, e in ipairs(catacombs.entries()) do
       if math.abs(x - e.x) < (e.half or 100) + 280 then

@@ -12,6 +12,7 @@ local config = require("src.config")
 local destruction = require("src.destruction")
 local effects = require("src.effects")
 local fluids = require("src.fluids")
+local fig = require("src.colossusfig")
 
 local H = enemies.helpers
 local center, collider, sfx = H.center, H.collider, H.sfx
@@ -38,17 +39,32 @@ local M = {
 -- Definitions -------------------------------------------------------------------------------------
 
 local def = enemies.defs.golem
-local S = 2 / 3 -- (a third smaller than the first rebuild)
-def.w, def.h = math.floor(112 * S), math.floor(168 * S)
+local S = 2 / 3 -- (the scale the attack ranges below were tuned at; the body itself is drawn at 1:1, src.colossusfig)
+def.w, def.h = 40, 148
 def.speed = 30
-def.spriteW, def.spriteH = def.w, def.h
+def.spriteW, def.spriteH = 130, 176 -- (the portrait box: the figure with its drifting shards)
 def.blood = { 0.9, 0.7, 0.45 }
+local IDLE_POSE, DORMANT_POSE -- (set below, with the pose code)
+def.occluders = function(e)
+  -- soft partial blockers shaped like the body in its pose, mirrored to face the way it faces
+  local p = e.fpose or (e.altarLocked and DORMANT_POSE) or IDLE_POSE
+  local b = e.body
+  local bx, gy = math.floor(b.x + b.w / 2), math.floor(b.y + b.h)
+  local f = e.facing or 1
+  for _, r in ipairs(fig.occluders(p)) do
+    local x = f == 1 and bx + (r[1] - fig.CX) or bx - (r[1] - fig.CX) - r[3]
+    love.graphics.setColor(1, 1, 1, r[5])
+    love.graphics.rectangle("fill", math.floor(x), math.floor(gy + (r[2] - fig.G)), math.ceil(r[3]), math.ceil(r[4]))
+  end
+end
+def.drawMargin = 150 -- (the figure and its shards reach well past its hitbox: no popping in at the screen's edge)
+def.barLift = 42 -- (its health bar floats above the crystal head and the shards, not on its hitbox)
 def.light = function(e)
   local cx, cy = center(e)
   -- (a warm glow over the whole of it, so the bulk can be seen, and its eye)
-  local l = { { cx, cy - 10, 150, 1, 0.72, 0.42, 0.2 } }
-  if e.eyeX then
-    l[2] = { e.eyeX, e.eyeY, e.bm and e.bm.phase == "act" and 120 or 50, 1, 0.55, 0.2, 0.85 }
+  local l = { { cx, cy - 10, 150, 1, 0.72, 0.42, e.altarLocked and 0.04 or 0.2 } }
+  if e.eyeX and not e.altarLocked then
+    l[2] = { e.eyeX, e.eyeY, e.bm and e.bm.phase == "act" and 120 or 40, 1, 0.55, 0.2, 0.6 }
   end
   return l
 end
@@ -61,9 +77,9 @@ mini.blood = { 0.9, 0.7, 0.45 }
 
 local ATTACKS = {
   -- name = { windup, act, recover } in seconds (half of what they were)
-  swipe = { 0.33, 0.13, 0.28 },
-  throw = { 0.4, 0.1, 0.3 },
-  stomp = { 0.48, 0.15, 0.4 },
+  swipe = { 0.5, 0.14, 0.3 }, -- (a held wind-up, then it whips: the fist is aimed at the hunter, locked near the end)
+  throw = { 0.55, 0.1, 0.35 }, -- (ore gathers out of thin air into a ball)
+  stomp = { 0.6, 0.14, 0.45 }, -- (ore piles onto the fists as they rise; then they fall hard)
   beam = { 0.6, 1.1, 0.5 },
   leap = { 0.55, 1.6, 0.6 },
 }
@@ -139,6 +155,11 @@ local function beamUpdate(e, dt, world, player)
     e.beamEnd = { ex + dx * len, ey + dy * len }
     -- the screen warps while it burns
     require("src.render").warpFrame(1)
+    bm.hum = (bm.hum or 0) - dt
+    if bm.hum <= 0 then
+      bm.hum = 0.35
+      sfx("dh_beam", 0.3, 0.9)
+    end
     camShake(0.12)
     bm.hitT = bm.hitT - dt
     local pcx, pcy = player:center()
@@ -169,10 +190,23 @@ local function beginAttack(e, name, px, py)
   local t = ATTACKS[name]
   e.gs, e.sub, e.gt, e.gd = name, "wind", t[1], t[1]
   e.last = name
+  e.clk1, e.clk2, e.tickT = false, false, 0
+  -- every attack announces itself: a different sound for each wind-up
   if name == "beam" then
     beamStart(e, px, py, t[1], t[2])
-  elseif name == "stomp" or name == "leap" then
+    sfx("dh_charge", 0.5, 0.8)
+  elseif name == "stomp" then
     sfx("explosion", 0.3, 0.4)
+    sfx("rumble", 0.7, 0.6)
+  elseif name == "leap" then
+    sfx("explosion", 0.3, 0.4)
+    sfx("rumble", 0.7, 0.5)
+    sfx("creak", 0.5, 0.6)
+  elseif name == "swipe" then
+    e.aimX, e.aimY = px, py
+    sfx("gargoyle_grind", 0.5, 0.7)
+  elseif name == "throw" then
+    sfx("rocks", 0.6, 0.7)
   end
 end
 
@@ -198,6 +232,7 @@ local function groundSlam(e, world, player, power)
   destruction.dig(world, cx - 22, fy, 9, 3, 0, -1)
   destruction.dig(world, cx + 22, fy, 9, 3, 0, -1)
   sfx("explosion", 1, 0.5)
+  sfx("gargoyle_crash", 0.8, 0.6)
   camShake(1.0)
   require("src.render").warpFrame(0.6)
   effects.ring(cx, fy - 6, 90, { 1, 0.7, 0.35 })
@@ -220,10 +255,16 @@ local function act(e, world, player, px, py, stage)
   local d = e.def
   if e.gs == "swipe" then
     sfx("hit", 0.9, 0.4)
+    sfx("impact", 0.7, 0.5)
+    sfx("gust_blast", 0.35, 0.7)
     b.vx = f * 90
-    local x0, x1 = cx + f * 16 * S, cx + f * (b.w / 2 + 120 * S)
+    -- the fist goes where the hunter was when the aim locked: its height and its distance
+    local gy = b.y + b.h
+    local reach = math.max(24, math.min(116, ((e.aimX or px) - cx) * f))
+    local aimY = gy + math.max(-150, math.min(8, (e.aimY or py) - gy))
+    local x0, x1 = cx + f * 16, cx + f * (reach + 16)
     local pb = player.body
-    if overlaps(math.min(x0, x1), b.y + 30 * S, math.abs(x1 - x0), b.h - 30 * S, pb.x, pb.y, pb.w, pb.h) then
+    if overlaps(math.min(x0, x1), aimY - 26, math.abs(x1 - x0), 52, pb.x, pb.y, pb.w, pb.h) then
       if hurt(e, player, d.damage, cx, cy) then
         pb.vx, pb.vy = f * 280, -170
       end
@@ -234,8 +275,9 @@ local function act(e, world, player, px, py, stage)
     end
   elseif e.gs == "throw" then
     sfx("hit", 0.7, 0.5)
+    sfx("gust_blast", 0.5, 0.8)
     local n = stage + 1
-    local sx, sy = cx + f * 34 * S, b.y + 20 * S
+    local sx, sy = e.handX or (cx + f * 10), e.handY or (b.y + 20) -- (from the raised fist)
     local T = math.max(0.6, math.min(1.1, math.abs(px - sx) / 280))
     for i = 1, n do
       local aim = px + (i - (n + 1) / 2) * 50
@@ -243,7 +285,15 @@ local function act(e, world, player, px, py, stage)
     end
   elseif e.gs == "stomp" then
     sfx("explosion", 0.8, 0.4)
+    sfx("ram_stamp", 0.7, 0.5)
     camShake(0.6)
+    -- both fists hit the ground: a ring of dust and a spray of rubble where each one lands
+    for _, fx in ipairs({ cx + f * 40, cx + f * 78 }) do
+      effects.ring(fx, b.y + b.h - 4, 34, { 1, 0.7, 0.35 })
+      for _ = 1, 14 do
+        effects.particle(fx + (love.math.random() - 0.5) * 20, b.y + b.h - 3, (love.math.random() - 0.5) * 150, -50 - love.math.random() * 150, 0.6, love.math.random() < 0.4 and { 1, 0.75, 0.35 } or { 0.85, 0.72, 0.55 }, 420, love.math.random() < 0.4)
+      end
+    end
     local dirs = { (px < cx) and -1 or 1 }
     if stage >= 2 then
       dirs[2] = -dirs[1]
@@ -256,6 +306,7 @@ local function act(e, world, player, px, py, stage)
     end
   elseif e.gs == "leap" then
     sfx("hit", 0.8, 0.3)
+    sfx("gust_blast", 0.6, 0.5)
     b.vy = -300
     b.vx = (px < cx and -1 or 1) * math.min(110, math.abs(px - cx) * 0.6)
     e.leapAir = true
@@ -273,6 +324,7 @@ end
 
 local function startShell(e, n)
   e.gs, e.sub, e.gt = "shell", nil, 0
+  e.shellFloor = e.body.y + e.body.h -- (the floor it lifts off from)
   e.invuln, e.vulnerable = true, false
   e.body.vx = 0
   e.bm, e.beamEnd = nil, nil
@@ -308,6 +360,306 @@ end
 
 -- The Colossus -----------------------------------------------------------------------------------------
 
+local figUpdate
+-- The pose: springs chasing targets ----------------------------------------------------------------------
+-- Every state names where the figure's parts want to be; each channel is a spring, so the fists swing
+-- through and settle, the body leans into a strike and the head trails (src.colossusfig draws the result).
+
+IDLE_POSE = { nf = { -2, 0 }, ff = { 10, 0 }, t = 0.6 }
+DORMANT_POSE = { drop = 42, nf = { 26, 0 }, ff = { -18, 0 }, nfist = { 10, 8 }, ffist = { 20, 4 }, hy = 8, lean = 6, dead = true, t = 2 }
+local DORMANT = { drop = 42, nfx = 26, ffx = -18, nfistx = 10, nfisty = 8, ffistx = 20, ffisty = 4, hy = 8, lean = 6 }
+local SEALED = { drop = 38, nfx = 6, ffx = -4, nfl = 30, ffl = 30, nfistx = 28, nfisty = -35, ffistx = -24, ffisty = -36, hy = 14, lean = 0 } -- curled up small inside the gem
+local KNEEL = { drop = 30, nfx = 22, ffx = -14, nfistx = 0, nfisty = 20, ffistx = 12, ffisty = 16, hy = 4 }
+local REST = { drop = 14, nfx = 14, ffx = -8, nfistx = 4, nfisty = 12, ffistx = 12, ffisty = 8, hy = 8, jaw = 2, lean = 2 }
+local BEAMPOSE = { drop = 4, nfx = -12, ffx = 18, nfistx = -26, nfisty = -26, ffistx = 52, ffisty = -34, jaw = 3 }
+local POSES = {
+  swipe = {
+    wind = { lean = -5, nfx = -6, ffx = 10, nfistx = -30, nfisty = -46, ffistx = -4, ffisty = 4, hx = -3, hy = -2, jaw = 2 },
+    act = { lean = 9, drop = 3, nfx = 22, ffx = -18, nfistx = 118, nfisty = -14, ffistx = -14, ffisty = 2, hx = 5, hy = 2, jaw = 3, open = true },
+  },
+  throw = {
+    wind = { lean = -3, nfx = -4, ffx = 12, nfistx = 0, nfisty = -72, ffistx = -10, ffisty = -4, hy = -3 },
+    act = { lean = 5, drop = 2, nfx = 10, ffx = 2, nfistx = 52, nfisty = -66, ffistx = -16, ffisty = 2, hx = 3, hy = 1, open = true },
+  },
+  stomp = {
+    wind = { lean = -1, nfx = 3, nfl = 16, ffx = 10, nfistx = 8, nfisty = -72, ffistx = 12, ffisty = -74, hy = -3 },
+    act = { drop = 7, nfx = 18, ffx = -12, nfistx = 68, nfisty = 16, ffistx = 44, ffisty = 16, hy = 4, jaw = 2 },
+  },
+  leap = {
+    wind = { drop = 16, lean = -5, nfx = 20, ffx = -16, nfistx = -24, nfisty = 10, ffistx = -8, ffisty = 12, hy = 4 },
+    act = { nfx = 10, nfl = 16, ffx = -8, ffl = 14, nfistx = 20, nfisty = -40, ffistx = -4, ffisty = -44, lean = 4, hy = -4, open = true, spread = 0.2 },
+    land = { drop = 12, lean = 6, nfx = 26, ffx = -22, nfistx = 24, nfisty = 38, ffistx = 46, ffisty = 34, hy = 6, jaw = 3 },
+  },
+}
+
+local function lerpn(a, b, t)
+  return a + (b - a) * t
+end
+
+local function ease(k)
+  k = math.max(0, math.min(1, k))
+  return k * k * (3 - 2 * k)
+end
+
+local function spring(e, name, target, k, dt)
+  local sp = e.fs[name]
+  if not sp then
+    sp = { x = target, v = 0 }
+    e.fs[name] = sp
+  end
+  local c = 2 * math.sqrt(k) * 0.6 -- a little under critical: they overshoot and settle
+  local n = 2
+  for _ = 1, n do
+    sp.v = sp.v + ((target - sp.x) * k - sp.v * c) * dt / n
+    sp.x = sp.x + sp.v * dt / n
+  end
+  return sp.x
+end
+
+local function figTarget(e)
+  local T = { drop = 0, lean = 0, nfx = -2, nfl = 0, ffx = 10, ffl = 0, nfistx = 0, nfisty = 0, ffistx = 0, ffisty = 0, hx = 0, hy = 0, jaw = 0, spread = 0, bob = 0 }
+  local k = 200 -- spring stiffness for this state
+  local gs, sub = e.gs, e.sub
+  local function use(src)
+    for key, v in pairs(src) do
+      T[key] = v
+    end
+  end
+  local function walk()
+    local b = e.body
+    local amp = e.grounded and math.min(1, math.abs(b.vx) / 30) or 0
+    local c, sn = math.cos(e.phase), math.sin(e.phase)
+    T.nfx, T.ffx = lerpn(-2, 24 * c, amp), lerpn(10, -20 * c, amp)
+    T.nfl, T.ffl = 14 * math.max(0, -sn) * amp, 14 * math.max(0, sn) * amp
+    T.nfistx, T.ffistx = -12 * c * amp, 14 * c * amp
+    T.lean, T.bob = 3 * amp, 2 * math.abs(sn) * amp
+  end
+  if e.state == "idle" or e.state == "sleep" or not gs then
+    use(DORMANT)
+    T.dead = true
+  elseif gs == "rise" then
+    -- dormant stone coming awake: a heap, the ore drifting together, then a flare and the eye
+    local p = 1 - math.max(0, e.gt or 0) / 2.6
+    T.dead = p < 0.3
+    T.drop = lerpn(42, 0, ease((p - 0.2) / 0.7))
+    T.spread = p < 0.5 and (p / 0.5) or lerpn(1, 0.3, math.min(1, (p - 0.5) / 0.5))
+    T.hy = lerpn(8, -8, ease((p - 0.5) / 0.4))
+    T.nfx, T.ffx = lerpn(26, 14, ease(p)), lerpn(-18, -12, ease(p))
+    local wake = ease((p - 0.65) / 0.3)
+    T.nfistx, T.nfisty = lerpn(10, -20, wake), lerpn(8, -22, wake)
+    T.ffistx, T.ffisty = lerpn(20, 40, wake), lerpn(4, -30, wake)
+    T.flare = p > 0.8 and (p - 0.8) / 0.2 or 0
+    T.charge = p > 0.7 and 0.6 or 0
+    T.open = p > 0.8
+    T.jaw = p > 0.8 and 4 or 0
+    k = 90
+  elseif gs == "shell" then
+    -- kneels and slims up, then curls into itself while the gem grows round it from the inside out and
+    -- lifts it off the floor (e.shellT counts from the kneel)
+    local st = e.shellT or 0
+    use(KNEEL)
+    local curl = ease((st - 0.4) / 0.7)
+    for key, v in pairs(SEALED) do
+      T[key] = lerpn(T[key] or 0, v, curl)
+    end
+    T.slim = ease(st / 0.5)
+    T.tuck = curl
+    T.charge = e.charge or 0
+    k = 110
+  elseif gs == "rest" then
+    use(REST)
+    k = 110
+  elseif gs == "beam" then
+    use(BEAMPOSE)
+    T.open = true
+    k = sub == "act" and 200 or 150
+    if e.bm then
+      T.charge = e.bm.phase == "wind" and (e.charge or 0) or 0.4
+      if e.bm.ang then
+        T.hy = -3 + 3 * math.sin(e.bm.ang)
+      else
+        T.hy = -5
+      end
+    end
+  elseif POSES[gs] then
+    local set = POSES[gs]
+    local which = sub == "wind" and "wind" or (sub == "act" and "act" or nil)
+    if gs == "leap" then
+      if sub == "wind" then
+        which = "wind"
+      elseif e.leapAir then
+        which = "act"
+      else
+        which = "land"
+      end
+    end
+    if gs == "swipe" and which then
+      -- aimed: the fist goes back and away from the hunter and holds, trembling, then whips out to where the
+      -- hunter stood when the aim locked (height and distance), the body stretching into it
+      local f = e.facing or 1
+      local cxx = e.body.x + e.body.w / 2
+      local gyy = e.body.y + e.body.h
+      local dx = math.max(24, math.min(116, ((e.aimX or cxx) - cxx) * f))
+      local dy = math.max(-150, math.min(8, (e.aimY or gyy) - gyy))
+      if which == "wind" then
+        local pw = 1 - math.max(0, e.gt or 0) / math.max(0.01, e.gd or 1)
+        local draw = ease(pw * 1.5)
+        use(set.wind)
+        T.nfistx = lerpn(0, -34, draw) + math.sin(love.timer.getTime() * 40) * 1.2 * math.max(0, pw - 0.5)
+        T.nfisty = lerpn(0, -40 + dy * 0.25, draw)
+        T.lean = lerpn(0, -6, draw)
+        k = 90
+      else
+        use(set.act)
+        T.nfistx = dx + 28
+        T.nfisty = dy + 58
+        T.lean = 10
+        T.stretch = 10
+        k = 2200
+      end
+    elseif gs == "stomp" and which then
+      if which == "wind" then
+        -- both fists climb while ore piles onto them, trembling under the weight
+        local pw = 1 - math.max(0, e.gt or 0) / math.max(0.01, e.gd or 1)
+        local draw = ease(pw * 1.3)
+        use(set.wind)
+        T.nfisty = lerpn(0, -78, draw)
+        T.ffisty = lerpn(0, -80, draw)
+        T.nfistx = 8 + math.sin(love.timer.getTime() * 45) * 1.2 * math.max(0, pw - 0.4)
+        T.lean = lerpn(0, -6, draw)
+        T.stretch = 6 * draw
+        T.mass = ease(pw * 1.15)
+        k = 100
+      else
+        -- and falls: heavy, fast, the body dropping with them
+        use(set.act)
+        T.mass = 1
+        T.lean = 6
+        T.drop = 11
+        k = 2600
+      end
+    elseif gs == "leap" and which == "act" then
+      -- in the air each part chases the one above it: rising, the head leads and the arms and legs
+      -- trail below; falling, the feet lead and everything above lags behind
+      local vy = e.body.vy
+      local sp = math.min(1, math.abs(vy) / 240)
+      use(set.act)
+      T.stretch = 28 * sp
+      T.spread = 0.1 + 0.1 * sp
+      if vy < 0 then
+        T.nfx, T.ffx, T.nfl, T.ffl = 4, -8, 0, 0
+        T.nfistx, T.nfisty, T.ffistx, T.ffisty = -10, 42 * sp, 8, 36 * sp
+      else
+        T.nfx, T.ffx, T.nfl, T.ffl = 8, -6, 0, 0
+        T.nfistx, T.nfisty, T.ffistx, T.ffisty = -4, -84 * sp, 8, -78 * sp
+      end
+      k = 120
+    elseif gs == "leap" and which == "land" then
+      -- landed: all of it slams down and comes apart, then the ore pulls itself back together
+      local p = 1 - math.max(0, e.gt or 0) / math.max(0.01, e.gd or 1)
+      local reform = ease((p - 0.3) / 0.7)
+      use(set.land)
+      T.drop = lerpn(set.land.drop + 16, 0, reform)
+      T.spread = 1 - reform
+      T.nfistx, T.nfisty = lerpn(30, 0, reform), lerpn(40, 0, reform)
+      T.ffistx, T.ffisty = lerpn(50, 0, reform), lerpn(36, 0, reform)
+      k = 140
+    elseif which then
+      use(set[which])
+      k = which == "wind" and 130 or 700
+    else
+      walk() -- recovering: back to the walk
+      k = 120
+    end
+  else
+    walk()
+  end
+  if gs == "throw" and sub == "wind" then
+    T.ball = ease(1.25 * (1 - math.max(0, e.gt or 0) / math.max(0.01, e.gd or 1)))
+  end
+  -- the beam can be fired from the shell too
+  if e.bm and gs ~= "beam" and e.charge then
+    T.charge = e.charge
+  end
+  return T, k
+end
+
+figUpdate = function(e, dt)
+  e.fs = e.fs or {}
+  e.shellT = (e.gs == "shell") and ((e.shellT or 0) + dt) or 0
+  -- sealed, it hovers in its gem, clear of the floor (the golemlings have the arena to themselves)
+  e.hoverH = (e.gs == "shell") and 56 * ease((e.shellT - 0.6) / 0.9) or 0
+  local T, k = figTarget(e)
+  dt = math.min(dt, 1 / 20)
+  local function sp(name, target, kk)
+    return spring(e, name, target or 0, kk or k, dt)
+  end
+  local hk = 220
+  local pose = {
+    drop = sp("drop", T.drop),
+    lean = sp("lean", T.lean),
+    bob = T.bob,
+    nf = { sp("nfx", T.nfx), sp("nfl", T.nfl) },
+    ff = { sp("ffx", T.ffx), sp("ffl", T.ffl) },
+    nfist = { sp("nfistx", T.nfistx), sp("nfisty", T.nfisty) },
+    ffist = { sp("ffistx", T.ffistx), sp("ffisty", T.ffisty) },
+    hx = sp("hx", T.hx, hk) + (e.headX or 0) * 0.4,
+    hy = sp("hy", T.hy, hk) + (e.headY or 0) * 0.4,
+    jaw = sp("jaw", T.jaw, hk),
+    spread = sp("spread", T.spread, 120),
+    stretch = sp("stretch", T.stretch, 200),
+    slim = sp("slim", T.slim, 200),
+    tuck = sp("tuck", T.tuck, 200),
+    mass = sp("mass", T.mass, 60),
+    ball = T.ball,
+    shellG = e.gs == "shell" and ease((e.shellT or 0) / 1.6) or 0,
+    open = T.open,
+    charge = T.charge,
+    dead = T.dead,
+    flare = T.flare,
+    t = love.timer.getTime(),
+  }
+  -- the gem growing: its seeds, then its closing, make sounds
+  if e.gs == "shell" then
+    local st = e.shellT
+    for i, at in ipairs({ 0.45, 0.8, 1.15, 1.45 }) do
+      if st >= at and (e.shellCue or 0) < i then
+        e.shellCue = i
+        sfx(i % 2 == 0 and "wisp_crackle" or "pop", 0.45, 0.8 + i * 0.12)
+      end
+    end
+    if st >= 1.6 and (e.shellCue or 0) < 5 then
+      e.shellCue = 5
+      sfx("gargoyle_crash", 0.6, 1.3)
+      sfx("tooth_break", 0.5, 0.9)
+    end
+  else
+    e.shellCue = 0
+  end
+  e.fpose = pose
+  -- the raised fist, in the world (where thrown stones leave from)
+  local b = e.body
+  local f = e.facing or 1
+  local bx, by = fig.ballOffset(pose)
+  e.handX = b.x + b.w / 2 + f * bx
+  e.handY = b.y + b.h + by -- (where the thrown stones leave from: the gathered ball)
+  -- while the ball gathers, grit and sparks stream in out of the air to it, so the making is easy to see
+  if e.gs == "throw" and e.sub == "wind" and (pose.ball or 0) > 0 then
+    local n = 1 + math.floor((pose.ball or 0) * 3)
+    for _ = 1, n do
+      if love.math.random() < dt * 100 then
+        local ang = love.math.random() * math.pi * 2
+        local dist = 45 + love.math.random() * 55
+        local life = 0.28 + love.math.random() * 0.14
+        local sx, sy = e.handX + math.cos(ang) * dist, e.handY + math.sin(ang) * dist * 0.8
+        local col = love.math.random() < 0.5 and { 1, 0.8, 0.35 } or { 0.95, 0.88, 0.75 }
+        effects.particle(sx, sy, (e.handX - sx) / life, (e.handY - sy) / life, life, col, 0, true)
+      end
+    end
+  end
+end
+
+
 local function updateGolem(e, dt, world, player, px, py)
   local def2, b = e.def, e.body
   local collide = collider(e, world)
@@ -318,22 +670,19 @@ local function updateGolem(e, dt, world, player, px, py)
   local frac = e.hp / e.maxHp
   local stage = frac > 0.66 and 1 or (frac > 0.33 and 2 or 3)
 
-  -- The floating head, on a spring: it trails and answers knocks
+  -- The floating head, on a spring: it trails and answers knocks (src.colossusfig draws it from the pose)
   e.headX, e.headY = e.headX or 0, e.headY or 0
   e.headVX, e.headVY = e.headVX or 0, e.headVY or 0
-  local bob = math.sin(love.timer.getTime() * 1.8 + e.phase) * 3
-  local drop = (e.invuln and 34 or 0) + (e.gs == "rise" and 40 or 0) + (e.gs == "rest" and 18 or 0)
-  local wantX, wantY = 0, bob + drop - (e.sub == "wind" and e.gs ~= "walk" and 8 or 0)
-  e.headVX = e.headVX + (wantX - e.headX) * 90 * dt - e.headVX * 9 * dt
-  e.headVY = e.headVY + (wantY - e.headY) * 90 * dt - e.headVY * 9 * dt
+  e.headVX = e.headVX + (0 - e.headX) * 90 * dt - e.headVX * 9 * dt
+  e.headVY = e.headVY + (0 - e.headY) * 90 * dt - e.headVY * 9 * dt
   e.headX, e.headY = e.headX + e.headVX * dt, e.headY + e.headVY * dt
-  local hx, hy = cx + (e.facing * 6 + e.headX) * S, b.y + (34 + e.headY) * S
-  e.eyeX, e.eyeY = hx + e.facing * 15 * S, hy + 2 * S
-  e.headPos = { hx, hy }
+  -- the eye, wherever the figure's pose (from the last update) puts it: the beam starts there
+  local eox, eoy = fig.eyeOffset(e.fpose or IDLE_POSE)
+  e.eyeX, e.eyeY = cx + e.facing * eox, b.y + b.h + eoy
 
   if e.state == "idle" or e.state == "sleep" then
     local inside = not a or (px > a.x0 and px < a.x1 and py > a.top and py < a.floorY)
-    if inside and dist < def2.sight then
+    if inside and dist < def2.sight and not e.altarLocked then
       e.state, e.gs, e.gt = "chase", "rise", 2.6
       sfx("explosion", 0.7, 0.35)
     else
@@ -341,6 +690,7 @@ local function updateGolem(e, dt, world, player, px, py)
       if Body.moveY(b, collide, b.vy * dt) then
         b.vy = 0
       end
+      figUpdate(e, dt)
       return
     end
   end
@@ -452,6 +802,16 @@ local function updateGolem(e, dt, world, player, px, py)
     local t = ATTACKS[e.gs]
     if e.sub == "wind" then
       e.facing = px < cx and -1 or 1
+      if e.gs == "swipe" and e.gt > t[1] * 0.3 then
+        e.aimX, e.aimY = px, py -- (it tracks the hunter, then the aim locks: the last stretch of the wind-up is a dodge window)
+      end
+      if e.gs == "throw" then
+        e.tickT = (e.tickT or 0) - dt
+        if e.tickT <= 0 then
+          e.tickT = 0.07
+          sfx("tick", 0.25, 0.7 + 0.9 * (1 - math.max(0, e.gt) / t[1]))
+        end
+      end
       if e.gt <= 0 then
         e.sub, e.gt, e.gd = "act", t[2], t[2]
         e.actAt = true
@@ -479,6 +839,19 @@ local function updateGolem(e, dt, world, player, px, py)
         e.sub, e.gt, e.gd = "rec", t[3], t[3]
       end
     elseif e.sub == "rec" then
+      if e.gs == "leap" then
+        -- the ore pulling itself back together, piece by piece
+        local rp = 1 - math.max(0, e.gt) / math.max(0.01, e.gd or 1)
+        if rp > 0.35 and not e.clk1 then
+          e.clk1 = true
+          sfx("clank", 0.5, 0.8)
+        end
+        if rp > 0.6 and not e.clk2 then
+          e.clk2 = true
+          sfx("clank", 0.6, 1.0)
+          sfx("rocks", 0.4, 0.9)
+        end
+      end
       if e.gt <= 0 then
         e.gs, e.sub = "walk", nil
         e.gt = ((e.last == "stomp" and (e.chain or 0) < 2) and 0.25 or (stage == 1 and 0.9 or (stage == 2 and 0.65 or 0.45))) + love.math.random() * 0.3
@@ -497,7 +870,13 @@ local function updateGolem(e, dt, world, player, px, py)
       b.vx = b.vx * math.max(0, 1 - 6 * dt)
     end
   end
-  b.vy = math.min(b.vy + config.gravity * dt, 450)
+  if e.gs == "shell" and e.shellFloor and (e.hoverH or 0) > 0 then
+    -- (floating up to its hover height, then bobbing there)
+    local want = e.shellFloor - e.hoverH + math.sin(love.timer.getTime() * 2.2) * 2
+    b.vy = math.max(-150, math.min(150, (want - (b.y + b.h)) * 8))
+  else
+    b.vy = math.min(b.vy + config.gravity * dt, 450)
+  end
   if Body.moveX(b, collide, b.vx * dt, 8) then
     b.vx = 0
   end
@@ -510,6 +889,7 @@ local function updateGolem(e, dt, world, player, px, py)
   if a then
     b.x = math.max(a.x0 + 6, math.min(a.x1 - b.w - 6, b.x))
   end
+  figUpdate(e, dt)
   local step = math.floor(e.phase / math.pi)
   e.phase = e.phase + dt * (math.abs(b.vx) / 14 + 0.5)
   if e.grounded and math.abs(b.vx) > 8 and math.floor(e.phase / math.pi) ~= step then
@@ -574,8 +954,11 @@ function enemies.golemShots(dt, world, player)
         end
       end
     end
-    if love.math.random() < dt * 50 then
+    if love.math.random() < dt * 70 then
       effects.particle(w.x, w.y - 2, (love.math.random() - 0.5) * 40, -40 - love.math.random() * 60, 0.4, { 0.85, 0.65, 0.42 }, 300)
+    end
+    if love.math.random() < dt * 40 then
+      effects.particle(w.x, w.y - 4, -w.dir * 20 + (love.math.random() - 0.5) * 30, -30 - love.math.random() * 70, 0.35, { 1, 0.7, 0.3 }, 0, true)
     end
     if w.life <= 0 or blocked then
       table.remove(waves, i)
@@ -621,227 +1004,67 @@ local function poly(c, a, ...)
   love.graphics.polygon("fill", ...)
 end
 
-local function chain(x0, y0, x1, y1)
-  local d = hypot(x1 - x0, y1 - y0)
-  local n = math.max(1, math.floor(d / 7))
-  for i = 1, n - 1 do
-    local t = i / n
-    local x, y = x0 + (x1 - x0) * t, y0 + (y1 - y0) * t + math.sin(t * math.pi) * 3
-    love.graphics.setColor(M.deep[1], M.deep[2], M.deep[3])
-    love.graphics.rectangle("fill", math.floor(x) - 1, math.floor(y) - 1, 4, 3)
-    love.graphics.setColor(M.gold[1] * 0.7, M.gold[2] * 0.7, M.gold[3] * 0.5)
-    love.graphics.rectangle("fill", math.floor(x), math.floor(y) - 1, 2, 1)
-  end
-end
-
 local function crystal(x, y, w, h, tilt, col)
   poly(col, 1, x - w / 2, y, x + w / 2, y, x + tilt, y - h)
   poly({ math.min(1, col[1] + 0.25), math.min(1, col[2] + 0.25), math.min(1, col[3] + 0.2) }, 1, x - w / 2, y, x, y, x + tilt, y - h)
 end
 
--- A fist: a block of marble with three claw-fingers and a gold band
-local function fist(x, y, f, flash, open, scale)
-  scale = scale or 1
-  local function C(c)
-    return flash and { 1, 1, 1 } or c
-  end
-  love.graphics.push()
-  love.graphics.translate(x, y)
-  love.graphics.scale(f * scale, scale)
-  poly(C(M.dark), 1, -14, -12, 12, -14, 16, 8, -10, 14)
-  poly(C(M.mid), 1, -14, -12, 12, -14, 10, -4, -12, -2)
-  poly(C(M.deep), 1, 12, -14, 16, 8, 10, 6)
-  poly(C(M.gold), 1, -12, 0, 14, -1, 14, 3, -12, 4)
-  for i = 0, 2 do
-    local fy = -9 + i * 9
-    local spread = open and 6 or 0
-    poly(C(M.rust), 1, 14, fy, 28, fy + 6 + (i - 1) * spread, 24, fy + 10 + (i - 1) * spread, 13, fy + 7)
-    poly(C(M.light), 1, 24, fy + 8 + (i - 1) * spread, 30, fy + 14 + (i - 1) * spread, 25, fy + 10 + (i - 1) * spread)
-  end
-  love.graphics.pop()
-end
-
-local function pose(e)
-  -- Where the fists are, in the torso's frame (x forward), and how far the body drops
-  local gs, sub = e.gs, e.sub
-  local k = 0
-  if e.gt and e.gd and e.gd > 0 then
-    k = 1 - math.max(0, e.gt) / e.gd
-  end
-  local p = { fx = 62, fy = 46, bx = -58, by = 40, drop = 0, open = false }
-  local sway = math.sin(e.phase * 2) * 3
-  p.fy, p.by = p.fy + sway, p.by - sway
-  if gs == "swipe" then
-    if sub == "wind" then
-      p.fx, p.fy = -50 + k * 20, -20 - k * 10
-    elseif sub == "act" then
-      p.fx, p.fy = -30 + k * 150, 0 + k * 10
-      p.open = true
-    else
-      p.fx, p.fy = 100 - k * 40, 10 + k * 30
-    end
-  elseif gs == "stomp" then
-    if sub == "wind" then
-      p.fx, p.fy, p.bx, p.by = 50, -90 * k - 20, -50, -90 * k - 20
-    elseif sub == "act" then
-      p.fx, p.fy, p.bx, p.by = 60, 80, -60, 80
-      p.drop = 8
-    else
-      p.fx, p.fy, p.bx, p.by = 60, 78 - k * 30, -60, 78 - k * 30
-      p.drop = 8 * (1 - k)
-    end
-  elseif gs == "throw" then
-    if sub == "wind" then
-      p.fx, p.fy = 40 - k * 20, -70 - k * 20
-    else
-      p.fx, p.fy = 70, -60 + k * 60
-    end
-  elseif gs == "beam" then
-    p.fx, p.fy, p.bx, p.by = 96, 20, -96, 20
-    p.open = true
-  elseif gs == "leap" then
-    if sub == "wind" then
-      p.fx, p.fy, p.bx, p.by = 70, 70, -70, 70
-      p.drop = 24 * k
-    elseif e.leapAir then
-      p.fx, p.fy, p.bx, p.by = 60, -80, -60, -80
-    else
-      p.fx, p.fy, p.bx, p.by = 66, 82, -66, 82
-      p.drop = 10
-    end
-  elseif gs == "shell" then
-    p.fx, p.fy, p.bx, p.by = 40, 70, -40, 70
-    p.drop = 40
-  elseif gs == "rest" then
-    p.fx, p.fy, p.bx, p.by = 50, 86, -50, 86
-    p.drop = 28
-  elseif gs == "rise" then
-    p.fx, p.fy, p.bx, p.by = 40, 86, -40, 86
-    p.drop = 40 * (e.gt and math.max(0, e.gt) / 2.6 or 0)
-  end
-  return p
-end
+-- The body is src.colossusfig's figure, drawn each frame into a canvas at 1:1, outlined by a shader
+-- (so every part shares one pixel size) and mirrored to face the hunter.
+local figCanvas, figShader
 
 local function drawGolem(e)
-  if not e.headPos then
-    -- (a portrait, not in the fight: the head where it floats when it stands at rest)
-    local cx = e.body.x + e.body.w / 2
-    local f = e.facing or 1
-    local hx, hy = cx + f * 6 * S, e.body.y + 34 * S
-    e.headPos = { hx, hy }
-    e.eyeX, e.eyeY = hx + f * 15 * S, hy + 2 * S
+  if not figCanvas then
+    figCanvas = love.graphics.newCanvas(fig.W, fig.H)
+    figCanvas:setFilter("nearest", "nearest")
+    figShader = love.graphics.newShader(fig.outlineShaderCode)
+    figShader:send("texel", { 1 / fig.W, 1 / fig.H })
   end
-  local rb = e.body
-  local rcx, rground = rb.x + rb.w / 2, rb.y + rb.h
-  -- (drawn at full size in a frame scaled about its feet)
-  local b = { x = rcx - 56, y = rground - 168, w = 112, h = 168 }
-  love.graphics.push()
-  love.graphics.translate(rcx, rground)
-  love.graphics.scale(S)
-  love.graphics.translate(-rcx, -rground)
-  local cx = b.x + b.w / 2
+  local p = e.fpose or (e.altarLocked and DORMANT_POSE) or IDLE_POSE
+  local b = e.body
   local f = e.facing or 1
-  local flash = e.flash > 0
-  local t = love.timer.getTime()
-  local p = pose(e)
-  local walk = (e.grounded and math.abs(rb.vx) > 4) and math.sin(e.phase * 1.5) or 0
-  local function C(c)
-    return flash and { 1, 1, 1 } or c
+  if not e.eyeX then
+    -- (a portrait, not in the fight)
+    local eox, eoy = fig.eyeOffset(p)
+    e.eyeX, e.eyeY = b.x + b.w / 2 + f * eox, b.y + b.h + eoy
   end
-  local ty = b.y + 98 + p.drop -- the torso's centre
-  local legTop = ty + 46
-  local ground = b.y + b.h
-  love.graphics.push()
-  love.graphics.translate(cx, 0)
-  love.graphics.scale(f, 1)
-  -- the back fist and its chain
-  local bsx, bsy = -30, ty - 34
-  local bfx, bfy = p.bx, ty + p.by - 34
-  chain(bsx, bsy, bfx, bfy)
-  love.graphics.push()
-  love.graphics.scale(-1, 1)
+  love.graphics.push("all")
+  love.graphics.setCanvas({ figCanvas, stencil = true })
+  love.graphics.clear(0, 0, 0, 0)
+  love.graphics.origin()
+  love.graphics.setColor(1, 1, 1)
+  if e.invuln and (p.shellG or 0) > 0.9 then
+    -- sealed: everything is clipped to the gem, so no part hangs out of it
+    local pts = fig.gemPoints(p.shellG)
+    love.graphics.stencil(function()
+      love.graphics.polygon("fill", pts)
+    end, "replace", 1)
+    love.graphics.setStencilTest("greater", 0)
+  end
+  fig.draw(p)
+  love.graphics.setStencilTest()
   love.graphics.pop()
-  fist(bfx, bfy, -1, flash, p.open, 0.95)
-  -- legs: two blocks floating under the torso, joined by chains, walking in turn
-  for side = -1, 1, 2 do
-    local lw = side * 15
-    local lift = (side == 1 and math.max(0, walk) or math.max(0, -walk)) * 8
-    local ly = ground - 38 - lift
-    if ly > legTop + 6 then
-      chain(lw, legTop - 4, lw, ly + 2)
-    end
-    poly(C(M.dark), 1, lw - 15, ly, lw + 15, ly, lw + 17, ly + 38, lw - 17, ly + 38)
-    poly(C(M.mid), 1, lw - 15, ly, lw + 15, ly, lw + 12, ly + 8, lw - 13, ly + 10)
-    poly(C(M.deep), 1, lw + 8, ly + 6, lw + 17, ly + 38, lw + 3, ly + 38)
-    poly(C(M.gold), 1, lw - 17, ly + 26, lw + 17, ly + 26, lw + 17, ly + 30, lw - 17, ly + 30)
+  local bx, gy = math.floor(b.x + b.w / 2), math.floor(b.y + b.h)
+  love.graphics.push("all")
+  love.graphics.setShader(figShader)
+  figShader:send("flash", e.flash > 0 and 0.85 or 0)
+  love.graphics.setBlendMode("alpha", "premultiplied")
+  if e.altarLocked then
+    love.graphics.setColor(0.40, 0.40, 0.46, 0.8) -- dormant: dim, almost fading into the hall
+  else
+    love.graphics.setColor(1, 1, 1)
   end
-  -- the torso: a great cracked slab, veined with gold, with crystals on the shoulders
-  poly(C(M.deep), 1, -42, ty - 46, -20, ty - 60, 20, ty - 60, 42, ty - 46, 48, ty + 4, 20, ty + 54, -20, ty + 54, -48, ty + 4)
-  poly(C(M.mid), 1, -38, ty - 44, -18, ty - 56, 18, ty - 56, 38, ty - 44, 42, ty + 2, 17, ty + 48, -17, ty + 48, -42, ty + 2)
-  poly(C(M.light), 1, -38, ty - 44, -18, ty - 56, 18, ty - 56, 38, ty - 44, 30, ty - 28, -30, ty - 28)
-  poly(C(M.dark), 1, 14, ty - 10, 42, ty + 2, 17, ty + 48, 5, ty + 42)
-  -- cracks, gold in them
-  love.graphics.setLineWidth(1)
-  local cracks = {
-    { -20, ty - 28, -8, ty - 6, -16, ty + 14, -4, ty + 38 },
-    { 12, ty - 40, 6, ty - 14, 20, ty + 6, 12, ty + 30 },
-    { -36, ty - 4, -24, ty + 4, -30, ty + 26 },
-  }
-  local vp = 0.6 + 0.3 * math.sin(t * 2 + e.phase)
-  for _, c in ipairs(cracks) do
-    love.graphics.setColor(M.deep[1], M.deep[2], M.deep[3])
-    love.graphics.line(c)
-    local gc = flash and { 1, 1, 1 } or { M.gold[1], M.gold[2], M.gold[3] }
-    love.graphics.setColor(gc[1], gc[2], gc[3], 0.8 * vp)
-    local shifted = {}
-    for i = 1, #c, 2 do
-      shifted[#shifted + 1], shifted[#shifted + 2] = c[i] + 1, c[i + 1]
-    end
-    love.graphics.line(shifted)
-  end
-  -- a gold belt, and rust stains
-  poly(C(M.gold), 1, -20, ty + 32, 20, ty + 32, 18, ty + 38, -18, ty + 38)
-  poly(C(M.rust), 0.7, -14, ty - 20, 6, ty - 22, 2, ty - 8, -10, ty - 6)
-  -- shoulder crystals, rusty orange with lit faces
-  for side = -1, 1, 2 do
-    local sxx = side * 32
-    crystal(sxx - side * 10, ty - 48, 12, 34, side * 3, C(M.rust))
-    crystal(sxx, ty - 46, 14, 46, side * 6, C(M.glow))
-    crystal(sxx + side * 10, ty - 42, 10, 26, side * 9, C(M.rust))
-  end
-  -- the front fist, last: it is what swings
-  local fsx, fsy = 34, ty - 34
-  local ffx, ffy = p.fx, ty + p.fy - 34
-  chain(fsx, fsy, ffx, ffy)
-  fist(ffx, ffy, 1, flash, p.open, 1.1)
-  love.graphics.pop()
-  -- the head floats free of the body, trailing and answering knocks
-  local hx, hy = rcx + (e.headPos[1] - rcx) / S, rground + (e.headPos[2] - rground) / S
-  love.graphics.push()
-  love.graphics.translate(hx, hy)
-  love.graphics.scale(f, 1)
-  local hv = e.invuln and 0 or 1
-  poly(C(M.deep), 1, -22, -4, -14, -22, 14, -22, 24, -4, 22, 16, 8, 24, -10, 24, -22, 14)
-  poly(C(M.mid), 1, -20, -4, -12, -20, 12, -20, 22, -4, 20, 12, 6, 20, -8, 20, -20, 10)
-  poly(C(M.light), 1, -20, -4, -12, -20, 12, -20, 10, -10, -10, -10)
-  poly(C(M.dark), 1, 6, 6, 20, 12, 6, 20, -2, 14)
-  -- a crown of gold and crystal horns
-  poly(C(M.gold), 1, -16, -20, 16, -20, 14, -15, -14, -15)
-  crystal(-10, -20, 8, 20, -3, C(M.rust))
-  crystal(0, -20, 9, 28, 0, C(M.glow))
-  crystal(10, -20, 8, 20, 3, C(M.rust))
-  -- the brow and a heavy jaw
-  poly(C(M.deep), 1, 0, -2, 22, -4, 22, 2, 0, 3)
+  love.graphics.draw(figCanvas, bx, gy, 0, f, 1, fig.CX, fig.G)
   love.graphics.pop()
   -- the crystal shell, when it kneels
-  if e.invuln then
-    local pulse = 0.7 + 0.2 * math.sin(t * 5)
-    love.graphics.setColor(1, 0.65, 0.25, 0.3 * pulse)
-    love.graphics.polygon("fill", cx - 66, ground, cx - 52, b.y + 60, cx - 20, b.y + 32, cx + 20, b.y + 32, cx + 52, b.y + 60, cx + 66, ground)
-    love.graphics.setColor(1, 0.85, 0.5, 0.7 * pulse)
-    love.graphics.polygon("line", cx - 66, ground, cx - 52, b.y + 60, cx - 20, b.y + 32, cx + 20, b.y + 32, cx + 52, b.y + 60, cx + 66, ground)
+  if e.invuln and e.gs == "shell" then
+    love.graphics.push()
+    love.graphics.translate(bx, gy)
+    love.graphics.scale(f, 1)
+    love.graphics.translate(-fig.CX, -fig.G)
+    fig.shell(love.timer.getTime(), p.shellG)
+    love.graphics.pop()
   end
-  love.graphics.pop()
 end
 
 local function drawGolemGlow(e)
@@ -850,33 +1073,33 @@ local function drawGolemGlow(e)
     return
   end
   local ex, ey = e.eyeX, e.eyeY
-  local rise = e.gs == "rise" and e.gt and e.gt > 1.4
+  local p = e.fpose
+  local f = e.facing or 1
+  local asleep = p and p.dead
   local charging = e.bm and e.bm.phase == "wind"
   local pulse = 0.7 + 0.3 * math.sin(t * (charging and 30 or 5))
-  if not rise then
-    local s = charging and 7 + 6 * (e.charge or 0) or 5
-    love.graphics.setColor(1, 0.5, 0.15, 0.35 * pulse)
-    love.graphics.rectangle("fill", math.floor(ex - s), math.floor(ey - s), s * 2 + 1, s * 2 + 1)
-    love.graphics.setColor(1, 0.75, 0.3, pulse)
-    love.graphics.rectangle("fill", math.floor(ex - 2), math.floor(ey - 2), 5, 5)
-    love.graphics.setColor(1, 1, 0.85)
-    love.graphics.rectangle("fill", math.floor(ex), math.floor(ey), 1, 1)
-    -- the other eye, behind
-    love.graphics.setColor(1, 0.55, 0.2, 0.7 * pulse)
-    love.graphics.rectangle("fill", math.floor(ex - (e.facing or 1) * 14 - 1), math.floor(ey - 1), 3, 3)
-  end
-  -- gold in the cracks glows brighter as it winds up
-  if e.gs ~= "rise" then
-    local b = e.body
-    local cx = b.x + b.w / 2
-    local vp = (0.25 + 0.2 * math.sin(t * 2.2)) + (e.sub == "wind" and 0.3 or 0)
-    love.graphics.setColor(1, 0.7, 0.25, vp * (e.invuln and 0.5 or 1))
-    for k = 0, 9 do
-      local vx = cx + (k - 4.5) * 8 * S
-      local vy = b.y + (80 + (k * 37 % 50)) * S
-      love.graphics.rectangle("fill", math.floor(vx), math.floor(vy), 3, 2)
+  love.graphics.setBlendMode("add")
+  if not asleep then
+    -- the eye: a soft bloom, a hot core, and a crisp spark
+    local rad = (charging and 16 + 16 * (e.charge or 0) or 15) * (0.9 + 0.1 * pulse)
+    fig.glow(ex, ey, rad, 1, 0.5, 0.15, 0.5 * pulse)
+    fig.glow(ex, ey, rad * 0.42, 1, 0.8, 0.4, 0.8)
+    love.graphics.setBlendMode("alpha")
+    love.graphics.setColor(1, 0.95, 0.75, pulse)
+    love.graphics.rectangle("fill", math.floor(ex), math.floor(ey - 1), 1, 3)
+    love.graphics.setBlendMode("add")
+    -- the heart stone, in its dark plane, glows brighter as it winds up
+    if p then
+      local b = e.body
+      local hx, hy = fig.heartOffset(p)
+      local x, y = b.x + b.w / 2 + f * hx, b.y + b.h + hy
+      local vp = (0.45 + 0.2 * math.sin(t * 2.2)) + (e.sub == "wind" and 0.35 or 0)
+      local k = vp * (e.invuln and 0.5 or 1)
+      fig.glow(x, y, 17, 1, 0.65, 0.2, 0.5 * k)
+      fig.glow(x, y, 7, 1, 0.9, 0.5, 0.7 * k)
     end
   end
+  love.graphics.setBlendMode("alpha")
   if charging and e.bm.a0 then
     for _, ang in ipairs({ e.bm.a0, e.bm.a1 }) do
       for d = 14, 560, 9 do
@@ -889,77 +1112,121 @@ local function drawGolemGlow(e)
   end
   if e.beamEnd then
     local x1, y1 = e.beamEnd[1], e.beamEnd[2]
-    local len = hypot(x1 - ex, y1 - ey)
-    for d = 0, len, 2 do
-      local f = d / len
-      local x, y = ex + (x1 - ex) * f, ey + (y1 - ey) * f
-      love.graphics.setColor(1, 0.45, 0.1, 0.35)
-      love.graphics.rectangle("fill", math.floor(x) - 4, math.floor(y) - 4, 9, 9)
-      love.graphics.setColor(1, 0.8, 0.4, 0.85)
-      love.graphics.rectangle("fill", math.floor(x) - 1, math.floor(y) - 1, 3, 3)
-      love.graphics.setColor(1, 1, 0.9)
-      love.graphics.rectangle("fill", math.floor(x), math.floor(y), 1, 1)
+    local len = math.max(1, hypot(x1 - ex, y1 - ey))
+    local dx, dy = (x1 - ex) / len, (y1 - ey) / len
+    local nx, ny = -dy, dx
+    local flick = 1 + 0.12 * math.sin(t * 45) + 0.08 * math.sin(t * 23 + 1)
+    local function band(w, r, g, b, a)
+      love.graphics.setColor(r, g, b, a)
+      love.graphics.polygon("fill", ex + nx * w, ey + ny * w, x1 + nx * w, y1 + ny * w, x1 - nx * w, y1 - ny * w, ex - nx * w, ey - ny * w)
     end
-    love.graphics.setColor(1, 0.85, 0.5, 0.7)
-    love.graphics.rectangle("fill", math.floor(x1) - 5, math.floor(y1) - 5, 11, 11)
+    love.graphics.setBlendMode("add")
+    band(9 * flick, 1, 0.38, 0.08, 0.12)
+    band(6 * flick, 1, 0.5, 0.12, 0.2)
+    band(3.6 * flick, 1, 0.7, 0.25, 0.45)
+    band(1.8 * flick, 1, 0.92, 0.6, 0.8)
+    band(0.8, 1, 1, 0.95, 1)
+    -- bloom along its length, and pulses racing out of the eye
+    for d = 0, len, 26 do
+      fig.glow(ex + dx * d, ey + dy * d, 15, 1, 0.5, 0.15, 0.16)
+    end
+    local off = (t * 260) % 22
+    for d = off, len, 22 do
+      fig.glow(ex + dx * d, ey + dy * d, 5, 1, 0.95, 0.7, 0.7)
+    end
+    -- where it burns: a big bloom, a white-hot core
+    fig.glow(x1, y1, 30 * flick, 1, 0.5, 0.12, 0.55)
+    fig.glow(x1, y1, 13 * flick, 1, 0.9, 0.55, 0.9)
+    fig.glow(ex, ey, 18, 1, 0.6, 0.2, 0.5)
+    love.graphics.setBlendMode("alpha")
   end
 end
 
--- The golemlings: small, rust and gold, with crystal spines; arms thrown up as they fall
+-- The golemlings: a gem for a body and two bits of marble for legs (src.colossusfig), drawn into a small
+-- canvas and outlined like their master
+local miniCanvas, miniShader
+
 local function drawMini(e)
+  if not miniCanvas then
+    miniCanvas = love.graphics.newCanvas(fig.MW, fig.MH)
+    miniCanvas:setFilter("nearest", "nearest")
+    miniShader = love.graphics.newShader(fig.plainShaderCode)
+  end
   local b = e.body
-  local x, y = math.floor(b.x), math.floor(b.y)
   local f = e.facing or 1
-  local flash = e.flash > 0
-  local function C(c)
-    return flash and { 1, 1, 1 } or c
-  end
   local air = not e.grounded
-  local w = e.grounded and math.abs(b.vx) > 4 and math.sin(e.phase * 1.5) or 0
-  local strike = (e.strikeT or 0) > 0
-  love.graphics.push()
-  love.graphics.translate(x + 7, y)
-  love.graphics.scale(f, 1)
-  -- legs
-  poly(C(M.dark), 1, -5, 13, -1, 13, -1, 20 - math.max(0, w) * 2, -5, 20 - math.max(0, w) * 2)
-  poly(C(M.dark), 1, 1, 13, 5, 13, 5, 20 - math.max(0, -w) * 2, 1, 20 - math.max(0, -w) * 2)
-  -- body
-  poly(C(M.mid), 1, -6, 6, -3, 4, 4, 4, 7, 7, 6, 14, -5, 14)
-  poly(C(M.light), 1, -6, 6, -3, 4, 4, 4, 5, 6, -5, 8)
-  poly(C(M.gold), 1, -5, 11, 6, 11, 6, 13, -5, 13)
-  -- crystal spines
-  crystal(-3, 5, 4, 7, -1, C(M.rust))
-  crystal(1, 4, 4, 9, 0, C(M.glow))
-  -- the head, a block with two orange eyes
-  poly(C(M.mid), 1, -4, 0, 4, 0, 5, 6, -3, 6)
-  poly(C(M.light), 1, -4, 0, 4, 0, 3, 2, -3, 2)
-  -- arms: up as it drops in, forward when it strikes
-  if air and e.falling then
-    poly(C(M.dark), 1, 5, 6, 7, 6, 8, -3, 6, -3)
-    poly(C(M.dark), 1, -6, 6, -8, 6, -9, -3, -7, -3)
-  elseif strike then
-    poly(C(M.rust), 1, 5, 6, 14, 5, 15, 9, 5, 9)
-    poly(C(M.light), 1, 13, 5, 16, 6, 15, 9, 13, 8)
-  else
-    poly(C(M.dark), 1, 5, 7, 8, 7, 8, 14 + w, 6, 14 + w)
-  end
+  love.graphics.push("all")
+  love.graphics.setCanvas(miniCanvas)
+  love.graphics.clear(0, 0, 0, 0)
+  love.graphics.origin()
+  love.graphics.setColor(1, 1, 1)
+  fig.drawMini({ ph = e.phase * 1.5, moving = e.grounded and math.abs(b.vx) > 4, air = air, falling = air and e.falling, strike = (e.strikeT or 0) > 0, trip = e.trip and e.trip.t / e.trip.dur, t = love.timer.getTime() })
+  love.graphics.pop()
+  love.graphics.push("all")
+  love.graphics.setShader(miniShader)
+  miniShader:send("flash", e.flash > 0 and 0.85 or 0)
+  love.graphics.setBlendMode("alpha", "premultiplied")
+  love.graphics.setColor(1, 1, 1)
+  love.graphics.draw(miniCanvas, math.floor(b.x + b.w / 2), math.floor(b.y + b.h), 0, f, 1, fig.MW / 2 - 8, fig.MG)
   love.graphics.pop()
 end
 
 local function drawMiniGlow(e)
+  if e.trip and e.trip.t / e.trip.dur > 0.12 and e.trip.t / e.trip.dur < 0.85 then
+    return -- (its face is in the dirt)
+  end
   local b = e.body
   local f = e.facing or 1
-  local x, y = math.floor(b.x) + 7, math.floor(b.y)
-  love.graphics.setColor(1, 0.6, 0.15, 0.95)
-  love.graphics.rectangle("fill", x + f * 2 - 1, y + 2, 2, 1)
-  love.graphics.rectangle("fill", x - f * 2 - 1, y + 2, 2, 1)
+  local x, y = math.floor(b.x + b.w / 2) + f * fig.miniEye[1], math.floor(b.y + b.h) + fig.miniEye[2]
   love.graphics.setColor(1, 0.55, 0.2, 0.4)
-  love.graphics.rectangle("fill", x + f * 2 - 2, y + 1, 4, 3)
+  love.graphics.rectangle("fill", x - 3, y - 3, 6, 7)
+  love.graphics.setColor(1, 0.7, 0.2, 0.95)
+  love.graphics.rectangle("fill", x - 1, y - 2, 2, 4)
 end
 
 -- Hooks into the enemy loop -----------------------------------------------------------------------------
 
 enemies.UPDATE.golem = updateGolem
+-- A golemling now and then trips over its own feet: it pitches forward, slides, falls, lies dazed, gets up
+local baseMiniUpdate = enemies.UPDATE.minigolem
+enemies.UPDATE.minigolem = function(e, dt, world, player, px, py)
+  local b = e.body
+  local tr = e.trip
+  if tr then
+    local collide = collider(e, world)
+    tr.t = tr.t + dt
+    b.vx = b.vx * math.max(0, 1 - 3.2 * dt) -- (still sliding on, slowing)
+    b.vy = math.min(b.vy + config.gravity * dt, 450)
+    if Body.moveX(b, collide, b.vx * dt, 4) then
+      b.vx = 0
+    end
+    if Body.moveY(b, collide, b.vy * dt) then
+      b.vy = 0
+    end
+    e.grounded = Body.isGrounded(b, collide) and b.vy >= 0
+    if not tr.landed and tr.t > 0.3 then
+      tr.landed = true
+      sfx("hit", 0.4, 1.3)
+      for _ = 1, 5 do
+        effects.particle(b.x + b.w / 2 + (e.facing or 1) * 8, b.y + b.h - 2, (love.math.random() - 0.5) * 50, -20 - love.math.random() * 30, 0.4, { 0.85, 0.7, 0.5 }, 200)
+      end
+    end
+    if tr.t >= tr.dur then
+      e.trip = nil
+      e.tripCd = 3 + love.math.random() * 3
+    end
+    return
+  end
+  e.tripCd = (e.tripCd or (1 + love.math.random() * 3)) - dt
+  if e.tripCd <= 0 and e.state == "chase" and e.grounded and not e.falling and (e.strikeT or 0) <= 0 and math.abs(b.vx) > 40 and love.math.random() < dt * 0.4 then
+    e.trip = { t = 0, dur = 1.15 }
+    b.vx = (e.facing or 1) * 75
+    sfx("clank", 0.4, 1.4)
+    return
+  end
+  return baseMiniUpdate(e, dt, world, player, px, py)
+end
+
 enemies.DRAW.golem = drawGolem
 enemies.GLOW.golem = drawGolemGlow
 enemies.DRAW.minigolem = drawMini
@@ -995,6 +1262,7 @@ enemies.afterDraw = function(view)
     love.graphics.push()
     love.graphics.translate(x, y)
     love.graphics.rotate(s.spin)
+    love.graphics.scale(1.5)
     love.graphics.setColor(M.dark[1], M.dark[2], M.dark[3])
     love.graphics.polygon("fill", -6, -3, -2, -7, 5, -5, 7, 1, 3, 6, -4, 5)
     love.graphics.setColor(M.mid[1], M.mid[2], M.mid[3])
@@ -1007,14 +1275,53 @@ enemies.afterDraw = function(view)
   end
   for _, w in ipairs(waves) do
     local fade = math.min(1, w.life * 2)
-    for k = 0, 5 do
-      local h = 9 + 12 * math.abs(math.sin(k * 1.7 + w.x * 0.05))
-      local x = w.x - w.dir * k * 7
-      love.graphics.setColor(M.mid[1], M.mid[2], M.mid[3], fade)
-      love.graphics.polygon("fill", x - 5, w.y, x + 5, w.y, x, w.y - h * (1 - k * 0.12))
-      love.graphics.setColor(M.light[1], M.light[2], M.light[3], fade)
-      love.graphics.polygon("fill", x - 5, w.y, x - 1, w.y, x - 1, w.y - h * (1 - k * 0.12) + 3)
+    local d = w.dir
+    -- a crack running back along the ground behind the front, glowing where the ground is fresh
+    for k = 0, 56 do
+      local x = math.floor(w.x - d * k)
+      local a = (1 - k / 56) * fade
+      love.graphics.setColor(M.deep[1], M.deep[2], M.deep[3], 0.8 * a)
+      love.graphics.rectangle("fill", x, math.floor(w.y) - 1 + (k % 5 == 0 and 1 or 0), 1, 1)
+      if k < 36 then
+        love.graphics.setColor(M.gold[1], M.gold[2], M.gold[3], 0.75 * a)
+        love.graphics.rectangle("fill", x, math.floor(w.y) - 2, 1, 1)
+      end
     end
+    -- spikes: tall just behind the front, falling away behind it; each leans, has a lit and a shaded face and
+    -- a crystal tip
+    for k = 0, 8 do
+      local grow = k == 0 and 0.55 or math.max(0, 1 - (k - 1) * 0.125)
+      if grow > 0.04 then
+        local base = 10 + 14 * math.abs(math.sin(k * 1.7 + w.x * 0.05))
+        local h = base * grow
+        local x = math.floor(w.x - d * k * 6.5)
+        local y = math.floor(w.y)
+        local lean = ((k % 2 == 0) and 1 or -1) * 2 - d
+        local hw = 5 - math.floor(k / 5)
+        local tipx, tipy = x + lean, y - h
+        love.graphics.setColor(M.light[1], M.light[2], M.light[3], fade)
+        love.graphics.polygon("fill", x - hw, y, x, y, tipx, tipy)
+        love.graphics.setColor(M.dark[1], M.dark[2], M.dark[3], fade)
+        love.graphics.polygon("fill", x, y, x + hw, y, tipx, tipy)
+        -- the crystal tip, orange, the last third of each spike
+        local tx = 0.32
+        local mxl, mxr = tipx + (x - hw - tipx) * tx, tipx + (x + hw - tipx) * tx
+        local my = tipy + (y - tipy) * tx
+        love.graphics.setColor(M.glow[1], M.glow[2], M.glow[3], fade)
+        love.graphics.polygon("fill", mxl, my, tipx, my, tipx, tipy)
+        love.graphics.setColor(M.rust[1], M.rust[2], M.rust[3], fade)
+        love.graphics.polygon("fill", tipx, my, mxr, my, tipx, tipy)
+        love.graphics.setColor(1, 0.95, 0.7, fade)
+        love.graphics.rectangle("fill", math.floor(tipx), math.floor(tipy), 1, 1)
+        love.graphics.setColor(M.deep[1], M.deep[2], M.deep[3], fade * 0.8)
+        love.graphics.rectangle("fill", x - hw, y - 1, hw * 2 + 1, 1)
+      end
+    end
+    -- the front: a flash of light where the ground splits
+    love.graphics.setBlendMode("add")
+    fig.glow(w.x, w.y - 4, 22, 1, 0.6, 0.2, 0.45 * fade)
+    fig.glow(w.x, w.y - 3, 9, 1, 0.9, 0.6, 0.6 * fade)
+    love.graphics.setBlendMode("alpha")
   end
   for _, r in ipairs(rocks) do
     local shake = r.delay > 0 and math.floor(math.sin(t * 50) * (1 + (1 - r.delay / (r.wait or 1)) * 2) + 0.5) or 0

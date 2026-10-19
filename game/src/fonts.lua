@@ -1,277 +1,149 @@
--- The game's lettering: a hand-drawn pixel face in the 32-bit style, stubby
--- and refined. The letters are drawn on a wide 6x7 grid (cap height 7, x-height
--- 5, descenders two rows below the baseline), so they come out short and
--- broad, then:
---   * enlarged 2x with a pixel-art smoothing pass (EPX / Scale2x), which
---     rounds the corners and straightens the diagonals while keeping every
---     pixel hard-edged: strokes end up two pixels thick on a 14-row cap
---     height, finer than the chunky 16-bit face this replaced;
---   * shaded mostly white: bright along every upper edge and through the body,
---     easing to a pale steel blue only at the foot, with a slightly darker
---     rim on lower edges;
---   * given a two-step drop shadow, down and to the right: a deep navy pixel
---     against the letter and a fainter black one beyond it.
--- Small sizes skip the enlargement and use the 6x7 grid as it is. The glyphs
--- carry their own colours, so print them in white: tinting with another colour
--- shifts the whole face toward it (reds and greens still read, which suits
--- warnings and prices). fonts.get(px) matches the size of a vector font of that
--- pixel height, so it can replace love.graphics.newFont. fonts.rule draws the
--- ornamental divider used under titles.
 local fonts = {}
 
-local CAP = 7 -- cap height in grid rows
-local SHADOW = 2 -- the drop shadow's reach, right and down, in output pixels
-local MAX_ROWS = 9 -- the tallest glyph: lower case with a descender
+-- The game's lettering: Scientifica, a 5-pixel-wide bitmap face (cap height 7, x-height 5, descenders two rows below
+-- the baseline; src/scientificadata.lua is generated from assets/fonts/scientifica-11.bdf). It is drawn white
+-- with a one-pixel dark navy drop shadow, down and to the right, so it reads on any background. The glyphs
+-- carry their own colours, so print them in white: tinting with another colour shifts the whole face toward it
+-- (reds and greens still read, which suits warnings and prices). fonts.get(px) matches the size of a vector font
+-- of that pixel height, using a whole-number enlargement of the bitmap, so it can replace love.graphics.newFont.
+-- fonts.rule draws the ornamental divider used under titles.
+local utf8 = require("utf8") -- (the LOVE framework's own)
+
+-- The three weights of the face, loaded the first time they are wanted
+local FACES = { regular = "src.scientificadata", bold = "src.scientificabold", italic = "src.scientificaitalic" }
+local DATA = {}
+
+local CAP = 7 -- cap height in rows; the text box starts at the top of the capitals
+local ROWS = 9 -- cap top to the lowest descender
+local SHADOW = 1 -- the drop shadow's reach, right and down, in glyph pixels
 
 -- Colours of the face (also used for ornaments)
 fonts.WHITE = { 0.97, 0.98, 1.0 }
 fonts.ICE = { 0.92, 0.95, 1.0 }
 fonts.STEEL = { 0.46, 0.62, 0.90 }
 
--- Glyphs: one string per row ('#' set). Capitals and digits are 7 rows; lower
--- case is 7 rows (two blank rows over the x-height) or 9 with a descender.
-local G = {
-  A = { "..##..", ".#..#.", "#....#", "######", "#....#", "#....#", "#....#" },
-  B = { "#####.", "#....#", "#....#", "#####.", "#....#", "#....#", "#####." },
-  C = { ".####.", "#....#", "#.....", "#.....", "#.....", "#....#", ".####." },
-  D = { "#####.", "#....#", "#....#", "#....#", "#....#", "#....#", "#####." },
-  E = { "######", "#.....", "#.....", "####..", "#.....", "#.....", "######" },
-  F = { "######", "#.....", "#.....", "####..", "#.....", "#.....", "#....." },
-  G = { ".####.", "#....#", "#.....", "#..###", "#....#", "#....#", ".####." },
-  H = { "#....#", "#....#", "#....#", "######", "#....#", "#....#", "#....#" },
-  I = { "#####", "..#..", "..#..", "..#..", "..#..", "..#..", "#####" },
-  J = { "...###", "....#.", "....#.", "....#.", "#...#.", "#...#.", ".###.." },
-  K = { "#...#.", "#..#..", "#.#...", "##....", "#.#...", "#..#..", "#...#." },
-  L = { "#.....", "#.....", "#.....", "#.....", "#.....", "#.....", "######" },
-  M = { "#....#", "##..##", "#.##.#", "#.##.#", "#....#", "#....#", "#....#" },
-  N = { "#....#", "##...#", "#.#..#", "#..#.#", "#...##", "#....#", "#....#" },
-  O = { ".####.", "#....#", "#....#", "#....#", "#....#", "#....#", ".####." },
-  P = { "#####.", "#....#", "#....#", "#####.", "#.....", "#.....", "#....." },
-  Q = { ".####.", "#....#", "#....#", "#....#", "#..#.#", "#...#.", ".###.#" },
-  R = { "#####.", "#....#", "#....#", "#####.", "#.#...", "#..#..", "#...##" },
-  S = { ".#####", "#.....", "#.....", ".####.", ".....#", ".....#", "#####." },
-  T = { "######", "..##..", "..##..", "..##..", "..##..", "..##..", "..##.." },
-  U = { "#....#", "#....#", "#....#", "#....#", "#....#", "#....#", ".####." },
-  V = { "#....#", "#....#", "#....#", "#....#", ".#..#.", ".#..#.", "..##.." },
-  W = { "#....#", "#....#", "#....#", "#.##.#", "#.##.#", "##..##", "#....#" },
-  X = { "#....#", ".#..#.", "..##..", "..##..", "..##..", ".#..#.", "#....#" },
-  Y = { "#....#", ".#..#.", "..##..", "..##..", "..##..", "..##..", "..##.." },
-  Z = { "######", ".....#", "....#.", "...#..", "..#...", "#.....", "######" },
-  ["0"] = { ".####.", "#....#", "#...##", "#.##.#", "##...#", "#....#", ".####." },
-  ["1"] = { "..##..", ".###..", "..##..", "..##..", "..##..", "..##..", ".####." },
-  ["2"] = { ".####.", "#....#", ".....#", "...##.", "..#...", ".#....", "######" },
-  ["3"] = { "#####.", ".....#", ".....#", "..###.", ".....#", ".....#", "#####." },
-  ["4"] = { "...##.", "..#.#.", ".#..#.", "#...#.", "######", "....#.", "....#." },
-  ["5"] = { "######", "#.....", "#####.", ".....#", ".....#", "#....#", ".####." },
-  ["6"] = { ".####.", "#.....", "#.....", "#####.", "#....#", "#....#", ".####." },
-  ["7"] = { "######", ".....#", "....#.", "...#..", "..#...", "..#...", "..#..." },
-  ["8"] = { ".####.", "#....#", "#....#", ".####.", "#....#", "#....#", ".####." },
-  ["9"] = { ".####.", "#....#", "#....#", ".#####", ".....#", ".....#", ".####." },
-  [" "] = { "..", "..", "..", "..", "..", "..", ".." },
-  ["."] = { ".", ".", ".", ".", ".", "#", "#" },
-  [","] = { "..", "..", "..", "..", ".#", ".#", "#." },
-  [":"] = { ".", "#", "#", ".", ".", "#", "#" },
-  [";"] = { "..", ".#", ".#", "..", "..", ".#", "#." },
-  ["!"] = { "#", "#", "#", "#", "#", ".", "#" },
-  ["?"] = { ".####.", "#....#", ".....#", "...##.", "..#...", "......", "..#..." },
-  ["'"] = { "#", "#", "#", ".", ".", ".", "." },
-  ['"'] = { "#.#", "#.#", "#.#", "...", "...", "...", "..." },
-  ["-"] = { "......", "......", "......", "######", "......", "......", "......" },
-  ["+"] = { "......", "..##..", "..##..", "######", "..##..", "..##..", "......" },
-  ["/"] = { ".....#", "....#.", "....#.", "...#..", "..#...", "..#...", "#....." },
-  ["%"] = { "##...#", "##..#.", "...#..", "..#...", ".#..##", "#...##", "......" },
-  ["("] = { "..#", ".#.", "#..", "#..", "#..", ".#.", "..#" },
-  [")"] = { "#..", ".#.", "..#", "..#", "..#", ".#.", "#.." },
-  ["["] = { "###", "#..", "#..", "#..", "#..", "#..", "###" },
-  ["]"] = { "###", "..#", "..#", "..#", "..#", "..#", "###" },
-  ["<"] = { "...#", "..#.", ".#..", "#...", ".#..", "..#.", "...#" },
-  [">"] = { "#...", ".#..", "..#.", "...#", "..#.", ".#..", "#..." },
-  ["="] = { "......", "......", "######", "......", "######", "......", "......" },
-  ["*"] = { "......", "#.##.#", ".####.", "######", ".####.", "#.##.#", "......" },
-  ["#"] = { ".#..#.", ".#..#.", "######", ".#..#.", "######", ".#..#.", ".#..#." },
-  ["&"] = { ".###..", "#...#.", "#..#..", ".##...", "#..#.#", "#...#.", ".###.#" },
-  ["_"] = { "......", "......", "......", "......", "......", "......", "######" },
-  ["|"] = { "#", "#", "#", "#", "#", "#", "#" },
-  ["~"] = { "......", "......", ".##..#", "#..##.", "......", "......", "......" },
-  ["@"] = { ".####.", "#....#", "#.####", "#.#..#", "#.####", "#.....", ".####." },
-  ["^"] = { "..##..", ".#..#.", "#....#", "......", "......", "......", "......" },
-  -- Lower case
-  a = { ".....", ".....", ".###.", "....#", ".####", "#...#", ".####" },
-  b = { "#....", "#....", "####.", "#...#", "#...#", "#...#", "####." },
-  c = { ".....", ".....", ".###.", "#...#", "#....", "#...#", ".###." },
-  d = { "....#", "....#", ".####", "#...#", "#...#", "#...#", ".####" },
-  e = { ".....", ".....", ".###.", "#...#", "#####", "#....", ".###." },
-  f = { "..##.", ".#...", "####.", ".#...", ".#...", ".#...", ".#..." },
-  g = { ".....", ".....", ".####", "#...#", "#...#", "#...#", ".####", "....#", ".###." },
-  h = { "#....", "#....", "####.", "#...#", "#...#", "#...#", "#...#" },
-  i = { ".", "#", ".", "#", "#", "#", "#" },
-  j = { "..", ".#", "..", ".#", ".#", ".#", ".#", ".#", "#." },
-  k = { "#....", "#....", "#..#.", "#.#..", "##...", "#.#..", "#..#." },
-  l = { "##.", ".#.", ".#.", ".#.", ".#.", ".#.", ".##" },
-  m = { ".....", ".....", "##.#.", "#.#.#", "#.#.#", "#...#", "#...#" },
-  n = { ".....", ".....", "####.", "#...#", "#...#", "#...#", "#...#" },
-  o = { ".....", ".....", ".###.", "#...#", "#...#", "#...#", ".###." },
-  p = { ".....", ".....", "####.", "#...#", "#...#", "#...#", "####.", "#....", "#...." },
-  q = { ".....", ".....", ".####", "#...#", "#...#", "#...#", ".####", "....#", "....#" },
-  r = { ".....", ".....", "#.##.", "##..#", "#....", "#....", "#...." },
-  s = { ".....", ".....", ".####", "#....", ".###.", "....#", "####." },
-  t = { ".#...", ".#...", "####.", ".#...", ".#...", ".#..#", "..##." },
-  u = { ".....", ".....", "#...#", "#...#", "#...#", "#..##", ".##.#" },
-  v = { ".....", ".....", "#...#", "#...#", "#...#", ".#.#.", "..#.." },
-  w = { ".....", ".....", "#...#", "#...#", "#.#.#", "#.#.#", ".#.#." },
-  x = { ".....", ".....", "#...#", ".#.#.", "..#..", ".#.#.", "#...#" },
-  y = { ".....", ".....", "#...#", "#...#", "#...#", ".####", "....#", "....#", ".###." },
-  z = { ".....", ".....", "#####", "...#.", "..#..", ".#...", "#####" },
-}
-
--- What is printed: capitals, digits and punctuation, then lower case
-local ORDER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,:;!?'\"-+/%()[]<>=*#&_|~@^"
-local LOWER = "abcdefghijklmnopqrstuvwxyz"
-
 local cache = {}
+local info = setmetatable({}, { __mode = "k" }) -- font -> { k, style, plain }
 
--- The face's colours: t = 0 at the top of a letter, 1 at its foot
-local function bodyColor(t)
-  if t < 0.6 then
-    local k = t / 0.6
-    return 1.0 + (0.94 - 1.0) * k, 1.0 + (0.97 - 1.0) * k, 1.0
+-- Builds the image font with every pixel k times as big. plain = no drop shadow (for dark text on a light
+-- ground, where the shadow only thickens the strokes until the letters run together).
+local function build(style, k, plain)
+  DATA[style] = DATA[style] or require(FACES[style])
+  local data = DATA[style]
+  local shadow = plain and 0 or SHADOW
+  local lift = style == "italic" and 1 or 0 -- (the slanted capitals stand a row above the cap line)
+  local codes = {}
+  for code in pairs(data) do
+    codes[#codes + 1] = code
   end
-  local k = (t - 0.6) / 0.4
-  return 0.94 + (0.66 - 0.94) * k, 0.97 + (0.78 - 0.97) * k, 1.0 + (0.95 - 1.0) * k
-end
-
--- A glyph's strings as a boolean grid grid[y][x] (1-based)
-local function parse(rows)
-  local grid = {}
-  for y, line in ipairs(rows) do
-    grid[y] = {}
-    for x = 1, #line do
-      grid[y][x] = line:sub(x, x) == "#"
-    end
+  table.sort(codes)
+  local cellRows = ROWS + lift + shadow
+  local cellH = cellRows * k
+  -- A glyph that leans out to the left of its cell (a negative offset) is moved right to sit inside it
+  local function span(g)
+    return math.max(g[1], math.max(0, -g[4]) + g[4] + g[2])
   end
-  return grid, #rows[1], #rows
-end
-
--- Scale2x (EPX): each pixel becomes four, and a pixel at a diagonal corner
--- takes its neighbour's colour, so corners round off and diagonals smooth
--- while every pixel stays hard-edged
-local function epx(grid, w, h)
-  local function at(x, y)
-    return grid[y] and grid[y][x] or false
+  local total = 1
+  for _, code in ipairs(codes) do
+    total = total + (span(data[code]) + shadow) * k + 1
   end
-  local out = {}
-  for y = 1, h * 2 do
-    out[y] = {}
-  end
-  for y = 1, h do
-    for x = 1, w do
-      local p, a, b, c, d = at(x, y), at(x, y - 1), at(x + 1, y), at(x - 1, y), at(x, y + 1)
-      local p1, p2, p3, p4 = p, p, p, p
-      if c == a and c ~= d and a ~= b then
-        p1 = a
-      end
-      if a == b and a ~= c and b ~= d then
-        p2 = b
-      end
-      if d == c and d ~= b and c ~= a then
-        p3 = c
-      end
-      if b == d and b ~= a and d ~= c then
-        p4 = d
-      end
-      out[2 * y - 1][2 * x - 1], out[2 * y - 1][2 * x] = p1, p2
-      out[2 * y][2 * x - 1], out[2 * y][2 * x] = p3, p4
-    end
-  end
-  return out, w * 2, h * 2
-end
-
--- Builds the image font: s = 1 uses the grid as it is, s = 2 enlarges it with
--- EPX; k scales every pixel up by a whole number
-local function build(s, k)
-  local list = {}
-  for i = 1, #ORDER do
-    list[#list + 1] = ORDER:sub(i, i)
-  end
-  for i = 1, #LOWER do
-    list[#list + 1] = LOWER:sub(i, i)
-  end
-  local capRows = CAP * s
-  local cellRows = MAX_ROWS * s + SHADOW
-  local glyphs, total = {}, 1
-  for i, ch in ipairs(list) do
-    local grid, w, h = parse(G[ch])
-    if s == 2 then
-      grid, w, h = epx(grid, w, h)
-    end
-    glyphs[i] = { grid = grid, w = w, h = h, cell = (ch == " " and 4 * s or w + SHADOW) * k }
-    total = total + glyphs[i].cell + 1
-  end
-  local img = love.image.newImageData(total, cellRows * k)
-  for y = 0, cellRows * k - 1 do
+  local img = love.image.newImageData(total, cellH)
+  for y = 0, cellH - 1 do
     img:setPixel(0, y, 1, 0, 1, 1) -- separator
   end
+  local chars = {}
   local x0 = 1
-  for i = 1, #list do
-    local g = glyphs[i]
-    for y = 0, cellRows * k - 1 do
-      img:setPixel(x0 + g.cell, y, 1, 0, 1, 1)
+  for _, code in ipairs(codes) do
+    local g = data[code]
+    local adv, w, h, xo, yo, bits = g[1], g[2], g[3], g[4], g[5], g[6]
+    local cols = span(g) + shadow
+    local cellW = cols * k
+    chars[#chars + 1] = utf8.char(code)
+    for y = 0, cellH - 1 do
+      img:setPixel(x0 + cellW, y, 1, 0, 1, 1)
     end
-    local function on(gx, gy)
-      return gx >= 1 and gy >= 1 and gx <= g.w and gy <= g.h and g.grid[gy][gx]
-    end
-    for gy = 1, cellRows do
-      for gx = 1, g.w + SHADOW do
-        local r, gr, b, a
-        if on(gx, gy) then
-          r, gr, b = bodyColor(math.min(1, (gy - 1) / (capRows - 1)))
-          if not on(gx, gy - 1) then
-            r, gr, b = 1, 1, 1 -- lit top edge
-          end
-          if not on(gx, gy + 1) or not on(gx + 1, gy) then
-            r, gr, b = r * 0.78, gr * 0.84, b * 0.94 -- a slightly darker rim below and to the right
-          end
-          a = 1
-        elseif on(gx - 1, gy - 1) or on(gx - 1, gy) or on(gx, gy - 1) then
-          r, gr, b, a = 0.04, 0.06, 0.18, 1 -- the shadow against the letter
-        elseif on(gx - 2, gy - 2) or on(gx - 2, gy - 1) or on(gx - 1, gy - 2) then
-          r, gr, b, a = 0, 0, 0, 0.5 -- and the fainter one beyond it
-        end
-        if a then
-          for dy = 0, k - 1 do
-            for dx = 0, k - 1 do
-              img:setPixel(x0 + (gx - 1) * k + dx, (gy - 1) * k + dy, r, gr, b, a)
-            end
-          end
+    -- the glyph's pixels (gx, gy in glyph pixels, from the cell's top-left)
+    local top = CAP - (yo + h) + lift
+    local left = xo + math.max(0, -xo)
+    local on = {}
+    for r = 1, h do
+      local byte = bits[r]
+      for c = 0, w - 1 do
+        if math.floor(byte / 2 ^ (7 - c)) % 2 == 1 then
+          on[(top + r - 1) * 64 + (left + c)] = true
         end
       end
     end
-    x0 = x0 + g.cell + 1
+    local function at(gx, gy)
+      return on[gy * 64 + gx]
+    end
+    local function put(gx, gy, r, g2, b, a)
+      if gx < 0 or gy < 0 or gx >= cols or gy >= cellRows then
+        return
+      end
+      for dy = 0, k - 1 do
+        for dx = 0, k - 1 do
+          img:setPixel(x0 + gx * k + dx, gy * k + dy, r, g2, b, a)
+        end
+      end
+    end
+    for gy = 0, cellRows - 1 do
+      for gx = 0, cols - 1 do
+        if at(gx, gy) then
+          put(gx, gy, 1, 1, 1, 1)
+        elseif not plain and (at(gx - 1, gy - 1) or at(gx - 1, gy) or at(gx, gy - 1)) then
+          put(gx, gy, 0.04, 0.06, 0.18, 1) -- the shadow against the letter
+        end
+      end
+    end
+    x0 = x0 + cellW + 1
   end
-  local font = love.graphics.newImageFont(img, table.concat(list))
+  local font = love.graphics.newImageFont(img, table.concat(chars))
   font:setFilter("nearest", "nearest")
-  font:setLineHeight(1.25) -- room between wrapped lines for the shadow
+  font:setLineHeight(plain and 1.35 or 1.2) -- room between wrapped lines
+  info[font] = { k = k, style = style, plain = plain }
   return font
 end
 
--- Which build suits a vector font of px pixels: small sizes use the 6x7 grid
--- as it is, larger ones the smoothed 2x grid, each at a whole-number scale
-local function sizeFor(px)
-  local cap = px * 0.72
-  if cap < 11 then
-    return 1, math.max(1, math.floor(cap / CAP + 0.5))
-  end
-  return 2, math.max(1, math.floor(cap / (CAP * 2) + 0.5))
-end
-
--- A font about as tall as a vector font of px pixels
-function fonts.get(px)
-  local s, k = sizeFor(px)
-  local key = s * 100 + k
+local function variant(style, k, plain)
+  local key = (style or "regular") .. k .. (plain and "p" or "")
   if not cache[key] then
-    cache[key] = build(s, k)
+    cache[key] = build(style or "regular", k, plain)
   end
   return cache[key]
+end
+
+-- A font about as tall as a vector font of px pixels (capitals about 0.72 of it, a whole number of bitmap
+-- pixels each). style: nil (regular), "bold" or "italic"
+function fonts.get(px, style)
+  return variant(style, math.max(1, math.floor(px * 0.72 / CAP + 0.5)))
+end
+
+-- The same, without the drop shadow
+function fonts.plain(px, style)
+  return variant(style, math.max(1, math.floor(px * 0.72 / CAP + 0.5)), true)
+end
+
+-- Where the ink of one character sits in a font this module made: x, y offset of its top-left from the
+-- point it is printed at, and its width and height (all in screen pixels, the drop shadow not counted), so a
+-- letter can be centred on what you see rather than on its cell
+function fonts.ink(font, ch)
+  local i = info[font]
+  local g = i and DATA[i.style] and DATA[i.style][utf8.codepoint(ch)]
+  if not g then
+    return 0, 0, font:getWidth(ch), font:getHeight()
+  end
+  local lift = i.style == "italic" and 1 or 0
+  return (g[4] + math.max(0, -g[4])) * i.k, (CAP - (g[5] + g[3]) + lift) * i.k, g[2] * i.k, g[3] * i.k
+end
+
+-- Another weight of a font this module made, at the same size (and with or without the shadow)
+function fonts.like(font, style, plain)
+  local i = info[font]
+  if not i then
+    return font
+  end
+  return variant(style or i.style, i.k, plain)
 end
 
 -- Prints name in `color`, then " [X]" with the weapon grade's letter in the

@@ -658,7 +658,16 @@ function game.update(dt)
   chests.update(dt)
   shop.update(dt, player)
   npcs.update(dt, player)
-  events.update(dt, player, playing and area or nil)
+  -- random events happen in ordinary areas only: never in a boss arena, a shop or the overworld
+  local eventArea = playing and area or nil
+  if eventArea then
+    local ex, ey = player:center()
+    local cat = require("src.scenes.catacombs")
+    if inShop or cat.inArena(ex, ey) or cat.inShop(ex, ey) then
+      eventArea = nil
+    end
+  end
+  events.update(dt, player, eventArea)
   bullets.update(dt, world)
   enemies.update(dt, world, player)
   fog.update(dt, world, player, enemies.nearby(), bullets)

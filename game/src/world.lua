@@ -291,6 +291,24 @@ function World:shownAt(x, y)
 end
 
 -- Is the pixel in a region painted on demand?
+-- Puts a pixel of decoration into the cells and onto the picture, leaving it to the lazy painting where that
+-- has not happened yet (the same rule as a repaint in the middle of play)
+function World:stampPixel(x, y, id)
+  if not self:inBounds(x, y) or self:get(x, y) ~= AIR then
+    return -- (decoration only goes into open air)
+  end
+  self:setRaw(x, y, id)
+  local tile = self:locate(x, y)
+  if tile.painting or (tile.data and (tile.lazyY or tile.y1) >= tile.y1) then
+    self:writePixel(x, y, self:colorAt(x, y, 0))
+  else
+    local from = tile.data and tile.lazyY or tile.y
+    if not (y >= from and self:lazyAt(x, y)) then
+      self:writePixel(x, y, self:colorAt(x, y, 0))
+    end
+  end
+end
+
 function World:lazyAt(x, y)
   for _, r in ipairs(self.lazy) do
     if x >= r[1] and x <= r[3] and y >= r[2] and y <= r[4] then
@@ -434,6 +452,19 @@ end
 function World:colorAt(x, y, depth)
   local def = defs[self:get(x, y)]
   if not def.solid then
+    if def.decor then
+      -- A blade of grass: painted only while the ground it stands on (or the blade below it) is still there
+      local yy = y + 1
+      while materials.decor[self:get(x, yy)] and yy < y + 8 do
+        yy = yy + 1
+      end
+      if not solid[self:get(x, yy)] then
+        self:setRaw(x, y, AIR)
+        return 0, 0, 0, 0
+      end
+      local v = (noise(x, y) - 0.5) * 2 * def.variation
+      return def.color[1] + v, def.color[2] + v, def.color[3] + v, 1
+    end
     return 0, 0, 0, 0
   end
   if def.cloud then

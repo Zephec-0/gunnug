@@ -39,6 +39,7 @@ materials.defs = {
     density = 1.5,
     color = { 0.36, 0.26, 0.22 },
     topColor = { 0.30, 0.42, 0.30 }, -- dead moss
+    grassColors = { { 0.18, 0.28, 0.16 }, { 0.30, 0.44, 0.22 }, { 0.50, 0.64, 0.30 } }, -- blades grow along its top (src.grass)
     variation = 0.07,
   },
   [2] = {
@@ -148,6 +149,7 @@ materials.defs = {
     density = 1.6,
     color = { 0.20, 0.28, 0.43 },
     topColor = { 0.24, 0.46, 0.44 }, -- a cold green moss
+    grassColors = { { 0.12, 0.30, 0.30 }, { 0.22, 0.46, 0.42 }, { 0.42, 0.68, 0.58 } },
     variation = 0.07,
   },
   -- Area 3 palette: crusted yellow sulfur rock and olive bile clay
@@ -168,6 +170,7 @@ materials.defs = {
     density = 1.6,
     color = { 0.22, 0.30, 0.12 },
     topColor = { 0.42, 0.62, 0.16 }, -- sickly green moss
+    grassColors = { { 0.24, 0.40, 0.08 }, { 0.44, 0.64, 0.14 }, { 0.72, 0.86, 0.30 } },
     variation = 0.07,
   },
   -- Grey-brown spoil dug out of the old mine (the overworld's tailings)
@@ -291,11 +294,29 @@ materials.defs[25] = {
   variation = 0.09, -- (a mottled bone that takes on the ground's colour)
 }
 
+-- Blades of grass, stamped into the terrain when an area is generated (src.grass): not solid (bullets, the hunter
+-- and the flow of water and gas pass through them), only painted, three shades of green root to tip for each
+-- material that grows grass. A blade whose ground is dug away vanishes on the next repaint (see World:colorAt).
+do
+  local nextId = 30
+  for _, id in ipairs({ 1, 12, 14 }) do
+    local d = materials.defs[id]
+    d.grassIds = {}
+    for k = 1, 3 do
+      materials.defs[nextId] = { name = "grass", solid = false, decor = true, color = d.grassColors[k], variation = 0.05 }
+      d.grassIds[k] = nextId
+      nextId = nextId + 1
+    end
+  end
+end
+
 -- Flat lookups for hot paths
 materials.solid = {}
 materials.anchored = {}
+materials.decor = {}
 for id, def in pairs(materials.defs) do
   materials.solid[id] = def.solid
+  materials.decor[id] = def.decor or false
   materials.anchored[id] = def.hardness == math.huge
 end
 

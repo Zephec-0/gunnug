@@ -320,4 +320,25 @@ for id, def in pairs(materials.defs) do
   materials.anchored[id] = def.hardness == math.huge
 end
 
+-- Decoration kits for the other areas (src.decor): three shades of a non-solid, painted-only material, made on
+-- demand by name. support = which neighbour keeps a pixel alive: "below" (stands on the ground), "above" (hangs
+-- from a ceiling) or "near" (clings to any rock beside it). One that loses its support vanishes (World:colorAt).
+local nextDecor = 40
+local kits = {}
+function materials.decorKit(name, support, colors)
+  local ids = kits[name]
+  if ids then
+    return ids
+  end
+  ids = {}
+  for k = 1, 3 do
+    materials.defs[nextDecor] = { name = name, solid = false, decor = true, support = support, color = colors[k], variation = 0.05 }
+    materials.solid[nextDecor], materials.decor[nextDecor], materials.anchored[nextDecor] = false, true, false
+    ids[k] = nextDecor
+    nextDecor = nextDecor + 1
+  end
+  kits[name] = ids
+  return ids
+end
+
 return materials

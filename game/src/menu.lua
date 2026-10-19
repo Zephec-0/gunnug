@@ -18,6 +18,7 @@ local fonts = require("src.fonts")
 local input = require("src.input")
 local meta = require("src.meta")
 local render = require("src.render")
+local titlelogo = require("src.titlelogo")
 local save = require("src.save")
 local settings = require("src.settings")
 
@@ -245,7 +246,15 @@ local function wrapped(text, x, y, width, f, color)
   return #lines * f:getHeight() * f:getLineHeight()
 end
 
+-- Rectangles that stand in the light and cast shadows: this frame's are
+-- collected as they are drawn, and last frame's are what the shadows use
+local casting, casters = {}, {}
+local function cast(x, y, w, h)
+  casting[#casting + 1] = { x = x, y = y, w = w, h = h }
+end
+
 local function panel(x, y, w, h, alpha, edge)
+  cast(x, y, w, h)
   love.graphics.setColor(0.045, 0.035, 0.065, alpha or 0.9)
   love.graphics.rectangle("fill", x, y, w, h, u, u)
   love.graphics.setLineWidth(math.max(1, u * 0.4))
@@ -270,10 +279,22 @@ local function focusFrame(x, y, w, h, color)
   love.graphics.rectangle("fill", x + w, y + h + k - t, k, t)
 end
 
+-- Trim text to fit a width, ending in ".." when it is cut
+local function fitText(font, text, maxw)
+  if font:getWidth(text) <= maxw then
+    return text
+  end
+  while #text > 1 and font:getWidth(text .. "..") > maxw do
+    text = text:sub(1, -2)
+  end
+  return text .. ".."
+end
+
 -- A button. opts: align ("left"/"center"), sub (a second, dimmer line),
 -- danger (red when focused), disabled
 local function button(id, label, x, y, w, h, onActivate, opts)
   opts = opts or {}
+  cast(x, y, w, h)
   local focused = widget({ id = id, x = x, y = y, w = w, h = h, activate = not opts.disabled and onActivate or nil })
   love.graphics.setColor(0.05, 0.04, 0.075, focused and 0.95 or 0.78)
   love.graphics.rectangle("fill", x, y, w, h, u, u)
@@ -300,12 +321,12 @@ local function button(id, label, x, y, w, h, onActivate, opts)
     end
     shadowPrint(label, lx, ty, f, color)
     if opts.sub then
-      shadowPrint(opts.sub, lx, ty + f:getHeight(), F.small, focused and WARM or FAINT)
+      shadowPrint(fitText(F.small, opts.sub, x + w - lx - 3 * u), lx, ty + f:getHeight(), F.small, focused and WARM or FAINT)
     end
   else
     printCentered(label, x + w / 2, ty, f, color)
     if opts.sub then
-      printCentered(opts.sub, x + w / 2, ty + f:getHeight(), F.small, focused and WARM or FAINT)
+      printCentered(fitText(F.small, opts.sub, w - 6 * u), x + w / 2, ty + f:getHeight(), F.small, focused and WARM or FAINT)
     end
   end
   return focused
@@ -397,6 +418,7 @@ local function tabs(idPrefix, names, current, x, y, w, h, onSelect)
     end })
     love.graphics.setColor(sel and { 0.12, 0.09, 0.15, 0.95 } or { 0.05, 0.04, 0.07, 0.8 })
     love.graphics.rectangle("fill", tx, y, tw - u, h, u, u)
+    cast(tx, y, tw - u, h)
     if sel then
       love.graphics.setColor(WARM)
       love.graphics.rectangle("fill", tx + u, y + h - math.max(1, u * 0.6), tw - 3 * u, math.max(1, u * 0.6))
@@ -412,8 +434,7 @@ end
 
 -- The title's lettering: its position in game pixels, and its font (drawn
 -- scaled up by whole game pixels, so it matches the game's pixel size)
-local TITLE_X, TITLE_Y = 36, 44
-local titleFont
+local TITLE_Y = 72
 
 local function lastProfileSlot()
   local s = settings.get("lastSlot")
@@ -442,13 +463,136 @@ local function slotSummary(i)
     return nil
   end
   local found, total = compendium.progress(p)
-  return string.format("%sSlot %d - %s - %d%% compendium", p.name and (p.name .. " - ") or "", i, save.formatTime(p.playtime), total > 0 and math.floor(found / total * 100) or 0)
+  return string.format("%sSlot %d - %s - %d%%", p.name and (p.name .. " - ") or "", i, save.formatTime(p.playtime), total > 0 and math.floor(found / total * 100) or 0)
 end
 
 local PAGES = {}
 local WASH_STEPS = 24
 local washMesh
 local DEFAULT_FOCUS = { compendium = "comp:cell:", slots = "slots:", settings = "set:tab", recap = "recap:new", name = "name:confirm", camp = "camp:up:", board = "board:", ghost = "ghost:", dialog = "dlg:" }
+
+-- The title is lit by the cursor, like a torch in the dark: the mark and the
+-- buttons brighten and warm toward it, and cast shadows away from it onto the
+-- backdrop. Shadows are drawn pixel-chunky (one canvas pixel per world pixel).
+local light = { x = nil, y = nil }
+local lightShader, glowImage, shadowCanvas
+
+local function getLightShader()
+  if lightShader == nil then
+    local ok, shader = pcall(love.graphics.newShader, [[
+      extern vec2 lightPos;
+      extern float radius;
+      extern float power;
+      vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
+        vec4 t = Texel(tex, uv) * color;
+        float d = distance(sc, lightPos) / radius;
+        float l = power / (1.0 + d * d);
+        vec3 lit = t.rgb * (0.58 + 0.95 * l * vec3(1.0, 0.82, 0.55));
+        return vec4(lit, t.a);
+      }
+    ]])
+    lightShader = ok and shader or false
+  end
+  return lightShader or nil
+end
+
+local function lightFlicker()
+  return 1 + 0.035 * math.sin(clock * 9.3) + 0.02 * math.sin(clock * 23.7 + 1)
+end
+
+-- A soft warm pool of light round the cursor, added over the backdrop
+local function drawGlow(lx, ly)
+  if not glowImage then
+    local n = 96
+    local data = love.image.newImageData(n, n)
+    for y = 0, n - 1 do
+      for x = 0, n - 1 do
+        local d = math.sqrt((x + 0.5 - n / 2) ^ 2 + (y + 0.5 - n / 2) ^ 2) / (n / 2)
+        local a = d < 1 and (1 - d) ^ 2 or 0
+        data:setPixel(x, y, 1, 1, 1, a)
+      end
+    end
+    glowImage = love.graphics.newImage(data)
+    glowImage:setFilter("linear", "linear")
+  end
+  local r = 85 * u * lightFlicker()
+  love.graphics.setBlendMode("add")
+  love.graphics.setColor(1, 0.72, 0.42, 0.42)
+  love.graphics.draw(glowImage, lx - r, ly - r, 0, 2 * r / glowImage:getWidth(), 2 * r / glowImage:getHeight())
+  love.graphics.setBlendMode("alpha")
+end
+
+-- Each caster's shadow is its shape smeared away from the light; it grows
+-- with distance. They are drawn small and scaled up (twice, offset half a
+-- pixel) so the edges are soft, and the casters' own footprints are cut out
+-- with a stencil (the buttons are translucent).
+local function drawShadows(lx, ly, logoX, logoY, logoScale)
+  local ww, wh = love.graphics.getDimensions()
+  local k = math.max(1, math.floor(render.scale + 0.5)) * 2
+  local cw, ch = math.ceil(ww / k), math.ceil(wh / k)
+  if not shadowCanvas or shadowCanvas:getWidth() ~= cw or shadowCanvas:getHeight() ~= ch then
+    shadowCanvas = love.graphics.newCanvas(cw, ch)
+    shadowCanvas:setFilter("linear", "linear")
+  end
+  local reach = 9 * u
+  local function smear(cx, cy)
+    local dx, dy = cx - lx, cy - ly
+    local d = math.sqrt(dx * dx + dy * dy) + 0.001
+    local len = reach * d / (d + 60 * u)
+    local ox, oy = dx / d * len, dy / d * len
+    return ox, oy, math.max(1, math.ceil(len / k))
+  end
+  love.graphics.push("all")
+  love.graphics.setCanvas(shadowCanvas)
+  love.graphics.clear(0, 0, 0, 0)
+  love.graphics.scale(1 / k)
+  love.graphics.setColor(0, 0, 0, 1)
+  if logoX then
+    local tw, th = titlelogo.W * logoScale, titlelogo.H * logoScale
+    local ox, oy, steps = smear(logoX + tw / 2, logoY + th / 2)
+    for i = 1, steps do
+      titlelogo.silhouette(logoX + ox * i / steps, logoY + oy * i / steps, logoScale)
+    end
+  end
+  for _, r in ipairs(casters) do
+    local ox, oy, steps = smear(r.x + r.w / 2, r.y + r.h / 2)
+    for i = 1, steps do
+      love.graphics.rectangle("fill", r.x + ox * i / steps, r.y + oy * i / steps, r.w, r.h, u, u)
+    end
+  end
+  love.graphics.pop()
+
+  love.graphics.stencil(function()
+    for _, r in ipairs(casters) do
+      love.graphics.rectangle("fill", r.x, r.y, r.w, r.h, u, u)
+    end
+  end, "replace", 1)
+  love.graphics.setStencilTest("equal", 0)
+  local a = 1 - math.sqrt(1 - 0.72)
+  love.graphics.setColor(0.01, 0.005, 0.02, a)
+  love.graphics.draw(shadowCanvas, -k / 2, -k / 2, 0, k, k)
+  love.graphics.draw(shadowCanvas, k / 2, k / 2, 0, k, k)
+  love.graphics.setStencilTest()
+end
+
+-- The page's light: a glow and shadows over its backdrop, then everything the
+-- page draws after this is lit. (logoX/logoY/logoScale: the title mark, if any)
+local function litBackdrop(logoX, logoY, logoScale)
+  love.graphics.setShader()
+  if not light.x then
+    light.x, light.y = love.mouse.getPosition()
+  end
+  local lx, ly = light.x, light.y
+  drawGlow(lx, ly)
+  drawShadows(lx, ly, logoX, logoY, logoScale)
+  local shader = getLightShader()
+  if shader then
+    shader:send("lightPos", { lx, ly })
+    shader:send("radius", 90 * u)
+    shader:send("power", lightFlicker())
+    love.graphics.setShader(shader)
+  end
+end
 
 PAGES.title = function()
   local ww, wh = love.graphics.getDimensions()
@@ -464,18 +608,17 @@ PAGES.title = function()
   love.graphics.setColor(1, 1, 1)
   love.graphics.draw(washMesh)
 
-  -- The title, over the wash, at the game's pixel size; its rule and the tag line
-  local tx, ty = render.toScreen(TITLE_X, TITLE_Y)
-  titleFont = titleFont or fonts.get(44, "bold")
-  love.graphics.setFont(titleFont)
-  love.graphics.setColor(1, 1, 1)
-  love.graphics.print("GUNNUG", math.floor(tx), math.floor(ty), 0, render.scale, render.scale)
-  local tw = titleFont and titleFont:getWidth("GUNNUG") * render.scale or 160 * u
-  local th = titleFont and titleFont:getHeight() * render.scale or 30 * u
-  rule(tx + tw / 2, ty + th + 2 * u, tw * 1.15)
-  printCentered("A hunter's descent into the catacombs", tx + tw / 2, ty + th + 6 * u, F.small, DIM)
+  -- The mark, centred over the menu column
+  local x, y, w, h, gap = X(34), Y(104), math.floor(118 * u), math.floor(13 * u), math.floor(3.5 * u)
+  local logoScale = titlelogo.PX * render.scale
+  local tw, th = titlelogo.W * logoScale, titlelogo.H * logoScale
+  local _, ty = render.toScreen(0, TITLE_Y)
+  local logoX = math.floor(x + w / 2 - tw / 2)
 
-  local x, y, w, h, gap = X(22), Y(104), math.floor(118 * u), math.floor(13 * u), math.floor(3.5 * u)
+  -- The cursor is the light
+  litBackdrop(logoX, ty, logoScale)
+  titlelogo.draw(logoX, ty, logoScale)
+
   local last = lastProfileSlot()
   if last then
     button("title:continue", "Continue", x, y, w, math.floor(h * 1.35), function()
@@ -503,7 +646,6 @@ PAGES.title = function()
   button("title:quit", "Quit", x, y, w, h, function()
     act("quit")
   end, { align = "left" })
-
 end
 
 -- The low-res part of the title screen (between render.beginWorld and
@@ -522,6 +664,7 @@ local function deepestName(p)
 end
 
 PAGES.slots = function()
+  litBackdrop()
   pageTitle("Save Files", X(22), Y(14))
   shadowPrint("Each file keeps its own compendium and records. Runs are not saved part-way.", X(22), Y(30), F.small, FAINT)
   local x, w, h = X(22), math.floor(230 * u), math.floor(40 * u)
@@ -830,6 +973,7 @@ PAGES.compendium = function()
   local ww, wh = love.graphics.getDimensions()
   love.graphics.setColor(0.015, 0.01, 0.025, root == "pause" and 0.93 or 0.6)
   love.graphics.rectangle("fill", 0, 0, ww, wh)
+  litBackdrop()
   local profile = compProfile()
 
   -- Header: title, the slot shown, and the overall count
@@ -980,6 +1124,7 @@ PAGES.camp = function()
   local ww, wh = love.graphics.getDimensions()
   love.graphics.setColor(0.015, 0.01, 0.025, 0.93)
   love.graphics.rectangle("fill", 0, 0, ww, wh)
+  litBackdrop()
   local person = meta.PEOPLE[campNpc] or { name = tostring(campNpc) }
   local marks = meta.marks()
   pageTitle(person.name, X(14), Y(9))
@@ -1327,6 +1472,7 @@ PAGES.settings = function()
   local ww, wh = love.graphics.getDimensions()
   love.graphics.setColor(0.015, 0.01, 0.025, root == "pause" and 0.93 or 0.55)
   love.graphics.rectangle("fill", 0, 0, ww, wh)
+  litBackdrop()
   panel(X(58), Y(8), math.floor(284 * u), math.floor(206 * u), 0.9)
   pageTitle("Settings", X(200), Y(12), true)
   tabs("set:tab", SETTINGS_TABS, settingsTab, X(66), Y(34), math.floor(268 * u), math.floor(12 * u), function(i)
@@ -1508,6 +1654,7 @@ PAGES.name = function()
   local ww, wh = love.graphics.getDimensions()
   love.graphics.setColor(0.015, 0.01, 0.025, 0.7)
   love.graphics.rectangle("fill", 0, 0, ww, wh)
+  litBackdrop()
   pageTitle("Name Your Hunter", ww / 2, Y(46), true)
   printCentered("Save file " .. tostring(nameState.slot) .. ". The name goes on the file, and is called back when death comes.", ww / 2, Y(46) + F.head:getHeight() + 6 * u, F.small, FAINT)
   -- The text box
@@ -1671,6 +1818,7 @@ PAGES.ghost = function()
   local ww, wh = love.graphics.getDimensions()
   love.graphics.setColor(0.01, 0.02, 0.04, 0.93)
   love.graphics.rectangle("fill", 0, 0, ww, wh)
+  litBackdrop()
   pageTitle("The Ghost Merchant", X(14), Y(9))
   shadowPrint("Pale hands, odd prices. Pay in gold, in blood, or in marks. He is gone when the lantern gutters.", X(14), Y(26), F.small, { 0.5, 0.7, 0.85 })
   local offers = events.ghostOffers()
@@ -1736,6 +1884,7 @@ PAGES.dialog = function()
   local ww, wh = love.graphics.getDimensions()
   love.graphics.setColor(0.015, 0.012, 0.03, 0.93)
   love.graphics.rectangle("fill", 0, 0, ww, wh)
+  litBackdrop()
   if not dialog then
     return
   end
@@ -1812,6 +1961,7 @@ PAGES.board = function()
   local ww, wh = love.graphics.getDimensions()
   love.graphics.setColor(0.015, 0.01, 0.025, 0.93)
   love.graphics.rectangle("fill", 0, 0, ww, wh)
+  litBackdrop()
   local marks = meta.marks()
   pageTitle("Bounty Board", X(14), Y(9))
   markPrice(marks .. (marks == 1 and " mark" or " marks"), X(386), Y(11), F.body, meta.SIGIL_COLOR)
@@ -2084,6 +2234,7 @@ PAGES.pause = function()
   local ww, wh = love.graphics.getDimensions()
   love.graphics.setColor(0.03, 0.02, 0.05, 0.62)
   love.graphics.rectangle("fill", 0, 0, ww, wh)
+  litBackdrop()
   pageTitle("Paused", ww / 2, Y(34), true)
   local y0 = Y(34) + F.head:getHeight() + 5 * u
   local okc, catacombs = pcall(require, "src.scenes.catacombs")
@@ -2364,9 +2515,16 @@ function menu.update(dt)
   clock = clock + (dt or 0)
   enterT = enterT + (dt or 0)
   if not root then
+    light.x = nil -- so the light starts at the cursor when a menu next opens
     return
   end
   local mx, my = love.mouse.getPosition()
+  if light.x then
+    local k = math.min(1, (dt or 0) * 14)
+    light.x, light.y = light.x + (mx - light.x) * k, light.y + (my - light.y) * k
+  else
+    light.x, light.y = mx, my
+  end
   if top() == "map" then
     local sm = require("src.surveymap")
     -- a right-button drag moves the map; the arrow keys and WASD do too
@@ -2410,14 +2568,18 @@ function menu.draw(scale)
   widgets = {}
   local page = top()
   -- Pages over the pause menu or the title replace it; the confirm box sits over the page below it
+  casters, casting = casting, {}
   if page == "confirm" and #stack >= 2 then
     PAGES[stack[#stack - 1]]()
+    love.graphics.setShader()
     widgets = {}
   elseif page == "confirm" then
     PAGES[root]()
+    love.graphics.setShader()
     widgets = {}
   end
   PAGES[page]()
+  love.graphics.setShader()
   reveal = false
   -- Nothing focused (a new page): focus its main control, else the first
   if not find(focusId) and widgets[1] then

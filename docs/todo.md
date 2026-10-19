@@ -169,3 +169,7 @@ Check items off as they land; append new ones at the bottom.
 - [x] Weapon panel layout chosen: hybrid of B (cards) and C (radar)
 - [x] Grass is baked into the map at generation (src/grass.lua bake from cavegen; decor materials 30-38 are painted but not solid; areas 1-3 only, none in water, gone when the ground is dug away), replacing the per-frame pass
 - [x] Weapon panel: radar + playing-card hybrid (src/itembar.lua drawPanel): tall cards side by side, picture box with grade badge, DPS headline, radar with value/difference per corner, impact/recoil/crit, slots shrinking to fit
+- [x] Weapon cards: the ammo and attachment slots now sit right under the name; the found-a-weapon prompt (compare.lua) shows the found card, an arrow, then the three carried cards ("Replace which?") using the same card drawer (itembar.drawGunCard)
+- [x] Area dressing: src/decor.lua bakes per-area decoration and rock tints at generation (cinder, drowned, quarry, needle, sky, flooded sets; see design 7b). Headless-tested in all of areas 4-13, not played
+- [ ] Decor leftovers: the first three areas could take moss/roots/drips too (tint only so far: none); decor is not yet knocked off when a prop or minecart sits on it; the Needle's outer flank (outside the cave) has none; frost could also whiten the Needle's one-way ledges; a gust of dust or falling grains was left out on purpose (no animation)
+

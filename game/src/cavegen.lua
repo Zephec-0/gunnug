@@ -104,6 +104,10 @@ function cavegen.generate(world, area, seed, tick)
   world:claim(X0, math.min(Y0 - 24 - 16, (area.shaftTop or math.huge) - 16), X1, Y1)
   local ROCKID = area.palette and area.palette.rock or ROCK
   local DIRTID = area.palette and area.palette.dirt or DIRT
+  -- The area's own colouring of its rock and earth (src.decor), worked out where it is painted
+  if area.decor then
+    require("src.decor").tint(world, area.decor, X0, Y0, X1, Y1, { ROCKID, DIRTID })
+  end
   -- Counts below scale with the area's size
   local scale = W * H / REF_AREA
   local function scaled(n)
@@ -1815,6 +1819,14 @@ function cavegen.generate(world, area, seed, tick)
         end
       end
     end
+  end
+
+  -- Dressing for the areas without grass (src.decor): moss, roots, drips, rubble, coral and the like, baked in last
+  -- so it follows the finished terrain
+  if area.decor then
+    require("src.decor").bake(world, area.decor, seed, X0 + BORDER, Y0 + 40, X1 - BORDER, Y1 - BORDER, { [ROCKID] = true, [DIRTID] = true }, { water, lava, acid }, POOL_CELL, flood, function(x, y)
+      return inProfile(x, y, 2)
+    end, tick)
   end
 
   return result

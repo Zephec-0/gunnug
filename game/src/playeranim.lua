@@ -65,8 +65,8 @@ local RELOAD_SOUND = {
   gatling = { eject = "gat_rattle", drum = "gat_rattle", click = "gat_spin", snap = "gat_click" }, -- chain rattle, barrels spin, click
   pistol = { eject = "pi_magdrop", click = "pi_magin", snap = "pi_click" }, -- mag drop, mag in, click
   semiauto = { eject = "pi_magdrop", click = "pi_magin", snap = "pi_click" },
-  crossbow = { eject = "pi_click", click = "pi_magin", snap = "pi_click" },
-  flare = { eject = "rev_eject", click = "rev_load", snap = "rev_close" },
+  crossbow = { eject = "pi_click", click = "pi_magin", snap = "pi_click" }, -- string let go, latched, bolt laid on
+  flare = { eject = "sg_eject", click = "sg_shell", snap = "sg_close" },
 }
 
 local RELOAD = {
@@ -141,8 +141,36 @@ local function smooth(t)
 end
 
 -- The two keyframes around progress p and how far between them (eased)
-RELOAD.crossbow = RELOAD.shotgun -- (cock it, fetch a bolt, lay it on the rail)
-RELOAD.flare = RELOAD.revolver
+-- Crossbow: let the string go slack, dip the muzzle and haul it back along
+-- the rail with the support hand until it latches, fetch a bolt from the belt
+-- and lay it on the rail
+RELOAD.crossbow = {
+  keys = {
+    { p = 0.00, tilt = 0.0, reach = 0.0, kind = "gun", a = 7.5, b = 0.5 },
+    { p = 0.12, tilt = -0.5, reach = -0.4, kind = "gun", a = 7.5, b = 0.8 },
+    { p = 0.50, tilt = -0.5, reach = -0.6, kind = "gun", a = 1.5, b = 0.8 },
+    { p = 0.58, tilt = -0.4, reach = 0.0, kind = "belt", a = 3, b = 0 },
+    { p = 0.72, tilt = -0.3, reach = 0.0, kind = "belt", a = 3, b = 0, carry = true },
+    { p = 0.86, tilt = 0.0, reach = 0.0, kind = "gun", a = 5.0, b = 0.0, carry = true },
+    { p = 1.00, tilt = 0.0, reach = 0.0, kind = "gun", a = 4.6, b = 0.5 },
+  },
+  events = { { 0.12, "eject" }, { 0.50, "click" }, { 0.88, "snap" } },
+}
+-- Flare pistol: break it open like a shotgun, flip out the shell, drop a
+-- fresh flare in from the belt and snap it shut
+RELOAD.flare = {
+  keys = {
+    { p = 0.00, tilt = 0.0, reach = 0.0, kind = "gun", a = -1.3, b = 0 },
+    { p = 0.14, tilt = -0.6, reach = -0.4, kind = "gun", a = -1.0, b = 0.5 },
+    { p = 0.40, tilt = -0.6, reach = -0.4, kind = "gun", a = 3.0, b = 1.0 },
+    { p = 0.50, tilt = -0.4, reach = 0.0, kind = "belt", a = 3, b = 0 },
+    { p = 0.62, tilt = -0.4, reach = 0.0, kind = "belt", a = 3, b = 0, carry = true },
+    { p = 0.72, tilt = -0.4, reach = 0.0, kind = "gun", a = 3.0, b = 1.0, carry = true },
+    { p = 0.84, tilt = 0.1, reach = 0.4, kind = "gun", a = -1.0, b = 0.5 },
+    { p = 1.00, tilt = 0.0, reach = 0.0, kind = "gun", a = -1.3, b = 0 },
+  },
+  events = { { 0.16, "eject" }, { 0.66, "click" }, { 0.84, "snap" } },
+}
 
 local function reloadKeys(model, p)
   local keys = (RELOAD[model] or RELOAD.revolver).keys
@@ -421,8 +449,8 @@ function anim.updateReload(player)
           effects.casing(
             neckX + f * (3 + love.math.random() * 2),
             neckY + 4,
-            (model == "shotgun" and -f * (15 + love.math.random() * 25) or (love.math.random() - 0.5) * 40) + player.body.vx * 0.3,
-            model == "shotgun" and -(60 + love.math.random() * 50) or (10 + love.math.random() * 20),
+            ((model == "shotgun" or model == "flare") and -f * (15 + love.math.random() * 25) or (love.math.random() - 0.5) * 40) + player.body.vx * 0.3,
+            (model == "shotgun" or model == "flare") and -(60 + love.math.random() * 50) or (10 + love.math.random() * 20),
             cs and cs.size or 3,
             nil,
             cs and cs.hull
@@ -802,27 +830,64 @@ function GUN_DRAW.shotgun(x, y, dx, dy, px, py, len)
   pixel(x + dx * len - px, y + dy * len - py, COLORS.silver)
 end
 
-function GUN_DRAW.crossbow(x, y, dx, dy, px, py, len)
-  -- Wooden stock into the shoulder, a long tiller, the steel prod across the
-  -- front with its string, and the bolt laid on the rail
-  segment(x, y, x - dx * 4 + px * 1.4, y - dy * 4 + py * 1.4, COLORS.grip)
-  segment(x - dx, y - dy, x + dx * (len - 2), y + dy * (len - 2), COLORS.grip)
+local CB_WOOD, CB_WOOD_L, CB_WOOD_D = { 0.46, 0.27, 0.13 }, { 0.62, 0.40, 0.20 }, { 0.30, 0.17, 0.09 }
+local CB_IRON, CB_IRON_L = { 0.22, 0.24, 0.28 }, { 0.42, 0.45, 0.50 }
+local CB_STRING, CB_FLETCH, CB_BRASS = { 0.82, 0.74, 0.56 }, { 0.78, 0.18, 0.14 }, { 0.86, 0.64, 0.24 }
+
+function GUN_DRAW.crossbow(x, y, dx, dy, px, py, len, gun)
+  -- How far the string is drawn: slack straight after a shot, hauled back
+  -- while reloading, taut with a bolt on the rail when ready
+  local drawn, bolt = 1, true
+  if gun and gun.isReloading and gun:isReloading() then
+    local rp = gun:reloadProgress()
+    drawn = smooth(clamp((rp - 0.12) / 0.38, 0, 1))
+    bolt = rp > 0.74
+  end
+  -- Wooden stock into the shoulder with a lit top edge, and a long dark tiller
+  segment(x, y, x - dx * 4 + px * 1.4, y - dy * 4 + py * 1.4, CB_WOOD)
+  segment(x - px * 0.6, y - py * 0.6, x - dx * 4 + px * 0.8, y - dy * 4 + py * 0.8, CB_WOOD_L)
+  segment(x - dx, y - dy, x + dx * (len - 2), y + dy * (len - 2), CB_WOOD_D)
+  segment(x, y - 0.5 * py, x + dx * (len - 3), y + dy * (len - 3) - 0.5 * py, CB_WOOD)
+  -- Iron prod across the front, its limbs swept back and tipped in brass
   local fx, fy = x + dx * (len - 3), y + dy * (len - 3)
-  segment(fx - px * 3.2, fy - py * 3.2, fx + px * 3.2, fy + py * 3.2, COLORS.gunMid)
-  segment(fx - px * 3.2 - dx, fy - py * 3.2 - dy, fx - dx * 2, fy - dy * 2, COLORS.silver)
-  segment(fx + px * 3.2 - dx, fy + py * 3.2 - dy, fx - dx * 2, fy - dy * 2, COLORS.silver)
-  segment(x + dx, y + dy - 0.5, x + dx * len, y + dy * len - 0.5, COLORS.silver)
-  pixel(x + dx * len, y + dy * len, COLORS.silver)
+  segment(fx - px * 3.2, fy - py * 3.2, fx + px * 3.2, fy + py * 3.2, CB_IRON)
+  segment(fx - px * 3.2 - dx, fy - py * 3.2 - dy, fx - dx * 2, fy - dy * 2, CB_IRON_L)
+  segment(fx + px * 3.2 - dx, fy + py * 3.2 - dy, fx - dx * 2, fy - dy * 2, CB_IRON_L)
+  pixel(fx - px * 3.2 - dx, fy - py * 3.2 - dy, CB_BRASS)
+  pixel(fx + px * 3.2 - dx, fy + py * 3.2 - dy, CB_BRASS)
+  -- The string runs limb tip to the nock, which rides back along the rail
+  local nx, ny = fx - dx * (2 + 3.5 * drawn), fy - dy * (2 + 3.5 * drawn)
+  segment(fx - px * 3.2 - dx, fy - py * 3.2 - dy, nx, ny, CB_STRING)
+  segment(fx + px * 3.2 - dx, fy + py * 3.2 - dy, nx, ny, CB_STRING)
+  -- Steel stirrup at the front, brass lock under the string
+  pixel(fx + dx * 1.5, fy + dy * 1.5 + py * 1.2, CB_IRON_L)
+  pixel(nx - dx * 0.5 + px * 0.5, ny - dy * 0.5 + py * 0.5, CB_BRASS)
+  -- The bolt on the rail: a dark shaft, red fletching, a bright head
+  if bolt then
+    segment(nx, ny - 0.5 * py, x + dx * len, y + dy * len - 0.5 * py, CB_IRON_L)
+    pixel(nx, ny - 0.5 * py, CB_FLETCH)
+    pixel(nx + dx, ny + dy - 0.5 * py, CB_FLETCH)
+    pixel(x + dx * len, y + dy * len - 0.5 * py, COLORS.silver)
+  end
 end
 
-function GUN_DRAW.flare(x, y, dx, dy, px, py, len)
-  -- A stubby, fat-barrelled signal pistol with a bright orange muzzle band
+function GUN_DRAW.flare(x, y, dx, dy, px, py, len, gun)
+  -- A stubby, fat-barrelled signal pistol with a bright orange muzzle band;
+  -- reloading breaks it open, the barrel tipping down about the frame
+  local open = 0
+  if gun and gun.isReloading and gun:isReloading() then
+    local rp = gun:reloadProgress()
+    open = smooth(clamp(rp / 0.14, 0, 1)) - smooth(clamp((rp - 0.72) / 0.1, 0, 1))
+  end
+  local t = 0.45 * open
+  local bx, by = dx * math.cos(t) + px * math.sin(t), dy * math.cos(t) + py * math.sin(t)
   segment(x, y, x + px * 2.5 - dx * 1.5, y + py * 2.5 - dy * 1.5, COLORS.grip)
-  segment(x, y, x + dx * len, y + dy * len, COLORS.gun)
-  segment(x + dx * 1.5 - px * 0.8, y + dy * 1.5 - py * 0.8, x + dx * len - px * 0.8, y + dy * len - py * 0.8, COLORS.gunMid)
-  pixel(x + dx * (len - 1), y + dy * (len - 1), { 1, 0.55, 0.2 })
-  pixel(x + dx * len, y + dy * len, { 1, 0.8, 0.4 })
-  pixel(x + dx * 3, y + dy * 3 + 0 * py, COLORS.silver)
+  segment(x, y, x + dx * 1.5, y + dy * 1.5, COLORS.gunMid) -- the frame the barrel hinges on
+  segment(x + dx * 1.5, y + dy * 1.5, x + bx * len, y + by * len, COLORS.gun)
+  segment(x + dx * 1.5 - px * 0.8, y + dy * 1.5 - py * 0.8, x + bx * len - px * 0.8, y + by * len - py * 0.8, COLORS.gunMid)
+  pixel(x + bx * (len - 1), y + by * (len - 1), { 1, 0.55, 0.2 })
+  pixel(x + bx * len, y + by * len, { 1, 0.8, 0.4 })
+  pixel(x + dx * 3, y + dy * 3, COLORS.silver)
 end
 
 function GUN_DRAW.automatic(x, y, dx, dy, px, py, len)

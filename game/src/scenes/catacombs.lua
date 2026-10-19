@@ -115,6 +115,7 @@ local THEMES = {
   {
     -- Left of the Queen's arena (area 4a): scorched basalt and ash, ember light
     name = "The Cinder Warrens",
+    decor = "cinder", -- baked dressing and rock colouring (src.decor)
     subtitle = "Area 4 - left path",
     ambient = { 0.22, 0.15, 0.13 },
     fx = { shadow = { 0.95, 0.96, 1.04 }, light = { 1.09, 1.0, 0.90 }, sat = 1.03, contrast = 0.31, aberr = 0.64 },
@@ -137,6 +138,7 @@ local THEMES = {
   {
     -- Right of the Queen's arena (area 4b): a flooded slate maze
     name = "The Drowned Halls",
+    decor = "drowned", -- baked dressing and rock colouring (src.decor)
     subtitle = "Area 4 - right path",
     ambient = { 0.08, 0.13, 0.17 },
     fx = { shadow = { 0.90, 0.98, 1.09 }, light = { 1.05, 1.02, 0.95 }, sat = 0.99, aberr = 0.68, vig = 0.40 },
@@ -159,6 +161,7 @@ local THEMES = {
     -- quarry: pale cut sandstone and spoil, dust, amber lamps and crystals,
     -- the miners' ghosts and their blasting powder.
     name = "The Quarry",
+    decor = "quarry", -- baked dressing and rock colouring (src.decor)
     subtitle = "A side road",
     prisoner = "cartographer", -- a lost surveyor, caged in the workings (src.npcs)
     ambient = { 0.22, 0.17, 0.12 },
@@ -185,6 +188,7 @@ local THEMES = {
     -- Under the Quarry: the foreman's hall, a boss chamber sized like the
     -- Queen's. For now its boss is the Warden; he guards the Diving Helm.
     name = "The Foreman's Hall",
+    decor = "quarry", -- baked dressing and rock colouring (src.decor)
     subtitle = "The Quarry's heart",
     ambient = { 0.20, 0.15, 0.11 },
     fx = { shadow = { 1.0, 0.95, 0.88 }, light = { 1.1, 1.02, 0.88 }, sat = 1.04, aberr = 0.5 },
@@ -217,6 +221,7 @@ local THEMES = {
     -- descends into the top of them, and all of it is water; with no breathing
     -- gear the hunter drowns, so the water is the lock.
     name = "The Flooded Caverns",
+    decor = "flooded", -- baked dressing and rock colouring (src.decor)
     subtitle = "Under the lake",
     ambient = { 0.07, 0.12, 0.16 },
     fx = { shadow = { 0.82, 0.98, 1.1 }, light = { 0.98, 1.05, 1.08 }, sat = 0.95, vig = 0.45, aberr = 0.6 },
@@ -244,6 +249,7 @@ local THEMES = {
     -- Under the galleries: a big flooded chamber for an aquatic boss. A
     -- placeholder boss for now (the Matron).
     name = "The Deep",
+    decor = "flooded", -- baked dressing and rock colouring (src.decor)
     subtitle = "Something large lives here",
     ambient = { 0.05, 0.10, 0.14 },
     fx = { shadow = { 0.78, 1.0, 1.12 }, light = { 0.95, 1.08, 1.08 }, sat = 0.95, aberr = 0.7, vig = 0.5 },
@@ -278,6 +284,7 @@ local THEMES = {
     -- top of a long ramp. A deep cave that climbs, on ladders of platforms, to
     -- the summit, where a boss guards the way up into the sky.
     name = "The Needle",
+    decor = "needle", -- baked dressing and rock colouring (src.decor)
     subtitle = "The way up",
     ambient = { 0.18, 0.14, 0.12 },
     fx = { shadow = { 1.0, 0.95, 0.9 }, light = { 1.08, 1.02, 0.9 }, sat = 1.02, aberr = 0.5, vig = 0.42 },
@@ -331,6 +338,7 @@ local THEMES = {
   {
     -- The sky, above the mountain: islands and spires in open air, with low gravity
     name = "The Cloud Reaches",
+    decor = "sky", -- baked dressing and rock colouring (src.decor)
     subtitle = "Where the air thins",
     ambient = { 0.55, 0.48, 0.5 },
     fx = { shadow = { 0.95, 0.96, 1.06 }, light = { 1.08, 1.02, 0.92 }, sat = 1.05, aberr = 0.5 },
@@ -690,6 +698,7 @@ local function areaFor(i)
   base.stalactites = lv.theme.stalactites
   base.gasPools = lv.theme.gasPools
   base.grass = lv.theme.grass
+  base.decor = lv.theme.decor
   base.waterPools = lv.theme.waterPools
   base.lavaPools = lv.theme.lavaPools
   base.acidPools = lv.theme.acidPools

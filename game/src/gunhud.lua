@@ -421,11 +421,11 @@ end
 -- Crossbow ---------------------------------------------------------------------
 
 local function drawCrossbow(R, rp)
-  -- The string is hauled back along the rail while it is wound, then the bolt
-  -- is laid in
-  local wind = rp and (ease((rp - 0.1) / 0.3) - ease((rp - 0.78) / 0.1)) or 0
+  -- Fired and slack at the start of a reload: the string is hauled back along
+  -- the rail and latched, then the bolt is laid in. Ready = drawn, bolt on
+  local drawn = rp and ease((rp - 0.14) / 0.4) or 1
   local bolt = (not rp) or rp > 0.62
-  local sx = 9 + floor(11 * wind + 0.5)
+  local sx = 9 + floor(11 * drawn + 0.5)
   -- The prod (the bow): two limbs sweeping forward from the front of the rail
   R(7, 0, 2, 3, WOOD_D)
   R(8, 3, 2, 3, WOOD)
@@ -434,12 +434,12 @@ local function drawCrossbow(R, rp)
   R(7, 12, 2, 3, WOOD_D)
   R(9, 5, 1, 5, STEEL)
   -- The string, from limb tip to limb tip through the nock
-  love.graphics.setColor(0.9, 0.88, 0.8)
+  local STRING = { 0.9, 0.88, 0.8 }
   local function line(x1, y1, x2, y2)
-    R(x1, y1, 1, 1, { 0.9, 0.88, 0.8 })
+    R(x1, y1, 1, 1, STRING)
     local n = math.max(math.abs(x2 - x1), math.abs(y2 - y1))
     for i = 1, n do
-      R(x1 + (x2 - x1) * i / n, y1 + (y2 - y1) * i / n, 1, 1, { 0.9, 0.88, 0.8 })
+      R(x1 + (x2 - x1) * i / n, y1 + (y2 - y1) * i / n, 1, 1, STRING)
     end
   end
   line(7, 1, sx, 7)
@@ -452,6 +452,10 @@ local function drawCrossbow(R, rp)
   R(4, 4, 3, 1, STEEL)
   R(4, 5, 1, 3, STEEL)
   R(4, 8, 3, 1, STEEL)
+  -- The latch the string catches on
+  if drawn > 0.9 then
+    R(sx, 6, 1, 3, BRASS)
+  end
   -- The bolt on the rail
   if bolt then
     R(sx - 1, 5, 17, 1, STEEL_L)
@@ -471,21 +475,13 @@ end
 
 -- Flare pistol -----------------------------------------------------------------
 
-local function drawFlare(R, rp)
-  local open = rp and (ease(rp / 0.2) - ease((rp - 0.82) / 0.1)) or 0
-  local shell = (not rp) or rp > 0.55
-  local lift = floor(open * 3 + 0.5)
-  -- The fat barrel, hinged at the back so it tips up to be loaded
-  R(0, 3 - lift, 15, 4, STEEL)
-  R(0, 3 - lift, 15, 1, STEEL_L)
-  R(0, 6 - lift, 15, 1, STEEL_D)
-  R(0, 2 - lift, 2, 5, HULL) -- the muzzle band
-  R(1, 2 - lift, 1, 5, HULL_L)
-  if shell then
-    R(3, 4 - lift, 7, 2, BRASS)
-    R(3, 4 - lift, 7, 1, BRASS_L)
-    R(9, 4 - lift, 1, 2, HULL)
-  end
+local FLARE_PIVOT_X, FLARE_PIVOT_Y = 14, 6
+
+local function drawFlare(R, rp, ox, oy, q)
+  -- A break-action: the barrel hinges down at the frame, the spent shell is
+  -- flipped out and a fresh one dropped in, then it snaps shut
+  local open = rp and (ease(rp / 0.14) - ease((rp - 0.72) / 0.1)) or 0
+  local loaded = (not rp) or rp >= 0.7
   -- Frame and trigger guard
   R(14, 5, 8, 4, STEEL_D)
   R(15, 5, 7, 1, STEEL)
@@ -499,6 +495,41 @@ local function drawFlare(R, rp)
     local c = r == #grip and WOOD_D or WOOD
     R(g[1], 5 + r, g[2] - g[1] + 1, 1, c)
     R(g[1], 5 + r, 1, 1, WOOD_L)
+  end
+
+  -- The fat barrel swings about the hinge, muzzle dropping
+  love.graphics.push()
+  love.graphics.translate(ox + FLARE_PIVOT_X * q, oy + FLARE_PIVOT_Y * q)
+  love.graphics.rotate(-0.4 * open)
+  love.graphics.translate(-(ox + FLARE_PIVOT_X * q), -(oy + FLARE_PIVOT_Y * q))
+  R(0, 3, 15, 4, STEEL)
+  R(0, 3, 15, 1, STEEL_L)
+  R(0, 6, 15, 1, STEEL_D)
+  R(0, 2, 2, 5, HULL) -- the muzzle band
+  R(1, 2, 1, 5, HULL_L)
+  if open > 0.3 then
+    R(13, 4, 2, 2, INK) -- the empty breech
+  end
+  if loaded then
+    R(12, 4, 2, 2, BRASS) -- the cap of the flare in the chamber
+    R(12, 4, 2, 1, BRASS_L)
+  end
+  if rp and rp >= 0.5 and rp < 0.7 then
+    local dy = -floor((1 - ease((rp - 0.5) / 0.2)) * 7) -- dropped in from above
+    R(7, 3 + dy, 6, 2, HULL)
+    R(7, 3 + dy, 6, 1, HULL_L)
+    R(12, 3 + dy, 2, 2, BRASS)
+  end
+  love.graphics.pop()
+
+  -- The spent shell flipped out of the open breech
+  if rp then
+    local t = (rp - 0.14) / 0.3
+    if t > 0 and t < 1 then
+      local ex, ey = 13 + 8 * t, 3 - 13 * t + 20 * t * t
+      R(ex - 4, ey, 3, 1, HULL, 1 - t * 0.6)
+      R(ex - 1, ey, 1, 1, BRASS, 1 - t * 0.6)
+    end
   end
 end
 
@@ -593,7 +624,7 @@ function gunhud.drawModel(gun, ox, oy, q, alpha)
   elseif model == "crossbow" then
     drawCrossbow(R, rp)
   elseif model == "flare" then
-    drawFlare(R, rp)
+    drawFlare(R, rp, ox, oy, q)
   else
     drawPistol(R, rp)
   end

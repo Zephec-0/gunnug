@@ -77,38 +77,6 @@ function compare.update()
   end
 end
 
--- One compact weapon card: icon, name, effective stats and fitted items
-local function card(gun, x, y, w, h, u, borderColor, tag)
-  love.graphics.setColor(0.10, 0.07, 0.12, 0.95)
-  love.graphics.rectangle("fill", x, y, w, h, 2 * u, 2 * u)
-  love.graphics.setLineWidth(math.max(1, u * 0.5))
-  love.graphics.setColor(borderColor)
-  love.graphics.rectangle("line", x, y, w, h, 2 * u, 2 * u)
-
-  itembar.drawThing(gun, x + 2 * u, y + 3 * u, 22 * u, u)
-  local tx = x + 27 * u
-  require("src.fonts").printGraded(itembar.font(3.8 * u), gun.name, require("src.gunInfo").grade(gun), tx, y + 2 * u, { 0.98, 0.99, 1 }, 2)
-  itembar.shadowPrint(itembar.statLine(gun), tx, y + 8 * u, itembar.font(3.1 * u), { 0.88, 0.86, 0.82 })
-
-  -- Fitted ammo and attachments, in a row along the bottom
-  local size = 7 * u
-  local sy = y + h - size - 1.5 * u
-  for s = 1, gun.slotCount do
-    local sx = tx + (s - 1) * (size + u)
-    love.graphics.setColor(0.06, 0.05, 0.08, 0.9)
-    love.graphics.rectangle("fill", sx, sy, size, size, u, u)
-    love.graphics.setColor(0.45, 0.4, 0.38)
-    love.graphics.rectangle("line", sx, sy, size, size, u, u)
-    if gun.slots[s] then
-      itembar.drawThing(gun.slots[s], sx, sy, size, u)
-    end
-  end
-  if tag then
-    local f = itembar.font(3 * u)
-    itembar.shadowPrint(tag, x + w - 3 * u - f:getWidth(tag), y + h - 6 * u, f, borderColor)
-  end
-end
-
 function compare.draw(inv, u)
   if not found then
     return
@@ -117,30 +85,49 @@ function compare.draw(inv, u)
   love.graphics.setColor(0.02, 0.01, 0.04, 0.75)
   love.graphics.rectangle("fill", 0, 0, ww, wh)
 
-  local cardW, cardH = 200 * u, 36 * u
-  local x = math.floor((ww - cardW) / 2)
-  local y = 10 * u
+  -- The found weapon on the left as a card, an arrow, then the carried weapons' cards: the same cards as the
+  -- weapon panel (src.itembar), not live, scaled down to fit the screen
+  local C = itembar.CARD
+  local carried = {}
+  for i = 1, inventory.weaponSlots() do
+    if inv.weapons[i] then
+      carried[#carried + 1] = i
+    end
+  end
+  local split = 14 -- the gap between the found card and the carried ones, in UI units
+  local totalUnits = (#carried + 1) * C.w + math.max(0, #carried - 1) * C.gap + split
+  local cu = math.min(u, ww * 0.96 / totalUnits)
+  local cardW, cardH, gap = C.w * cu, C.h * cu, C.gap * cu
+  local x0 = math.floor((ww - totalUnits * cu) / 2)
+  local y = math.max(24 * u, math.floor((wh - cardH) / 2) - 4 * u)
   local title, small = itembar.font(5 * u), itembar.font(3.4 * u)
 
-  itembar.shadowPrint("Found a weapon", x, y, title, { 0.95, 0.97, 1 })
-  y = y + 9 * u
-  card(found, x, y, cardW, cardH, u, { 0.55, 0.75, 1 }, "FOUND")
-  y = y + cardH + 5 * u
-  local hint = "Click a carried weapon (or press 1-3) to replace it - the old one drops.   Esc: leave it"
-  itembar.shadowPrint(hint, math.floor((ww - small:getWidth(hint)) / 2), y, small, { 1, 1, 1, 0.8 })
-  y = y + 7 * u
+  -- The found weapon
+  itembar.shadowPrint("Found a weapon", x0, y - 9 * u, title, { 0.95, 0.97, 1 })
+  itembar.drawGunCard(inv, found, x0, y, cu, { border = { 0.55, 0.75, 1 }, selected = true, static = true })
 
+  -- The arrow between them
+  local ax, ay = x0 + cardW + (split * cu) / 2, y + cardH / 2
+  love.graphics.setColor(0.55, 0.75, 1, 0.9)
+  love.graphics.polygon("fill", ax - 3 * cu, ay - 5 * cu, ax + 3 * cu, ay, ax - 3 * cu, ay + 5 * cu)
+
+  -- The carried weapons: click one (or press its number) to swap it for the found one
+  local cx = x0 + cardW + split * cu
+  itembar.shadowPrint("Replace which?", cx, y - 9 * u, title, { 0.95, 0.97, 1 })
   hitboxes = {}
-  local carriedH = 34 * u
-  for i = 1, inventory.weaponSlots() do
-    local gun = inv.weapons[i]
-    if gun then
-      local isHover = hovered == i
-      card(gun, x, y, cardW, carriedH, u, isHover and { 1, 0.5, 0.4 } or { 0.55, 0.48, 0.42 }, isHover and "REPLACE" or ("[" .. i .. "]"))
-      hitboxes[i] = { x = x, y = y, w = cardW, h = carriedH }
+  for _, i in ipairs(carried) do
+    local isHover = hovered == i
+    itembar.drawGunCard(inv, inv.weapons[i], cx, y, cu, { index = i, border = isHover and { 1, 0.5, 0.4 } or { 0.55, 0.48, 0.42 }, selected = isHover, static = true })
+    if isHover then
+      local f = itembar.font(3.4 * u)
+      itembar.shadowPrint("REPLACE", cx + (cardW - f:getWidth("REPLACE")) / 2, y - 4.2 * u, f, { 1, 0.5, 0.4 })
     end
-    y = y + carriedH + 3 * u
+    hitboxes[i] = { x = cx, y = y, w = cardW, h = cardH }
+    cx = cx + cardW + gap
   end
+
+  local hint = "Click a carried weapon (or press 1-3) to replace it - the old one drops.   Esc: leave it"
+  itembar.shadowPrint(hint, math.floor((ww - small:getWidth(hint)) / 2), y + cardH + 4 * u, small, { 1, 1, 1, 0.8 })
 end
 
 return compare

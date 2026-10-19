@@ -8,6 +8,7 @@
 --   hunt       a marked beast: kill it before the clock runs out
 -- Conversation and games happen in src.menu's generic dialog page.
 local audio = require("src.audio")
+local config = require("src.config")
 local effects = require("src.effects")
 local enemies = require("src.enemies")
 local fluids = require("src.fluids")
@@ -83,7 +84,10 @@ local function dropReward(x, y, goldAmount, item)
 end
 
 -- Open, flat ground with air above, near the hunter but not on top of him
+-- (and always off-screen: past the edge of the view, which leads toward the aim, so the hunter has to find it)
 local function findSpot(px, py, flatHalf, minD, maxD)
+  minD = math.max(minD, config.VIRTUAL_W / 2 + 90)
+  maxD = math.max(maxD, minD + 160)
   for _ = 1, 80 do
     local x = math.floor(px + (love.math.random() < 0.5 and -1 or 1) * (minD + love.math.random() * (maxD - minD)))
     local gy = world:findGround(x, math.floor(py - 40))
@@ -109,7 +113,7 @@ local function findSpot(px, py, flatHalf, minD, maxD)
   -- Cramped caves rarely have a flat room: cut a nook into ordinary rock beside
   -- the hunter (never into anything unbreakable), a flat floor and head-room
   for _ = 1, 60 do
-    local x = math.floor(px + (love.math.random() < 0.5 and -1 or 1) * (minD * 0.6 + love.math.random() * (maxD - minD)))
+    local x = math.floor(px + (love.math.random() < 0.5 and -1 or 1) * (minD + love.math.random() * (maxD - minD)))
     local gy = world:findGround(x, math.floor(py - 40))
     if gy and math.abs(gy - py) < 60 and not fluids.waterAt(x, gy - 4) then
       local hw = flatHalf + 6

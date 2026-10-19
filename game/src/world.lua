@@ -449,16 +449,119 @@ local function cloudColor(world, def, x, y, depth)
   return s[1] + (c[1] - s[1]) * lit + v, s[2] + (c[2] - s[2]) * lit + v, s[3] + (c[3] - s[3]) * lit + v, 1
 end
 
+-- Is a pixel of decoration held up: rock (or a held pixel of decoration) next to it in the direction dy, straight
+-- or diagonal? (a strand that sways, or a stalk that leans, is held along its length)
+local function decorHeld(self, x, y, dy, depth)
+  if depth > 18 then
+    return false
+  end
+  local ny = y + dy
+  for i = 1, 3 do
+    local ox = i == 1 and 0 or (i == 2 and -1 or 1)
+    local id = self:get(x + ox, ny)
+    if solid[id] or (materials.decor[id] and decorHeld(self, x + ox, ny, dy, depth + 1)) then
+      return true
+    end
+  end
+  return false
+end
+
+-- Tints (an area's own colouring of its rock and earth, from src.decor): layers of strata, streaks and blotches
+-- blended over the pixel's colour. Worked out from the position alone, so a crater's rim keeps the pattern.
+local tnoise = love.math.noise
+local function applyTint(tint, x, y, id, r, g, b)
+  if not tint.ids[id] then
+    return r, g, b
+  end
+  for _, L in ipairs(tint.layers) do
+    local m
+    local k = L.kind
+    local fade = 1
+    if L.ramp then
+      -- (a layer for part of the area's height fades in and out at its edges, no hard line)
+      fade = math.min(1, math.max(0, math.min(y - L.y0, L.y1 - y) / L.ramp))
+    end
+    if fade <= 0 then
+      m = -1
+    elseif k == "strata" then
+      m = math.sin(y * L.freq + tnoise(x * 0.015, y * 0.01 + L.seed) * 5) - L.cut
+    elseif k == "streak" then
+      m = tnoise(x * L.freq, y * 0.012 + L.seed) - L.cut
+    else
+      m = tnoise(x * L.freq, y * L.freq * 1.3 + L.seed) - L.cut
+    end
+    if m > 0 then
+      local a = math.min(1, m * L.soft) * L.amount * fade
+      local c = L.color
+      r, g, b = r + (c[1] - r) * a, g + (c[2] - g) * a, b + (c[3] - b) * a
+    end
+  end
+  return r, g, b
+end
+
+-- Tints the rock and earth ids in a rectangle: layers = { { kind = "strata"|"streak"|"blotch", color, amount, ... } }
+function World:addTint(x0, y0, x1, y1, layers, ids)
+  local set = {}
+  for _, id in ipairs(ids) do
+    set[id] = true
+  end
+  local out = {}
+  for i, L in ipairs(layers) do
+    out[i] = {
+      kind = L.kind,
+      color = L.color,
+      amount = L.amount or 0.3,
+      freq = L.freq or (L.kind == "strata" and 0.35 or L.kind == "streak" and 0.5 or 0.04),
+      cut = L.cut or (L.kind == "strata" and 0.6 or 0.58),
+      soft = L.soft or 6,
+      y0 = L.y0 or y0,
+      y1 = L.y1 or y1,
+      ramp = L.y0 and math.max(1, math.min(300, (L.y1 - L.y0) * 0.3)) or nil,
+      seed = (L.seed or 0) + i * 17.3,
+    }
+  end
+  self.tints = self.tints or {}
+  self.tints[#self.tints + 1] = { x0 = x0, y0 = y0, x1 = x1, y1 = y1, layers = out, ids = set }
+end
+
+local baseColorAt
 function World:colorAt(x, y, depth)
+  local r, g, b, a = baseColorAt(self, x, y, depth)
+  local tints = self.tints
+  if a == 1 and tints then
+    for i = 1, #tints do
+      local t = tints[i]
+      if x >= t.x0 and x <= t.x1 and y >= t.y0 and y <= t.y1 then
+        r, g, b = applyTint(t, x, y, self:get(x, y), r, g, b)
+        break
+      end
+    end
+  end
+  return r, g, b, a
+end
+
+baseColorAt = function(self, x, y, depth)
   local def = defs[self:get(x, y)]
   if not def.solid then
     if def.decor then
-      -- A blade of grass: painted only while the ground it stands on (or the blade below it) is still there
-      local yy = y + 1
-      while materials.decor[self:get(x, yy)] and yy < y + 8 do
-        yy = yy + 1
+      -- A blade of grass: painted only while the ground it stands on (or the blade below it) is still there.
+      -- Other decoration (src.decor) may hang from above or cling to the side instead (def.support)
+      local sup = def.support
+      local held
+      if sup == "above" then
+        held = decorHeld(self, x, y, -1, 0)
+      elseif sup == "below" then
+        held = decorHeld(self, x, y, 1, 0)
+      elseif sup == "near" then
+        held = solid[self:get(x, y + 1)] or solid[self:get(x, y - 1)] or solid[self:get(x - 1, y)] or solid[self:get(x + 1, y)]
+      else
+        local yy = y + 1
+        while materials.decor[self:get(x, yy)] and yy < y + 8 do
+          yy = yy + 1
+        end
+        held = solid[self:get(x, yy)]
       end
-      if not solid[self:get(x, yy)] then
+      if not held then
         self:setRaw(x, y, AIR)
         return 0, 0, 0, 0
       end

@@ -267,10 +267,10 @@ end
 function eventui.tinker(o, player, env)
   local inv = player.inventory
   local dlg = { title = "The Travelling Tinker" }
-  o.rerolls = o.rerolls or 0
   local tk = { flip = nil, flash = 0 }
-  local function price()
-    return 35 + 30 * o.rerolls
+  -- (the price climbs with each gun's own re-rolls, not with the tinker's)
+  local function price(gun)
+    return 35 + 30 * ((gun and gun.tinkerRolls) or 0)
   end
 
   dlg.custom = function(H)
@@ -288,7 +288,7 @@ function eventui.tinker(o, player, env)
       end
     end
     local C = itembar.CARD
-    local cu = min(u * 0.6, (wh * 0.5) / C.h, (ww * 0.9) / (max(1, #carried) * (C.w + C.gap)))
+    local cu = min(u * 0.78, (wh * 0.6) / C.h, (ww * 0.92) / (max(1, #carried) * (C.w + C.gap * 3)))
     local cw, ch, gap = C.w * cu, C.h * cu, C.gap * 3 * cu
     local total = #carried * cw + max(0, #carried - 1) * gap
     local x0 = floor((ww - total) / 2)
@@ -306,9 +306,9 @@ function eventui.tinker(o, player, env)
     if tk.flip and now - tk.flip.t0 >= FLIP then
       tk.flash, tk.flashIdx, tk.flip = now, tk.flip.idx, nil
     end
-    local cost = price()
     for n, i in ipairs(carried) do
       local gun = inv.weapons[i]
+      local cost = price(gun)
       local cx = x0 + (n - 1) * (cw + gap)
       local flipping = tk.flip and tk.flip.idx == i
       local sxs, lift = 1, 0
@@ -333,14 +333,14 @@ function eventui.tinker(o, player, env)
       local can = gun.rolls and inv.gold >= cost and not tk.flip
       H.button("dlg:tk:roll" .. i, "", floor(cx), floor(by), floor(cw), bh, function()
         inv.gold = inv.gold - cost
-        o.rerolls = o.rerolls + 1
+        gun.tinkerRolls = (gun.tinkerRolls or 0) + 1
         tk.flip = { t0 = love.timer.getTime(), idx = i }
         audio.play("tinker_shake")
         return true
       end, { disabled = not can })
       local label = tostring(cost)
       local fw = H.F.body:getWidth(label)
-      local iw = 11 * S
+      local iw = 15 * S
       local sx0 = cx + (cw - (iw + 3 * S + fw)) / 2
       gfx.setColor(can and { 1, 0.9, 0.55 } or { 0.5, 0.48, 0.5 })
       gfx.draw(eventart.reroll(), floor(sx0), floor(by + (bh - iw) / 2), 0, S, S)

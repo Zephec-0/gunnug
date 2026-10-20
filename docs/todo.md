@@ -211,3 +211,8 @@ Check items off as they land; append new ones at the bottom.
 - [x] High-Low: text and cards more central, the dealt card is face up all the way down
 - [x] Shrine cards centred, rounded; tinker flip faster
 
+## Batch 2026-10-20 events round 4 (released as 0.2.7)
+- [x] Gallery goals 35 / 30 / 25
+- [x] Tinker: re-roll price is per gun (35 + 30 per re-roll of that gun), bigger cards, re-roll icon redrawn so the arrowhead is not cut off
+- [x] Gun cards: Impact / Recoil / Crit centred in their columns; effects line moved down
+

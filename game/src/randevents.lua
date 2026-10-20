@@ -168,11 +168,11 @@ end
 -- What a round pays: Easy a bullet or an attachment, Medium a gun, Hard a perk, each better the more of the
 -- goal was hit. Under 60% of it pays nothing; above that the bands of the goal get narrower as they get better.
 local DIFFICULTIES = {
-  { name = "Easy", cost = 10, speed = 34, goal = 30, mode = "sweep", color = { 0.62, 0.95, 0.62 }, icon = "ammo",
+  { name = "Easy", cost = 10, speed = 34, goal = 35, mode = "sweep", color = { 0.62, 0.95, 0.62 }, icon = "ammo",
     text = "Chance of an attachment or ammo. The more targets you hit, the rarer it is." },
-  { name = "Medium", cost = 25, speed = 72, goal = 25, mode = "bounce", color = { 1.0, 0.95, 0.55 }, icon = "gun",
+  { name = "Medium", cost = 25, speed = 72, goal = 30, mode = "bounce", color = { 1.0, 0.95, 0.55 }, icon = "gun",
     text = "Chance of a weapon. The more targets you hit, the better a roll it has." },
-  { name = "Hard", cost = 50, speed = 0, goal = 20, mode = "blink", color = { 1.0, 0.60, 0.55 }, icon = "perk",
+  { name = "Hard", cost = 50, speed = 0, goal = 25, mode = "blink", color = { 1.0, 0.60, 0.55 }, icon = "perk",
     text = "Chance of a perk. The more targets you hit, the rarer it is." },
 }
 local TIER_FROM = { 0.60, 0.76, 0.89, 0.97 } -- the share of the goal where each of the four prize tiers starts

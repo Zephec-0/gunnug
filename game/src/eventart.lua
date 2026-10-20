@@ -925,19 +925,25 @@ local rerollImg
 -- The re-roll icon: a circling arrow, 11 x 11, in white (tinted as it is drawn)
 function eventart.reroll()
   if not rerollImg then
-    local p = newPainter(11, 11)
+    -- (15 x 15: a ring open at the top right, and a head on the end that is wholly inside the picture)
+    local p = newPainter(15, 15)
     local W = { 1, 1, 1 }
-    for y = 0, 10 do
-      for x = 0, 10 do
-        local dx, dy = x + 0.5 - 5.5, y + 0.5 - 5.5
+    for y = 0, 14 do
+      for x = 0, 14 do
+        local dx, dy = x + 0.5 - 7.5, y + 0.5 - 7.5
         local d = sqrt(dx * dx + dy * dy)
         local a = math.atan2(dy, dx)
-        if d >= 3.3 and d <= 4.9 and not (a > -1.35 and a < -0.35) then
+        if d >= 4.0 and d <= 5.6 and not (a > -1.4 and a < -0.2) then
           p:put(x, y, W)
         end
       end
     end
-    p:poly({ 6.5, 0.2, 10.8, 1.4, 8.6, 5 }, W)
+    -- the head sits on the ring's end at the top and points clockwise (to the right)
+    local ea = -1.4
+    local px, py = 7.5 + math.cos(ea) * 4.8, 7.5 + math.sin(ea) * 4.8
+    local tx, ty = -math.sin(ea), math.cos(ea) -- the way round the ring
+    local nx, ny = math.cos(ea), math.sin(ea)
+    p:poly({ px + tx * 3.6, py + ty * 3.6, px + nx * 2.8, py + ny * 2.8, px - nx * 2.8, py - ny * 2.8 }, W)
     rerollImg = p:image()
   end
   return rerollImg

@@ -787,9 +787,11 @@ local function drawGunCard(inv, gun, x, y, u, o)
   local ry = rcy + R + 12 * u
   local minor = { rows[6], rows[7], rows[9] }
   for n, row in ipairs(minor) do
-    local colX = x + 4 * u + (n - 1) * ((cardW - 8 * u) / 3)
-    shadowPrint(row[1], colX, ry, textFont, { 0.62, 0.66, 0.76 })
-    shadowPrint(row[2], colX, ry + textFont:getHeight(), textFont, { 0.98, 0.99, 1 })
+    -- (each one centred in its third of the card)
+    local colW = (cardW - 8 * u) / 3
+    local colX = x + 4 * u + (n - 1) * colW
+    shadowPrint(row[1], math.floor(colX + (colW - textFont:getWidth(row[1])) / 2), ry, textFont, { 0.62, 0.66, 0.76 })
+    shadowPrint(row[2], math.floor(colX + (colW - textFont:getWidth(row[2])) / 2), ry + textFont:getHeight(), textFont, { 0.98, 0.99, 1 })
   end
   if statLine(gun):find("\n.*\n") then
     -- (crit is already in the row above), wrapped to the card's width
@@ -800,7 +802,7 @@ local function drawGunCard(inv, gun, x, y, u, o)
       love.graphics.setFont(textFont)
       for i = 1, math.min(3, #wrapped) do
         local text = wrapped[i]:gsub("%s+$", "")
-        shadowPrint(text, math.floor(x + (cardW - textFont:getWidth(text)) / 2), math.floor(ry + textFont:getHeight() * (1.9 + (i - 1))), textFont, { 0.80, 0.86, 1 })
+        shadowPrint(text, math.floor(x + (cardW - textFont:getWidth(text)) / 2), math.floor(ry + textFont:getHeight() * (2.4 + (i - 1))), textFont, { 0.80, 0.86, 1 })
       end
     end
   end

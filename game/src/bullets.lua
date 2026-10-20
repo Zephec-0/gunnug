@@ -559,11 +559,11 @@ function bullets.update(dt, w)
           effects.particle(b.x, b.y, (love.math.random() - 0.5) * 30, -20 - love.math.random() * 30, 0.4, { 0.7, 0.85, 1 }, 200, true)
         end
       end
-      b.speed = b.speed * math.exp(-5.5 * dt)
+      b.speed = b.speed * math.exp(-2.5 * dt)
       if love.math.random() < dt * 25 then
         effects.particle(b.x, b.y, 0, -22, 0.5, { 0.75, 0.9, 1 }, -30, true) -- bubbles
       end
-      if b.speed < 140 then
+      if b.speed < 90 then
         b.life = 0 -- spent: it sinks
       end
     else

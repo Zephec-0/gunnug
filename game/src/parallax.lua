@@ -626,7 +626,8 @@ local STYLES = { mineStyle, hollowsStyle, ventsStyle, warrensStyle, drownedStyle
 -- Draws area `index`'s far scenery over the view (world pixels vx0..vx1, vy0..vy1).
 -- colors: the area's three pillar colours (for the mine's far rock).
 function parallax.draw(index, camX, camY, vx0, vy0, vx1, vy1, colors)
-  local style = STYLES[index] or STYLES[#STYLES]
+  -- (the boss arenas have named styles of their own: src.bossbg)
+  local style = type(index) == "string" and require("src.bossbg").styles[index] or STYLES[index] or STYLES[#STYLES]
   style(camX, camY, vx0, vy0, vx1, vy1, colors, love.timer.getTime())
 end
 

@@ -730,8 +730,23 @@ function Player:update(dt, aimX, aimY)
 
   -- Gravity. In water he sinks slowly and swims up while jump is held.
   if self.inWater then
-    b.vy = math.min(b.vy + config.gravity * cfg.gravityScale * 0.3 * dt, 90)
-    b.vx = b.vx * (1 - math.min(1, 1.5 * dt))
+    local drag = 1 - math.min(1, 1.5 * dt)
+    if self.submerged then
+      -- Completely under, a gun's kick is the same whichever way it pushes: a push down or up
+      -- fades like one sideways (speed past the sink and swim speeds is bled off by the same
+      -- drag), rather than being cut short going down and carried on going up
+      if b.vy > 90 then
+        b.vy = 90 + (b.vy - 90) * drag
+      else
+        b.vy = math.min(b.vy + config.gravity * cfg.gravityScale * 0.3 * dt, 90)
+      end
+      if b.vy < -95 and not jumpHeld then
+        b.vy = -95 + (b.vy + 95) * drag
+      end
+    else
+      b.vy = math.min(b.vy + config.gravity * cfg.gravityScale * 0.3 * dt, 90)
+    end
+    b.vx = b.vx * drag
     if jumpHeld then
       b.vy = math.max(b.vy - 520 * dt, -95)
     end

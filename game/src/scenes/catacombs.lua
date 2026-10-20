@@ -19,6 +19,7 @@ local effects = require("src.effects")
 local enemies = require("src.enemies")
 local fluids = require("src.fluids")
 local parallax = require("src.parallax")
+local bossbg = require("src.bossbg")
 local pickups = require("src.pickups")
 local hud = require("src.hud")
 local materials = require("src.materials")
@@ -104,6 +105,8 @@ local THEMES = {
     monsters = { ghoul = 14, bat = 10, spitter = 12, hopper = 8, bloater = 46, wisp = 40, worm = 12, roller = 8, miner = 8 }, -- gas bags and fire wisps
     boss = "queen", -- the Sulfur Queen, in the arena that fills the last quarter
     defy = "Caverns", -- (the pedestal at the middle of the arena says "Defy the ...")
+    arenaParallax = "acid", -- the arena's own far scenery (src.bossbg), blended in over the area's
+    arenaBack = { 0.05, 0.065, 0.02 }, -- ...and its own backdrop colour
     arena = true,
     gasPools = 34, -- pools of poison gas in low spots (src.fluids)
     waterPools = 22,
@@ -212,8 +215,10 @@ local THEMES = {
     boss = "golem",
     defy = "Stone",
     bossReward = "diving_helm",
+    arenaWon = { "The Colossus Has Fallen", "The gates are open. Take the Diving Helm: the flooded caverns lie beyond" },
     stalactites = 30,
     parallax = 6,
+    arenaParallax = "quarryhall", -- (src.bossbg)
     track = 3,
   },
   {
@@ -269,6 +274,7 @@ local THEMES = {
     arenaH = 1000,
     arenaWidth = 0.72,
     arenaBanner = { "The Deep", "Something old and large turns in the dark water" },
+    arenaWon = { "The Biggest Fish Has Fallen", "The gates are open. The water is still at last" },
     boss = "bigfish",
     arenaShape = "round", -- (an oval of water, no ledges)
     noPlatforms = true,
@@ -277,6 +283,7 @@ local THEMES = {
     fish = 30,
     stalactites = 20,
     parallax = 7,
+    arenaParallax = "deep", -- the arena's own far scenery (src.bossbg)
     track = 5,
   },
   {
@@ -495,6 +502,8 @@ local world
 local firstArea, baseSeed
 local deadline = 0 -- os.clock() time the current slice of work must stop at
 local announced = {} -- the areas whose banner has been shown
+-- The bosses whose fights have a theme of their own (src.audio); the Dark Hunter's is played by src.darkhunter
+local BOSS_MUSIC = { queen = true, golem = true, bigfish = true }
 
 function catacombs.count()
   return #levels
@@ -551,6 +560,16 @@ function catacombs.theme(i)
   return THEMES[i] or THEMES[#THEMES]
 end
 
+-- The box of area i's boss arena when it has far scenery of its own (theme.arenaParallax):
+-- x0, y0, x1, y1 (nil when it has none, or the area is not generated yet)
+function catacombs.arenaBox(i)
+  local lv = levels[i]
+  local a = lv and lv.info and lv.info.arena
+  if a and lv.theme.arenaParallax then
+    return a.x0, a.top, a.x1, a.floorY
+  end
+end
+
 -- The sky area that darkens into space at its top: { x0, x1, y0, y1 }, or nil
 function catacombs.spaceBand()
   for _, lv in ipairs(levels) do
@@ -578,6 +597,7 @@ local updateBossCamera
 function catacombs.start(w, first, seed, tiers)
   world, firstArea, baseSeed = w, first, seed
   minedecor.clear()
+  audio.setBoss(false) -- (a fight left by a death must not play on into the next run)
   levels = {}
   announced = {}
   fluids.clear()
@@ -605,6 +625,9 @@ function catacombs.start(w, first, seed, tiers)
       if lv.info and lv.info.arena and e.areaIndex == lv.index then
         if lv.boss then
           lv.boss.state = "done"
+        end
+        if BOSS_MUSIC[lv.theme.boss] then
+          audio.setBoss(false)
         end
         catacombs.openGates(lv)
       end
@@ -1443,6 +1466,9 @@ end
 function catacombs.startBoss(lv, player)
   local a, m = lv.info.arena, lv.boss.m
   lv.boss.state = "fight"
+  if BOSS_MUSIC[lv.theme.boss] then
+    audio.setBoss(true, lv.theme.boss)
+  end
   sealArena(lv)
   for _, e in ipairs(enemies.every()) do
     local cx, cy = e.body.x + e.body.w / 2, e.body.y + e.body.h / 2
@@ -1974,6 +2000,16 @@ function catacombs.drawEmissive(view)
   for _, lv in ipairs(levels) do
     if lv.theme.parallax == 9 and lv.theme.profile and inArea(lv, view) then
       parallax.drawSkyGlow(view.x, view.y, view.x + view.w, view.y + view.h, require("src.lighting").mask(), lv.theme.profile)
+    end
+  end
+  -- What glows in a boss arena's far scenery (src.bossbg), drawn bright over the lit scene but
+  -- hidden behind the terrain, so it never lights the ground in front of it
+  for _, lv in ipairs(levels) do
+    if lv.theme.arenaParallax and inArea(lv, view) then
+      local bx0, by0, bx1, by1 = catacombs.arenaBox(lv.index)
+      if bx0 and view.x + view.w > bx0 and view.x < bx1 and view.y + view.h > by0 and view.y < by1 then
+        bossbg.drawGlow(view, lv.theme.arenaParallax, { bx0, by0, bx1, by1 }, require("src.lighting").mask())
+      end
     end
   end
   fluids.drawGlints(require("src.lighting").list())

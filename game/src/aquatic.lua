@@ -432,15 +432,20 @@ end
 
 -- The fish boss -------------------------------------------------------------------------------
 
+local fishsprite = require("src.fishsprite")
+local bossbg = require("src.bossbg")
+local anglerart = require("src.anglerart")
+
 local STAGES = {
   { name = "Big Fish", w = 24, h = 15, damage = 10 },
   { name = "Bigger Fish", w = 48, h = 30, damage = 16 },
-  { name = "Even Bigger Fish", w = 96, h = 60, damage = 22 },
-  { name = "The Biggest Fish", w = 520, h = 280, damage = 0 },
+  { name = "Even Bigger Fish", w = 150, h = 46, damage = 22 }, -- (an eel: long, not tall)
+  { name = "The Biggest Fish", w = 470, h = 250, damage = 0 }, -- (the Angler Sharkwhale's body)
 }
-local STAGE_HP = 100
-local GATE_HP = 10 -- the fish holds at this much until the bigger one arrives
-local EAT_AT = 20 -- ...which comes at 20% of its health
+local STAGE_HP = 750
+local GATE_HP = 75 -- the fish holds at this much until the bigger one arrives
+local TOOTH_HP = 100 -- what each of the Biggest Fish's tusks takes before it breaks
+local EAT_AT = 150 -- ...which comes at 20% of its health
 
 local STYLE = {
   { back = { 0.36, 0.42, 0.48 }, body = { 0.62, 0.68, 0.70 }, light = { 0.82, 0.86, 0.86 }, belly = { 0.78, 0.30, 0.24 }, fin = { 0.70, 0.25, 0.20 } },
@@ -448,6 +453,8 @@ local STYLE = {
   { back = { 0.13, 0.13, 0.24 }, body = { 0.28, 0.30, 0.46 }, light = { 0.50, 0.54, 0.70 }, belly = { 0.36, 0.14, 0.20 }, fin = { 0.30, 0.10, 0.20 } },
   { back = { 0.10, 0.10, 0.18 }, body = { 0.24, 0.26, 0.40 }, light = { 0.44, 0.48, 0.64 }, belly = { 0.28, 0.09, 0.13 }, fin = { 0.22, 0.07, 0.14 } },
 }
+
+local stage4Lights, smallFishLights, tuskStates
 
 local boss = {
   name = "Big Fish",
@@ -467,8 +474,20 @@ local boss = {
   weight = 14,
   deathKind = "piranha",
   light = function(e)
-    local cx, cy = center(e)
-    return { cx, cy, math.min(420, 40 + e.body.w * 0.8), 0.55, 0.72, 1, 0.38 }
+    if e.stage == 4 then
+      return stage4Lights(e)
+    end
+    return smallFishLights(e)
+  end,
+  -- (the Biggest Fish cannot be hit anywhere but its tusks until they are all gone)
+  noBodyHit = function(e)
+    local n = 0
+    for i = 1, 4 do
+      if e.teeth and e.teeth[i] then
+        n = n + 1
+      end
+    end
+    return e.stage == 4 and n > 0
   end,
 }
 
@@ -481,7 +500,213 @@ local function fishGrid(st, flash)
   return c
 end
 
+-- The eel (stage 3): its picture is cut into eight segments that follow one another, so it
+-- bends like a body when it turns, instead of sliding about as one flat piece. A joint can only
+-- bend a little past the one before it (a tight bias), so the segments do not fold into each
+-- other; the tail end also sways as it swims, and a layer of purple streaks pulses along it.
+local EEL_SEGS = 8
+local EEL_MAX_BEND = 0.3 -- radians between one segment and the next
+
+-- the nine joints of a straight eel centred on (cx, cy), nose first
+local function eelStraight(cx, cy, ang, w)
+  local J, Ls = {}, w / EEL_SEGS
+  local fx, fy = math.cos(ang), math.sin(ang)
+  for i = 0, EEL_SEGS do
+    J[i] = { cx + fx * (w / 2 - i * Ls), cy + fy * (w / 2 - i * Ls) }
+  end
+  return J
+end
+
+local function wrapAngle(a)
+  return (a + math.pi) % (math.pi * 2) - math.pi
+end
+
+-- Each frame the nose is put where the head is, and every joint behind follows its leader, a
+-- segment's length away, bent no more than the limit
+local function updateEelChain(e)
+  local w = e.body.w
+  local cx, cy = center(e)
+  local ang = e.ang or 0
+  local J = e.eelJ
+  if not J then
+    e.eelJ = eelStraight(cx, cy, ang, w)
+    return
+  end
+  local Ls = w / EEL_SEGS
+  J[0][1], J[0][2] = cx + math.cos(ang) * w / 2, cy + math.sin(ang) * w / 2
+  local prev = ang + math.pi -- (the direction a segment points, nose to tail)
+  for i = 1, EEL_SEGS do
+    local a = math.atan2(J[i][2] - J[i - 1][2], J[i][1] - J[i - 1][1])
+    local d = wrapAngle(a - prev)
+    d = math.max(-EEL_MAX_BEND, math.min(EEL_MAX_BEND, d))
+    a = prev + d
+    J[i][1], J[i][2] = J[i - 1][1] + math.cos(a) * Ls, J[i - 1][2] + math.sin(a) * Ls
+    prev = a
+  end
+end
+
+-- The joints as drawn (the tail end swaying), the way the belly faces (1 or -1)
+local function eelDrawJoints(e, cx, cy, w, h, ang)
+  local J = (e and e.stage == 3 and e.eelJ) or eelStraight(cx, cy, ang, w)
+  local t = love.timer.getTime()
+  local px, py = -math.sin(ang), math.cos(ang)
+  local D = {}
+  for k = 0, EEL_SEGS do
+    local off = 0
+    if k > 0 then
+      off = h * 0.15 * (k / EEL_SEGS) ^ 1.1 * math.sin(t * 6 - k * 0.85)
+    end
+    D[k] = { J[k][1] + px * off, J[k][2] + py * off }
+  end
+  return D, math.cos(ang) < 0 and -1 or 1
+end
+
+local eelSegQuad
+local function drawEelChain(e, cx, cy, w, h, ang, flash, openMouth, alpha)
+  local base, streak = fishsprite.eel(w, h, openMouth, flash)
+  local D, flip = eelDrawJoints(e, cx, cy, w, h, ang)
+  local t = love.timer.getTime()
+  local Ls = w / EEL_SEGS
+  eelSegQuad = eelSegQuad or love.graphics.newQuad(0, 0, 1, 1, 1, 1)
+  for i = 0, EEL_SEGS - 1 do
+    local x1 = math.floor(w - (i + 1) * Ls + 0.5)
+    local x2 = math.floor(w - i * Ls + 0.5)
+    local qx = math.max(0, x1 - 1)
+    local qw = math.min(w, x2 + 1) - qx
+    eelSegQuad:setViewport(qx, 0, qw, h, w, h)
+    local ax, ay, bx, by = D[i][1], D[i][2], D[i + 1][1], D[i + 1][2]
+    local rot = math.atan2(ay - by, ax - bx)
+    local mx, my = (ax + bx) / 2, (ay + by) / 2
+    local ox, oy = (x1 + x2) / 2 - qx, h / 2
+    love.graphics.setColor(1, 1, 1, alpha or 1)
+    love.graphics.draw(base, eelSegQuad, mx, my, rot, 1, flip, ox, oy)
+    if not flash and not alpha then
+      local f = (EEL_SEGS - i) / EEL_SEGS
+      local pulse = 0.3 + 0.7 * math.max(0, math.sin(f * 11 - t * 7))
+      love.graphics.setColor(1, 1, 1, pulse)
+      love.graphics.draw(streak, eelSegQuad, mx, my, rot, 1, flip, ox, oy)
+    end
+  end
+end
+
+-- where a point of the eel is in the world: (segment number, along the segment -0.5..0.5 of its
+-- length, across it as a fraction of the body's height, + toward its belly)
+local function eelPoint(e, seg, along, across)
+  local b = e.body
+  local cx, cy = center(e)
+  local D, flip = eelDrawJoints(e, cx, cy, b.w, b.h, e.ang or 0)
+  local ax, ay, bx, by = D[seg][1], D[seg][2], D[seg + 1][1], D[seg + 1][2]
+  local rot = math.atan2(ay - by, ax - bx)
+  local mx, my = (ax + bx) / 2, (ay + by) / 2
+  local lx, ly = along * (b.w / EEL_SEGS), across * b.h * flip
+  return mx + math.cos(rot) * lx - math.sin(rot) * ly, my + math.sin(rot) * lx + math.cos(rot) * ly
+end
+
+-- The Biggest Fish is the Angler Sharkwhale (src.anglerart), a picture facing left: it is drawn
+-- mirrored, so its head is at +x like the other fish, its body's box centred on the boss's
+local ART
+local function art()
+  if not ART then
+    ART = anglerart.bake()
+  end
+  return ART
+end
+
+-- a point of the picture (in its pixels) as a fraction of the boss's box, head at +x
+local function artFrac(ax, ay, w, h)
+  local bd = art().body
+  local bcx, bcy = (bd[1] + bd[3]) / 2, (bd[2] + bd[4]) / 2
+  return (ax - bcx) / w, (ay - bcy) / h
+end
+
+local function drawAngler(cx, cy, ang, flash, teeth, phase, states)
+  love.graphics.push()
+  love.graphics.translate(math.floor(cx + 0.5), math.floor(cy + 0.5))
+  love.graphics.rotate(ang or 0)
+  love.graphics.scale(1, math.cos(ang or 0) < 0 and -1 or 1)
+  anglerart.draw(art(), love.timer.getTime() + (phase or 0), flash, teeth, nil, states)
+  love.graphics.pop()
+end
+
+-- The Bigger Fish: baked at its real size, then swum in strips, the tail end sweeping side to side
+local midQuads = {}
+local function midWave(w, h, t, x)
+  local f = x / w
+  return math.floor(math.sin(f * 6 - t * 6.5) * (h * 0.07 * (1 - f) ^ 1.3 + 0.3) + 0.5)
+end
+
+local function drawMid(cx, cy, w, h, ang, flash, beat, openMouth, alpha, fold, side)
+  local img = fishsprite.get(STYLE[2], 2, w, h, beat, openMouth, flash)
+  local qs = midQuads[w .. "x" .. h]
+  if not qs then
+    qs = {}
+    for x = 0, w - 1 do
+      qs[x] = love.graphics.newQuad(x, 0, 1, h, w, h)
+    end
+    midQuads[w .. "x" .. h] = qs
+  end
+  local t = love.timer.getTime()
+  love.graphics.push()
+  love.graphics.translate(cx, cy)
+  love.graphics.rotate(ang or 0)
+  love.graphics.scale(1, math.cos(ang or 0) < 0 and -1 or 1)
+  love.graphics.translate(-w / 2, -h / 2)
+  love.graphics.setColor(1, 1, 1, alpha or 1)
+  fold = fold or 0
+  local squeeze = 1 - 0.34 * fold
+  for x = 0, w - 1 do
+    local f = x / w
+    -- folding: the tail pulls in toward the head and curls to one side, and the body shortens
+    local dy = midWave(w, h, t, x) + math.floor((side or 1) * fold * h * 1.25 * (1 - f) ^ 1.7 + 0.5)
+    local dx = math.floor(w - (w - x) * squeeze + 0.5) - x
+    love.graphics.draw(img, qs[x], x + dx, dy)
+  end
+  love.graphics.pop()
+end
+
+-- What the fish blocks of the hunter's light: the Sharkwhale as it is shaped (soft: a partial
+-- blocker), the smaller fish their box
+boss.occluders = function(e)
+  local b = e.body
+  local cx, cy = center(e)
+  if e.stage == 3 then
+    return drawEelChain(e, cx, cy, b.w, b.h, e.ang or 0, false, false, 0.75)
+  elseif e.stage == 2 then
+    return drawMid(cx, cy, b.w, b.h, e.ang or 0, false, 0, false, 0.75)
+  elseif e.stage ~= 4 then
+    love.graphics.setColor(1, 1, 1, 0.75)
+    love.graphics.rectangle("fill", b.x + 1, b.y + 1, math.max(1, b.w - 2), math.max(1, b.h - 2))
+    return
+  end
+  love.graphics.push()
+  love.graphics.translate(math.floor(cx + 0.5), math.floor(cy + 0.5))
+  love.graphics.rotate(e.ang or 0)
+  love.graphics.scale(1, math.cos(e.ang or 0) < 0 and -1 or 1)
+  anglerart.draw(art(), love.timer.getTime() + e.phase, false, e.teeth, 0.75)
+  love.graphics.pop()
+end
+
 local function drawFishBody(e, stage, cx, cy, w, h, ang, flash, beat, openMouth)
+  if stage == 4 then
+    return drawAngler(cx, cy, ang, flash, nil, e and e.phase)
+  end
+  if stage == 3 then
+    return drawEelChain(e, cx, cy, w, h, ang, flash, openMouth)
+  end
+  if stage == 2 then
+    return drawMid(cx, cy, w, h, ang, flash, beat, openMouth, nil, e and e.fold, e and e.foldSide)
+  end
+  if stage >= 2 and stage < 4 then
+    local img = fishsprite.get(STYLE[stage], stage, w, h, beat, openMouth, flash)
+    love.graphics.push()
+    love.graphics.translate(cx, cy)
+    love.graphics.rotate(ang or 0)
+    love.graphics.scale(1, math.cos(ang or 0) < 0 and -1 or 1)
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.draw(img, -w / 2, -h / 2)
+    love.graphics.pop()
+    return
+  end
   local c = fishGrid(stage, flash)
   love.graphics.push()
   love.graphics.translate(cx, cy)
@@ -569,24 +794,85 @@ local function framePoint(e)
   end
 end
 
--- The last fish's teeth: two fangs in each jaw, standing out beyond the front of its body
--- (centre and size as fractions of it), so a shot reaches them before it reaches the body
-local TEETH = {
-  { 0.585, -0.02, 0.10, 0.24 }, -- upper, front
-  { 0.525, 0.0, 0.07, 0.16 }, -- upper, back
-  { 0.595, 0.27, 0.10, 0.24 }, -- lower, front
-  { 0.535, 0.23, 0.07, 0.16 }, -- lower, back
-}
+-- The last fish's teeth: its four tusks (upper front, upper back, lower front, lower back),
+-- boxed from the picture as fractions of its body (centre u, v, width, height). They stand out
+-- in the open maw, so a shot reaches them before it reaches the body behind
+local TEETH
+local function teethTable()
+  if not TEETH then
+    TEETH = {}
+    local st = STAGES[4]
+    for i, bx in ipairs(art().boxes) do
+      local u, v = artFrac((bx[1] + bx[3]) / 2, (bx[2] + bx[4]) / 2, st.w, st.h)
+      TEETH[i] = { u, v, (bx[3] - bx[1]) / st.w, (bx[4] - bx[2]) / st.h, cx = (bx[1] + bx[3]) / 2 }
+    end
+  end
+  return TEETH
+end
 
 local function toothRect(e, i)
   local b = e.body
   local P = framePoint(e)
-  local t = TEETH[i]
-  local x, y = P(t[1], t[2])
+  local t = teethTable()[i]
+  local v = t[2]
+  if i >= 3 then
+    -- the lower jaw is open a little: its tusks have dropped with it
+    v = v + anglerart.jawDy(art(), love.timer.getTime() + e.phase, t.cx) / b.h
+  end
+  local x, y = P(t[1], v)
   local tw, th = t[3] * b.w, t[4] * b.h
   local ca, sa = math.abs(math.cos(e.ang or 0)), math.abs(math.sin(e.ang or 0))
   local bw, bh = tw * ca + th * sa, tw * sa + th * ca
   return x - bw / 2, y - bh / 2, bw, bh
+end
+
+-- The lights of the first three fish: a cool wash over each, a glow at the eye, and on the eel
+-- the purple streaks that run down it, pulsing
+smallFishLights = function(e)
+  local b = e.body
+  local cx, cy = center(e)
+  local P = framePoint(e)
+  local t = love.timer.getTime()
+  local out = { { cx, cy, math.min(420, 40 + b.w * 0.8), 0.55, 0.72, 1, 0.38 } }
+  if e.stage == 3 then
+    out[1] = { cx, cy, 190, 0.5, 0.45, 0.95, 0.28 }
+    local ex, ey = eelPoint(e, 0, -0.45, -0.1)
+    out[#out + 1] = { ex, ey, 64, 1, 0.45, 0.9, 0.6 }
+    for _, seg in ipairs({ 2, 4, 6 }) do
+      local f = (EEL_SEGS - seg) / EEL_SEGS
+      local pulse = 0.3 + 0.7 * math.max(0, math.sin(f * 11 - t * 7))
+      local x, y = eelPoint(e, seg, 0, 0)
+      out[#out + 1] = { x, y, 54, 0.7, 0.35, 1, 0.5 * pulse }
+    end
+  elseif e.stage == 2 then
+    local ex, ey = P(0.795 - 0.5, 0.37 - 0.5)
+    out[#out + 1] = { ex, ey, 40, 1, 0.3, 0.2, 0.5 }
+  else
+    local ex, ey = P(18.5 / 24 - 0.5, 5 / 15 - 0.5)
+    out[#out + 1] = { ex, ey, 26, 1, 0.5, 0.3, 0.5 }
+  end
+  return out
+end
+
+-- The Biggest Fish's lights, where its lure, eye and fin tips are this moment
+stage4Lights = function(e)
+  local t = love.timer.getTime() + e.phase
+  local b = e.body
+  local P = framePoint(e)
+  local cx, cy = center(e)
+  local pulse = 0.85 + 0.15 * math.sin(t * 2.5)
+  local out = { { cx, cy, 240, 0.25, 0.45, 0.8, 0.22 } } -- (a faint wash so its bulk can be seen)
+  for _, l in ipairs(anglerart.lights(art(), t)) do
+    local x, y = P(l.x / b.w, l.y / b.h)
+    if l.kind == "lure" then
+      out[#out + 1] = { x, y, 300, 0.35, 0.8, 1, 0.75 * pulse }
+    elseif l.kind == "eye" then
+      out[#out + 1] = { x, y, 70, 0.3, 0.85, 1, 0.5 }
+    else
+      out[#out + 1] = { x, y, 46, 0.3, 0.75, 1, 0.4 * pulse }
+    end
+  end
+  return out
 end
 
 local function teethLeft(e)
@@ -599,108 +885,58 @@ local function teethLeft(e)
   return n
 end
 
--- A shot can hit a tooth even where it is outside the body's box
-local function extraHit(e, px, py)
-  if e.stage ~= 4 or not e.teeth then
-    return false
-  end
+-- How worn each tusk looks: 0 whole, 1 under 60% of its strength left, 2 under 30%
+function tuskStates(e)
+  local out = {}
   for i = 1, 4 do
-    if e.teeth[i] then
-      local tx, ty, tw, th = toothRect(e, i)
-      if px >= tx - 3 and px <= tx + tw + 3 and py >= ty - 3 and py <= ty + th + 3 then
-        return true
-      end
-    end
+    local r = (e.teethHp and e.teethHp[i] or TOOTH_HP) / TOOTH_HP
+    out[i] = r > 0.6 and 0 or (r > 0.3 and 1 or 2)
   end
-  return false
+  return out
 end
 
--- The Biggest Fish: a huge head and a gaping, fanged maw, a ribbed dorsal fin, a
--- pair of big orange bulbs on its flank (not its eyes) and a small red real eye
-local function drawBiggest(e)
-  local b = e.body
-  local w, h = b.w, b.h
-  local flash = e.flash > 0
+-- Which tusk (if any) is at a point of the world: its own pixels, a touch smaller, as drawn
+local function toothAt(e, px, py)
+  if e.stage ~= 4 or not e.teeth then
+    return nil
+  end
+  local a = art()
+  local cx, cy = center(e)
+  local ang = e.ang or 0
+  local ca, sa = math.cos(ang), math.sin(ang)
+  local dx, dy = px - cx, py - cy
+  local lx, ly = dx * ca + dy * sa, -dx * sa + dy * ca
+  if ca < 0 then
+    ly = -ly
+  end
+  local bd = a.body
+  local ax = lx + math.floor((bd[1] + bd[3]) / 2 + 0.5)
+  local ay = ly + math.floor((bd[2] + bd[4]) / 2 + 0.5)
   local t = love.timer.getTime() + e.phase
-  local P = framePoint(e)
-  local function poly(col, ...)
-    local pts = { ... }
-    local out = {}
-    for i = 1, #pts, 2 do
-      local x, y = P(pts[i], pts[i + 1])
-      out[#out + 1], out[#out + 2] = x, y
-    end
-    love.graphics.setColor(col[1], col[2], col[3], col[4] or 1)
-    love.graphics.polygon("fill", out)
-  end
-  local function C(c)
-    return flash and { 1, 1, 1 } or c
-  end
-  local body, dark, belly, fin = C({ 0.30, 0.36, 0.44 }), C({ 0.14, 0.17, 0.24 }), C({ 0.56, 0.62, 0.68 }), C({ 0.20, 0.24, 0.34 })
-  local sway = math.sin(t * 2) * 0.02
-  -- tail
-  poly(fin, -0.36, -0.04, -0.52, -0.2 + sway, -0.47, 0.0, -0.52, 0.2 - sway, -0.36, 0.06)
-  -- dorsal fin, with ribs
-  poly(fin, -0.28, -0.3, -0.12, -0.52, 0.08, -0.5, 0.2, -0.3)
-  love.graphics.setColor(dark[1], dark[2], dark[3], 0.8)
-  for i = 0, 4 do
-    local x0, y0 = P(-0.22 + i * 0.07, -0.3)
-    local x1, y1 = P(-0.16 + i * 0.065, -0.48)
-    love.graphics.line(x0, y0, x1, y1)
-  end
-  -- the round body and the pale belly
-  poly(body, -0.42, 0.0, -0.3, -0.3, -0.05, -0.37, 0.24, -0.33, 0.4, -0.2, 0.4, 0.2, 0.2, 0.36, -0.1, 0.4, -0.32, 0.28)
-  poly(belly, -0.38, 0.12, -0.1, 0.34, 0.2, 0.32, 0.38, 0.18, 0.1, 0.4, -0.2, 0.42, -0.34, 0.28)
-  -- pectoral fin
-  poly(fin, -0.02, 0.2, 0.12, 0.34, 0.06, 0.46, -0.1, 0.34)
-  -- gill slits
-  love.graphics.setColor(dark[1], dark[2], dark[3], 0.9)
-  for i = 0, 2 do
-    local x0, y0 = P(0.04 + i * 0.03, -0.06)
-    local x1, y1 = P(0.01 + i * 0.03, 0.14)
-    love.graphics.line(x0, y0, x1, y1)
-  end
-  -- the head: an upper jaw reaching out past the body, the lower jaw hanging open
-  local open = 0.05 * math.sin(t * 1.3)
-  poly(body, 0.2, -0.33, 0.5, -0.18, 0.64, -0.06, 0.62, -0.01, 0.22, 0.0)
-  poly(C({ 0.30, 0.04, 0.07 }), 0.62, -0.01, 0.62, 0.27 + open, 0.14, 0.12, 0.14, 0.02)
-  poly(belly, 0.62, 0.27 + open, 0.64, 0.43 + open, 0.02, 0.36, 0.14, 0.12)
-  poly(dark, 0.62, -0.01, 0.62, 0.03, 0.2, 0.03, 0.22, -0.02)
-  -- the four teeth: curved fangs, or the stump of a broken one
-  local bone = C({ 0.95, 0.93, 0.84 })
+  local st = tuskStates(e)
   for i = 1, 4 do
-    local tu = TEETH[i]
-    local up = i <= 2
-    local x0, x1 = tu[1] - tu[3] / 2, tu[1] + tu[3] / 2
-    local y0, y1 = tu[2] - tu[4] / 2, tu[2] + tu[4] / 2
-    if e.teeth and e.teeth[i] then
-      if up then
-        poly(bone, x0, y0, x1, y0, x1 + tu[3] * 0.2, y1)
-      else
-        poly(bone, x0, y1, x1, y1, x1 + tu[3] * 0.2, y0)
+    if e.teeth[i] then
+      local yy = ay
+      if i >= 3 then
+        yy = ay - anglerart.jawDy(a, t, ax) -- (the lower tusks ride the jaw)
       end
-      local ax, ay = P(tu[1], up and y0 or y1)
-      local bx, by = P(tu[1] + tu[3] * 0.1, up and y0 + tu[4] * 0.8 or y1 - tu[4] * 0.8)
-      love.graphics.setColor(0.6, 0.55, 0.45)
-      love.graphics.line(ax, ay, bx, by)
-    else
-      local sy0 = up and y0 or y1 - tu[4] * 0.2
-      poly({ 0.58, 0.52, 0.44 }, x0 + tu[3] * 0.15, sy0, x1 - tu[3] * 0.15, sy0, x1 - tu[3] * 0.15, sy0 + tu[4] * 0.2, x0 + tu[3] * 0.15, sy0 + tu[4] * 0.2)
+      if anglerart.tuskHit(a, i, st[i], ax, yy) then
+        return i
+      end
     end
   end
-  -- the big orange bulb: it is not an eye
-  local bx, by = P(-0.04, -0.12)
-  local br = h * 0.1
-  love.graphics.setColor(dark[1], dark[2], dark[3])
-  love.graphics.circle("fill", bx, by, br + 4)
-  love.graphics.setColor(flash and 1 or 0.95, flash and 1 or 0.45, flash and 1 or 0.1)
-  love.graphics.circle("fill", bx, by, br)
-  love.graphics.setColor(1, 0.8, 0.4, 0.8)
-  love.graphics.circle("fill", bx - br * 0.3, by - br * 0.3, br * 0.4)
-  -- its real eye: a small red dot
-  local ex, ey = P(0.37, -0.2)
-  love.graphics.setColor(1, 0.1, 0.1)
-  love.graphics.circle("fill", ex, ey, math.max(3, h * 0.014))
+  return nil
+end
+
+-- A shot can hit a tooth even where it is outside the body's box
+local function extraHit(e, px, py)
+  return toothAt(e, px, py) ~= nil
+end
+
+-- The Biggest Fish: the Angler Sharkwhale, with whichever tusks it still has
+local function drawBiggest(e)
+  local cx, cy = center(e)
+  drawAngler(cx, cy, e.ang or 0, e.flash > 0, e.teeth or {}, e.phase, tuskStates(e))
 end
 
 local function drawBigFish(e)
@@ -717,33 +953,7 @@ local function drawBigFish(e)
 end
 
 local function drawBigFishGlow(e)
-  local b = e.body
-  local w, h = b.w, b.h
-  local P = framePoint(e)
-  if e.stage == 4 then
-    local pulse = 0.6 + 0.3 * math.sin(love.timer.getTime() * 3)
-    local bx, by = P(-0.04, -0.12)
-    love.graphics.setColor(1, 0.5, 0.1, 0.35 * pulse)
-    love.graphics.circle("fill", bx, by, h * 0.17)
-    love.graphics.setColor(1, 0.7, 0.2, 0.55 * pulse)
-    love.graphics.circle("fill", bx, by, h * 0.1)
-    local ex, ey = P(0.37, -0.2)
-    love.graphics.setColor(1, 0.1, 0.1, 0.9)
-    love.graphics.circle("fill", ex, ey, math.max(3, h * 0.016))
-    -- the teeth, lit, so they can be shot at
-    for i = 1, 4 do
-      if e.teeth and e.teeth[i] then
-        local tx, ty, tw, th = toothRect(e, i)
-        love.graphics.setColor(1, 0.97, 0.85, 0.55)
-        love.graphics.rectangle("fill", tx + tw * 0.2, ty + th * 0.1, tw * 0.6, th * 0.8)
-      end
-    end
-    return
-  end
-  -- the eye
-  local ex, ey = P(18.5 / 24 - 0.5, 5 / 15 - 0.5)
-  love.graphics.setColor(1, 0.35, 0.2, 0.9)
-  love.graphics.circle("fill", ex, ey, math.max(1, math.min(w / 24, 14)))
+  -- (nothing is painted over the fish: its lights are real lights, see smallFishLights and stage4Lights)
 end
 
 -- A fish of a stage's size, an eating one, comes in from far away
@@ -770,16 +980,21 @@ local function stageInit(e, n, cx, cy)
   e.bs = { mode = "approach", t = 0, n = 0 }
   e.gate, e.eater, e.tele = nil, nil, nil
   e.teeth = n == 4 and { true, true, true, true } or nil
+  if n >= 3 then
+    art() -- (bake the Sharkwhale now, before it comes to eat the eel, not mid-fight)
+  end
   e.retreatT = nil
+  e.chain, e.fold, e.eelJ = nil, nil, nil
+  e.teethHp = n == 4 and { TOOTH_HP, TOOTH_HP, TOOTH_HP, TOOTH_HP } or nil
 end
 
-local function clampToArena(e)
+-- a centre (cx, cy) for the fish moved to the nearest place it can be inside its arena
+local function arenaClampPoint(e, cx, cy, bw, bh)
   local a = e.arena
   if not a then
-    return
+    return cx, cy
   end
-  local b = e.body
-  local cx, cy = center(e)
+  local b = { w = bw or e.body.w, h = bh or e.body.h }
   if a.shape == "round" then
     -- (an oval room: stay inside it, the bigger the fish the less room it has)
     local mx, my = (a.x0 + a.x1) / 2, (a.top + a.floorY) / 2
@@ -795,6 +1010,15 @@ local function clampToArena(e)
     cx = math.max(a.x0 + b.w / 2, math.min(a.x1 - b.w / 2, cx))
     cy = math.max(a.top + b.h / 2, math.min(a.floorY - b.h / 2, cy))
   end
+  return cx, cy
+end
+
+local function clampToArena(e)
+  if not e.arena then
+    return
+  end
+  local b = e.body
+  local cx, cy = arenaClampPoint(e, center(e))
   b.x, b.y = cx - b.w / 2, cy - b.h / 2
 end
 
@@ -832,9 +1056,45 @@ local function jelliesAlive()
   return n
 end
 
-local function startEater(e)
+-- The smaller fish is gone, the bigger one is the boss
+local function finishEat(e, er, cx, cy)
+  local st = STAGES[er.stage]
+  sfx("fish_chomp", 1, 0.8)
+  for _ = 1, 18 do
+    effects.chunk(cx + (love.math.random() - 0.5) * e.body.w, cy + (love.math.random() - 0.5) * e.body.h, (love.math.random() - 0.5) * 160, (love.math.random() - 0.5) * 120, 2, 2, love.math.random() < 0.5 and { 0.8, 0.2, 0.2 } or { 0.7, 0.7, 0.75 }, 3)
+    effects.particle(cx, cy, (love.math.random() - 0.5) * 120, (love.math.random() - 0.5) * 120, 0.8, { 1, 0.4, 0.4 }, -20, true)
+  end
+  effects.ring(er.x, er.y, st.w * 0.6 + 14, { 1, 0.5, 0.4 })
+  local facing = er.facing or 1
+  local nx, ny = cx, cy -- (it takes the smaller fish's place: no jump)
+  if er.stop or er.big then
+    nx, ny = er.x, er.y -- (the last one stays where it stopped, well clear of the hunter)
+  end
+  stageInit(e, er.stage, nx, ny)
+  e.facing = facing
+  if er.big then
+    e.ang = er.ang
+  end
+  clampToArena(e)
+  effects.popup(nx, ny - st.h / 2 - 10, STAGES[er.stage].name, { 1, 0.5, 0.45 })
+  require("src.camera").shake(0.6)
+  e.invulnT = 0.8
+end
+
+local function startEater(e, px, py)
   e.gate = true
   local cx, cy = center(e)
+  if e.stage + 1 == 4 then
+    -- the Biggest Fish always comes in from the right of the arena, from out of sight
+    local ar = e.arena
+    local y = cy
+    if ar then
+      y = math.max(ar.top + 60, math.min(ar.floorY - 60, cy))
+    end
+    e.eater = { x = (ar and ar.x1 or cx + 700) + 300, y = y, stage = 4, t = 0, big = true, ang = math.pi, facing = -1, phase = "come" }
+    sfx("fish_groan", 1, 0.6)
+    return
+  end
   local a = love.math.random() * math.pi * 2
   local x, y = cx + math.cos(a) * 700, cy + math.sin(a) * 500
   if e.arena then
@@ -845,8 +1105,66 @@ local function startEater(e)
   sfx("fish_groan", 1, 0.7)
 end
 
+-- where the Biggest Fish's mouth is, while it is still only an eater
+local function eaterMouth(er)
+  local st = STAGES[er.stage]
+  local a = art()
+  local mu, mv = artFrac(a.mouthFront[1], a.mouthFront[2], st.w, st.h)
+  local ang = er.ang or 0
+  local ca, sa = math.cos(ang), math.sin(ang)
+  local fl = ca < 0 and -1 or 1
+  return er.x + mu * st.w * ca - mv * st.h * fl * sa, er.y + mu * st.w * sa + mv * st.h * fl * ca
+end
+
+-- It swims in from the right, level with the eel, and stops a little way off; then it draws the
+-- eel in, faster and faster, and swallows it
+local function updateBigEater(e, dt)
+  local er = e.eater
+  er.t = er.t + dt
+  local st = STAGES[4]
+  local cx, cy = center(e)
+  if er.phase == "come" then
+    local tx, ty = arenaClampPoint(e, cx + st.w * 0.72 + 170, cy, st.w, st.h)
+    local d = hypot(tx - er.x, ty - er.y)
+    if d > 1 then
+      local sp = math.min(560, 100 + d * 1.4)
+      er.x, er.y = er.x + (tx - er.x) / d * sp * dt, er.y + (ty - er.y) / d * sp * dt
+    end
+    if d < 30 or er.t > 8 then
+      er.phase, er.suckT, er.sucking = "suck", 0, true
+      e.tele = nil
+      sfx("fish_groan", 1, 0.5)
+    end
+    return
+  end
+  er.suckT = er.suckT + dt
+  local mx, my = eaterMouth(er)
+  local b = e.body
+  local d = hypot(mx - cx, my - cy)
+  if d > 1 then
+    local sp = math.min(140 + 900 * er.suckT ^ 1.6, 80 + d * 6) -- (faster and faster, easing into the mouth)
+    b.vx, b.vy = (mx - cx) / d * sp, (my - cy) / d * sp
+    b.x, b.y = b.x + b.vx * dt, b.y + b.vy * dt
+    e.facing = b.vx < 0 and -1 or 1
+  end
+  -- water streaming into the mouth with it
+  for _ = 1, 2 do
+    local a = love.math.random() * math.pi * 2
+    local r = 50 + love.math.random() * 170
+    local sx, sy = mx + math.cos(a) * r, my + math.sin(a) * r
+    local life = 0.4 + love.math.random() * 0.3
+    effects.particle(sx, sy, (mx - sx) / life, (my - sy) / life, life, { 0.7, 0.9, 1 }, 0, false)
+  end
+  if (d < 35 and er.suckT > 0.8) or er.suckT > 2.4 then
+    finishEat(e, er, cx, cy)
+  end
+end
+
 local function updateEater(e, dt)
   local er = e.eater
+  if er.big then
+    return updateBigEater(e, dt)
+  end
   er.t = er.t + dt
   local cx, cy = center(e)
   local st = STAGES[er.stage]
@@ -857,28 +1175,30 @@ local function updateEater(e, dt)
     er.facing = cx < er.x and -1 or 1
     er.ang = math.atan2(cy - er.y, cx - er.x)
   end
-  if d < st.w * 0.35 + 8 or er.t > 7 then
-    -- chomp: the smaller fish is gone, the bigger one is the boss
-    sfx("fish_chomp", 1, 0.8)
-    for _ = 1, 18 do
-      effects.chunk(cx + (love.math.random() - 0.5) * e.body.w, cy + (love.math.random() - 0.5) * e.body.h, (love.math.random() - 0.5) * 160, (love.math.random() - 0.5) * 120, 2, 2, love.math.random() < 0.5 and { 0.8, 0.2, 0.2 } or { 0.7, 0.7, 0.75 }, 3)
-      effects.particle(cx, cy, (love.math.random() - 0.5) * 120, (love.math.random() - 0.5) * 120, 0.8, { 1, 0.4, 0.4 }, -20, true)
-    end
-    effects.ring(er.x, er.y, st.w * 0.6 + 14, { 1, 0.5, 0.4 })
-    local facing = er.facing or 1
-    local nx, ny = cx, cy -- (it takes the smaller fish's place: no jump)
-    stageInit(e, er.stage, nx, ny)
-    e.facing = facing
-    clampToArena(e)
-    effects.popup(nx, ny - st.h / 2 - 10, STAGES[er.stage].name, { 1, 0.5, 0.45 })
-    require("src.camera").shake(0.6)
-    e.invulnT = 0.8
+  if d < (er.stop or st.w * 0.35 + 8) or er.t > 7 then
+    finishEat(e, er, cx, cy)
   end
 end
 
 local function aimAngle(e, px, py)
   local cx, cy = center(e)
   return math.atan2(py - cy, px - cx)
+end
+
+-- At half health the smaller fish get faster and more dangerous
+local function isHalf(e)
+  return e.hp <= e.maxHp * 0.5
+end
+
+-- Small bubbles streaming off the fish's body while it dashes (rate per second)
+local function trailBubbles(e, dt, rate)
+  e.bubT = (e.bubT or 0) - dt
+  while e.bubT <= 0 do
+    e.bubT = e.bubT + 1 / rate
+    local P = framePoint(e)
+    local x, y = P(-0.5 + love.math.random() * 0.55, (love.math.random() - 0.5) * 0.7)
+    effects.particle(x, y, (love.math.random() - 0.5) * 36, -8 - love.math.random() * 28, 0.7 + love.math.random() * 0.6, { 0.72, 0.92, 1 }, -45, love.math.random() < 0.4)
+  end
 end
 
 local function bossUpdate(e, dt, world, player, px, py)
@@ -891,12 +1211,16 @@ local function bossUpdate(e, dt, world, player, px, py)
     e.hp, e.maxHp = STAGE_HP, STAGE_HP
   end
   e.invulnT = math.max(0, (e.invulnT or 0) - dt)
+  e.fold = math.max(0, (e.fold or 0) - dt * 3.5) -- (the bigger fish folds up when it turns: see drawMid)
   if e.dormant then
     e.state = "idle"
     b.vx, b.vy = 0, 0
     return -- (it lies in wait until the fight starts: see src.scenes.catacombs)
   end
   updateAngle(e, dt, px, py)
+  if e.stage == 3 then
+    updateEelChain(e)
+  end
   local bs = e.bs
   bs.t = bs.t + dt
   local cx, cy = center(e)
@@ -904,13 +1228,29 @@ local function bossUpdate(e, dt, world, player, px, py)
   local stage = e.stage
 
   if stage < 4 and not e.gate and e.hp <= EAT_AT then
-    startEater(e)
+    startEater(e, px, py)
   end
   if e.eater then
     updateEater(e, dt)
     if e.stage ~= stage then
       return -- (it has just been eaten: the bigger fish starts fresh next frame)
     end
+    if e.eater and e.eater.sucking then
+      return -- (being drawn in: it does nothing else)
+    end
+    -- at its threshold it gives up its attacks: it holds still and waits to be eaten (and if a
+    -- pass had taken it out of sight, it is brought back into the arena first)
+    e.tele = nil
+    local tx, ty = arenaClampPoint(e, cx, cy)
+    local d = hypot(tx - cx, ty - cy)
+    if d > 6 then
+      b.vx, b.vy = (tx - cx) / d * 520, (ty - cy) / d * 520
+      b.x, b.y = b.x + b.vx * dt, b.y + b.vy * dt
+      e.facing = b.vx < 0 and -1 or 1
+    else
+      b.vx, b.vy = 0, 0
+    end
+    return
   end
 
   if e.tele then
@@ -927,11 +1267,36 @@ local function bossUpdate(e, dt, world, player, px, py)
     end
   end
 
-  -- Stage 1: dart in, bite, dash away twice as far in a random direction ----------------
+  -- a sweep: the band is shown, the fish swims off out of sight to where the pass begins, waits
+  -- there a moment, then comes across. At half health it makes three passes at once, in three
+  -- lanes, back and forth
+  local function clampSweepY(y)
+    if e.arena then
+      y = math.max(e.arena.top + b.h, math.min(e.arena.floorY - b.h, y))
+    end
+    return y
+  end
+  local function laneTele(lanes, px0, t)
+    e.tele = { band = true, ys = lanes, y = lanes[1], x0 = px0 - 560, x1 = px0 + 560, t = t, total = t }
+  end
+  local function startLane(dir, lanes, lane, px0)
+    local y = lanes[lane]
+    setMode("sweepexit", { dir = dir, y = y, px = px0, sx = px0 - dir * 560, sy = y, lanes = lanes, lane = lane })
+  end
+  local function beginSweep(dir, px0, py0)
+    local y = clampSweepY(py0)
+    local lanes = isHalf(e) and { y, clampSweepY(y - 130), clampSweepY(y + 130) } or { y }
+    laneTele({ lanes[1] }, px0, 3)
+    startLane(dir, lanes, 1, px0)
+  end
+
+  -- Stage 1: dart in, bite, dash away twice as far in a random direction (faster at half health) --
   if stage == 1 then
+    local fast = isHalf(e)
+    local spd = fast and 470 or 300
     if bs.mode == "approach" then
       local a = aimAngle(e, px, py)
-      moveBy(e, math.cos(a) * 75, math.sin(a) * 75, dt)
+      moveBy(e, math.cos(a) * (fast and 115 or 75), math.sin(a) * (fast and 115 or 75), dt)
       if dist < 120 or bs.t > 3 then
         setMode("windup")
         faceToward(e, px)
@@ -939,80 +1304,123 @@ local function bossUpdate(e, dt, world, player, px, py)
     elseif bs.mode == "windup" then
       faceToward(e, px)
       b.vx, b.vy = 0, 0
-      if bs.t > 0.35 then
+      if bs.t > (fast and 0.18 or 0.35) then
         bs.dir = aimAngle(e, px, py)
         setMode("dash", { dir = bs.dir })
-        sfx("fish_dash", 1, 1.3)
+        sfx("fish_dash", 1, fast and 1.5 or 1.3)
       end
     elseif bs.mode == "dash" then
-      moveBy(e, math.cos(bs.dir) * 300, math.sin(bs.dir) * 300, dt)
-      if bs.t > 0.35 then
+      moveBy(e, math.cos(bs.dir) * spd, math.sin(bs.dir) * spd, dt)
+      trailBubbles(e, dt, 40)
+      if bs.t > (fast and 0.3 or 0.35) then
         -- away: a random heading in the half-circle facing away from the hunter, twice as far
         local away = bs.dir + math.pi + (love.math.random() - 0.5) * math.pi * 1.1
         setMode("away", { dir = away })
       end
     elseif bs.mode == "away" then
-      moveBy(e, math.cos(bs.dir) * 300, math.sin(bs.dir) * 300, dt)
-      if bs.t > 0.7 then
+      moveBy(e, math.cos(bs.dir) * spd, math.sin(bs.dir) * spd, dt)
+      trailBubbles(e, dt, 40)
+      if bs.t > (fast and 0.5 or 0.7) then
         setMode("approach")
       end
     end
 
-  -- Stage 2: fast zig-zag dashes (shown first by dotted lines), and a burst of bubbles -----
+  -- Stage 2: it bobs in a ring around the hunter; from there it spits bubbles (mostly) or makes a
+  -- zig-zag dash that always crosses the place the hunter was standing, then comes back to the
+  -- ring. At half health every attack comes twice in a row ------------------------------------------
   elseif stage == 2 then
+    local half = isHalf(e)
+    bs.dirn = bs.dirn or (love.math.random() < 0.5 and 1 or -1)
+    -- a ring around the hunter, breathing in and out, with a bob on top
+    local function ringPoint()
+      local t = e.phase
+      local rx = 225 + 30 * math.sin(t * 2.1)
+      local ry = 150 + 22 * math.sin(t * 2.1 + 1)
+      return arenaClampPoint(e, px + math.cos(bs.a) * rx, py + math.sin(bs.a) * ry + 16 * math.sin(t * 3.3))
+    end
+    local function toOrbit(atk)
+      setMode("orbit", { a = math.atan2(cy - py, cx - px), atk = atk })
+    end
     if bs.mode == "approach" then
-      local a = aimAngle(e, px, py)
-      moveBy(e, math.cos(a) * 85, math.sin(a) * 85, dt)
-      if bs.t > 0.55 then
-        bs.n = bs.n + 1
-        -- it alternates: a zig-zag, then a spit; far away it always zig-zags to catch up
-        if dist > 300 or (bs.n % 2 == 1 and dist > 140) then
-          -- far off: a wide zig-zag to catch up, the same size every time
-          local sx, sy = cx, cy
-          local a2 = aimAngle(e, px, py)
-          local pts = { { sx, sy } }
-          for i = 1, 4 do
-            local along = 190 * i
-            local side = (i % 2 == 1 and 1 or -1) * 200
-            pts[#pts + 1] = { sx + math.cos(a2) * along - math.sin(a2) * side, sy + math.sin(a2) * along + math.cos(a2) * side }
+      toOrbit(1.4)
+    elseif bs.mode == "orbit" then
+      bs.a = bs.a + dt * bs.dirn * (half and 1.5 or 1.05)
+      local tx, ty = ringPoint()
+      local d = math.max(1, hypot(tx - cx, ty - cy))
+      local sp = math.min(360, d * 4)
+      moveBy(e, (tx - cx) / d * sp, (ty - cy) / d * sp, dt)
+      faceToward(e, px)
+      bs.atk = bs.atk - dt
+      if bs.atk <= 0 and (d < 120 or bs.atk < -2) then
+        local kind = e.chain
+        e.chain = nil
+        if not kind then
+          bs.n = bs.n + 1
+          -- two spits, then a zig-zag
+          kind = (bs.n % 3 == 0) and "zig" or "bubbles"
+          if half then
+            e.chain = kind -- (and again)
           end
-          e.tele = { pts = pts, t = 1.0, total = 1.0 }
+        end
+        if kind == "zig" then
+          -- through the place the hunter is now: legs swing out either side of the line to it,
+          -- cross it at the hunter's spot, then carry on past it
+          local sx, sy = cx, cy
+          local dx, dy = px - sx, py - sy
+          local D = math.max(120, hypot(dx, dy))
+          local ux, uy = dx / D, dy / D
+          local nx, ny = -uy, ux
+          local sgn = love.math.random() < 0.5 and 1 or -1
+          local lat = 105
+          local function at(along, across)
+            return { sx + ux * along + nx * across * sgn, sy + uy * along + ny * across * sgn }
+          end
+          local pts = { { sx, sy }, at(D * 0.3, lat), at(D * 0.64, -lat), { px, py }, at(D + 150, lat), at(D + 290, -lat) }
+          for i = 2, #pts do
+            if i ~= 4 then
+              pts[i][1], pts[i][2] = arenaClampPoint(e, pts[i][1], pts[i][2])
+            end
+          end
+          e.tele = { pts = pts, t = 0.8, total = 0.8 }
           setMode("zigtele", { pts = pts })
         else
-          -- close in: it spits instead
-          setMode("bubbles")
-          faceToward(e, px)
+          setMode("bubbles", { fired = false })
           sfx("fish_groan", 0.7, 1.4)
         end
       end
     elseif bs.mode == "zigtele" then
       b.vx, b.vy = 0, 0
-      if bs.t >= 1.0 then
-        setMode("zig", { leg = 1 })
+      if bs.t >= 0.8 then
+        setMode("zig", { leg = 1, legT = 0 })
+        e.fold, e.foldSide = 0.5, 1
         sfx("fish_dash", 1, 1.1)
       end
     elseif bs.mode == "zig" then
       local p = bs.pts[bs.leg + 1]
       local d = hypot(p[1] - cx, p[2] - cy)
-      if d < 22 then
+      bs.legT = (bs.legT or 0) + dt
+      trailBubbles(e, dt, 55)
+      if d < 22 or bs.legT > 1.0 then
         bs.leg = bs.leg + 1
+        bs.legT = 0
+        e.fold = 1 -- it folds in on itself as it turns
+        e.foldSide = (bs.leg % 2 == 0) and 1 or -1
         if bs.leg >= #bs.pts then
-          setMode("rest")
+          toOrbit(e.chain and 0.3 or (half and 0.9 or 1.3))
           return
         end
         sfx("fish_dash", 0.6, 1.4)
       else
-        moveBy(e, (p[1] - cx) / d * 470, (p[2] - cy) / d * 470, dt)
-      end
-    elseif bs.mode == "rest" then
-      moveBy(e, 0, 0, dt)
-      if bs.t > 0.9 then
-        setMode("approach")
+        local sp = 540 * (half and 1.15 or 1)
+        if d < 60 then
+          sp = sp * 0.65 -- (it slows into a turn, so the fold shows)
+        end
+        moveBy(e, (p[1] - cx) / d * sp, (p[2] - cy) / d * sp, dt)
       end
     elseif bs.mode == "bubbles" then
       faceToward(e, px)
       b.vx, b.vy = 0, 0
-      if bs.t > 0.7 and not bs.fired then
+      if bs.t > 0.55 and not bs.fired then
         bs.fired = true
         local mx, my = cx + math.cos(e.ang or 0) * b.w * 0.45, cy + math.sin(e.ang or 0) * b.w * 0.45
         local base = aimAngle(e, px, py)
@@ -1022,8 +1430,8 @@ local function bossUpdate(e, dt, world, player, px, py)
         end
         sfx("fish_chomp", 0.6, 1.6)
       end
-      if bs.t > 1.2 then
-        setMode("approach")
+      if bs.t > 1.05 then
+        toOrbit(e.chain and 0.3 or (half and 0.9 or 1.4))
       end
     end
 
@@ -1036,8 +1444,21 @@ local function bossUpdate(e, dt, world, player, px, py)
       bs.a = bs.a + dt * 1.5
       local tx, ty = px + math.cos(bs.a) * 210, py + math.sin(bs.a) * 150
       local d = math.max(1, hypot(tx - cx, ty - cy))
-      moveBy(e, (tx - cx) / d * math.min(260, d * 3), (ty - cy) / d * math.min(260, d * 3), dt)
-      faceToward(e, px)
+      if bs.entering then
+        -- (coming back in from out of sight: it swims in, it does not pop into the arena)
+        tx, ty = arenaClampPoint(e, tx, ty)
+        d = math.max(1, hypot(tx - cx, ty - cy))
+        b.x, b.y = b.x + (tx - cx) / d * 520 * dt, b.y + (ty - cy) / d * 520 * dt
+        b.vx, b.vy = (tx - cx) / d * 520, (ty - cy) / d * 520
+        e.facing = b.vx < 0 and -1 or 1
+        if d < 90 or bs.t > 2.6 then
+          bs.entering = false
+          bs.t = 0
+        end
+      else
+        moveBy(e, (tx - cx) / d * math.min(260, d * 3), (ty - cy) / d * math.min(260, d * 3), dt)
+        faceToward(e, px)
+      end
       bs.shot = bs.shot - dt
       if bs.shot <= 0 then
         bs.shot = 1.25
@@ -1053,42 +1474,50 @@ local function bossUpdate(e, dt, world, player, px, py)
           sfx("fish_chomp", 0.5, 1.8)
         end
       end
-      if bs.t > 3.6 then
-        local y = py
-        if e.arena then
-          y = math.max(e.arena.top + b.h, math.min(e.arena.floorY - b.h, y))
-        end
-        local dir = 1
-        e.tele = { band = true, y = y, x0 = px - 560, x1 = px + 560, t = 1.1, total = 1.1 }
-        setMode("sweeptele", { dir = dir, y = y, px = px })
+      if bs.t > 3.6 and not bs.entering then
+        beginSweep(1, px, py)
       end
-    elseif bs.mode == "sweeptele" then
+    elseif bs.mode == "sweepexit" then
+      local tx, ty = bs.sx, bs.sy
+      local d = hypot(tx - cx, ty - cy)
+      trailBubbles(e, dt, 50)
+      if d < 30 or bs.t > 2.6 then
+        b.x, b.y = tx - b.w / 2, ty - b.h / 2
+        b.vx, b.vy = 0, 0
+        laneTele({ bs.lanes[bs.lane] }, bs.px, isHalf(e) and 0.3 or 0.6)
+        setMode("sweepwait")
+      else
+        local sp = 760
+        b.x, b.y = b.x + (tx - cx) / d * sp * dt, b.y + (ty - cy) / d * sp * dt
+        b.vx, b.vy = (tx - cx) / d * sp, (ty - cy) / d * sp
+        e.facing = b.vx < 0 and -1 or 1
+      end
+    elseif bs.mode == "sweepwait" then
       b.vx, b.vy = 0, 0
-      if bs.t > 1.1 then
-        -- out of sight to the left (or right), then across
-        local startX = bs.px - bs.dir * 560
-        b.x, b.y = startX - b.w / 2, bs.y - b.h / 2
-        e.facing = bs.dir
-        setMode("sweep")
+      e.ang = bs.dir > 0 and 0 or math.pi
+      e.facing = bs.dir
+      if bs.t > (isHalf(e) and 0.3 or 0.6) then
+        setMode("sweep", { lanes = bs.lanes, lane = bs.lane, dir = bs.dir, px = bs.px, y = bs.y })
         sfx("fish_dash", 1, 0.8)
         sfx("fish_groan", 0.8, 0.8)
       end
     elseif bs.mode == "sweep" then
-      b.x = b.x + bs.dir * 880 * dt
-      b.vx, b.vy = bs.dir * 880, 0
+      local sp = isHalf(e) and 1050 or 880
+      b.x = b.x + bs.dir * sp * dt
+      b.vx, b.vy = bs.dir * sp, 0
       e.ang = bs.dir > 0 and 0 or math.pi
       e.facing = bs.dir
-      if bs.t > 1.5 then
-        if bs.dir == 1 then
+      trailBubbles(e, dt, 70)
+      if bs.t > 1320 / sp then
+        if bs.lane < #bs.lanes then
+          -- the next lane, the other way
+          laneTele({ bs.lanes[bs.lane + 1] }, bs.px, 0.9) -- (the next lane's line shows only now)
+          startLane(-bs.dir, bs.lanes, bs.lane + 1, bs.px)
+        elseif bs.dir == 1 and #bs.lanes == 1 then
           -- and back the other way, at wherever the hunter has got to
-          local y = py
-          if e.arena then
-            y = math.max(e.arena.top + b.h, math.min(e.arena.floorY - b.h, y))
-          end
-          e.tele = { band = true, y = y, x0 = px - 560, x1 = px + 560, t = 1.1, total = 1.1 }
-          setMode("sweeptele", { dir = -1, y = y, px = px })
+          beginSweep(-1, px, py)
         else
-          setMode("orbit", { a = math.atan2(cy - py, cx - px), shot = 0.6 })
+          setMode("orbit", { a = math.atan2(cy - py, cx - px), shot = 0.6, entering = true })
         end
       end
     end
@@ -1100,13 +1529,27 @@ local function bossUpdate(e, dt, world, player, px, py)
     if retreating then
       e.retreatT = e.retreatT - dt
       local a = aimAngle(e, px, py) + math.pi
-      moveBy(e, math.cos(a) * 230, math.sin(a) * 230, dt)
+      local spd = e.retreatSpd or 230
+      moveBy(e, math.cos(a) * spd, math.sin(a) * spd, dt)
       e.facing = px < cx and -1 or 1
     else
       local a = aimAngle(e, px, py)
-      -- (faster than he can swim)
-      moveBy(e, math.cos(a) * 112, math.sin(a) * 112, dt)
+      -- it comes on slowly, but keeps level with the hunter (so he cannot just go over it)
+      local vy = math.max(-130, math.min(130, (py - cy) * 2.4))
+      moveBy(e, math.cos(a) * 56, vy, dt)
       e.facing = px < cx and -1 or 1
+    end
+    -- a few small bubbles drawn into its mouth
+    e.suckT = (e.suckT or 0) - dt
+    if e.suckT <= 0 then
+      e.suckT = 0.13 + love.math.random() * 0.1
+      local a = art()
+      local Pf = framePoint(e)
+      local mu, mv = artFrac(a.mouthFront[1], a.mouthFront[2], b.w, b.h)
+      local tx, ty = Pf(mu - 0.02, mv)
+      local sx, sy = Pf(mu + 0.12 + love.math.random() * 0.22, mv + (love.math.random() - 0.5) * 0.45)
+      local life = 0.8 + love.math.random() * 0.5
+      effects.particle(sx, sy, (tx - sx) / life, (ty - sy) / life, life, { 0.7, 0.9, 1 }, 0, false)
     end
     -- the maw: a bite hurts a lot
     if not player.dead and not retreating then
@@ -1117,6 +1560,7 @@ local function bossUpdate(e, dt, world, player, px, py)
         if player:hurt(math.floor(32 * e.dmgMul + 0.5), mx, my, "bigfish") then
           sfx("fish_chomp", 1, 0.7)
           e.retreatT = 0.9
+          e.retreatSpd = 230
         end
       end
     end
@@ -1152,9 +1596,20 @@ local function bossFilter(e, amount)
       for i = 1, 4 do
         if e.teeth[i] then
           local tx, ty, tw, th = toothRect(e, i)
-          if x >= tx - 4 and x <= tx + tw + 4 and y >= ty - 4 and y <= ty + th + 4 then
+          if toothAt(e, x, y) == i then
+            e.teethHp = e.teethHp or { TOOTH_HP, TOOTH_HP, TOOTH_HP, TOOTH_HP }
+            e.teethHp[i] = e.teethHp[i] - math.max(1, amount)
+            if e.teethHp[i] > 0 then
+              -- it chips, it does not break yet
+              sfx("tooth_break", 0.35, 1.7 + i * 0.05)
+              for _ = 1, 3 do
+                effects.chunk(x, y, (love.math.random() - 0.5) * 120, -love.math.random() * 90, 2, 2, { 0.94, 0.92, 0.84 }, 0.8)
+              end
+              return 0
+            end
             e.teeth[i] = false
-            e.retreatT = 2.6
+            e.retreatT = 0.6
+            e.retreatSpd = 156 -- (a short step back: about 95 px)
             sfx("tooth_break", 1, 0.8 + i * 0.05)
             sfx("fish_groan", 1, 0.8)
             for _ = 1, 12 do
@@ -1167,11 +1622,8 @@ local function bossFilter(e, amount)
         end
       end
     end
-    -- no shield, but the body barely feels it until the teeth are gone
-    e.chip = (e.chip or 0) + amount * 0.01
-    local whole = math.floor(e.chip)
-    e.chip = e.chip - whole
-    return whole
+    -- the body takes nothing until the teeth are gone
+    return 0
   end
   return amount
 end
@@ -1224,6 +1676,20 @@ enemies.VOICES.bigfish = { "fish_groan", 6, 11, 1 }
 -- Shots in flight, and the fish's telegraphs -----------------------------------------------------
 
 function enemies.afterUpdate(dt, world, player, px, py)
+  -- The giant waiting in the dark of the Deep's background (src.bossbg) shows while the fish are
+  -- still small, and goes out once the eel is under half its health
+  local want, stage, cx, cy = false, 1, nil, nil
+  for _, e in ipairs(enemies.all()) do
+    if e.kind == "bigfish" and not e.dead then
+      stage = e.stage or 1
+      want = stage < 3 or (stage == 3 and e.hp > (e.maxHp or STAGE_HP) * 0.5)
+      local a = e.arena
+      if a then
+        cx, cy = (a.x0 + a.x1) / 2, (a.top + a.floorY) / 2
+      end
+    end
+  end
+  bossbg.setLurk(dt, want, stage, cx, cy)
   for i = #shots, 1, -1 do
     local s = shots[i]
     s.life = s.life - dt
@@ -1273,8 +1739,9 @@ function enemies.afterDraw()
       if e.tele then
         love.graphics.setColor(1, 0.92, 0.15, pulse)
         if e.tele.band then
-          dotted(e.tele.x0, e.tele.y - e.body.h / 2, e.tele.x1, e.tele.y - e.body.h / 2)
-          dotted(e.tele.x0, e.tele.y + e.body.h / 2, e.tele.x1, e.tele.y + e.body.h / 2)
+          for _, ty in ipairs(e.tele.ys or { e.tele.y }) do
+            dotted(e.tele.x0, ty, e.tele.x1, ty)
+          end
         elseif e.tele.pts then
           for i = 1, #e.tele.pts - 1 do
             dotted(e.tele.pts[i][1], e.tele.pts[i][2], e.tele.pts[i + 1][1], e.tele.pts[i + 1][2])
@@ -1291,4 +1758,6 @@ function enemies.afterDraw()
 end
 
 aquatic.STAGES = STAGES
+aquatic.stageInit = stageInit
+aquatic.toothRect = toothRect
 return aquatic

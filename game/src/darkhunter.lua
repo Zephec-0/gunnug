@@ -997,6 +997,7 @@ enemies.GLOW.darkhunter = drawDarkHunterGlow
 
 -- His bullets and beams, every frame while he lives -----------------------------------------------------
 
+local hunterMusic = false
 local prevUpdate = enemies.afterUpdate
 enemies.afterUpdate = function(dt, world, player, px, py)
   if prevUpdate then
@@ -1009,7 +1010,10 @@ enemies.afterUpdate = function(dt, world, player, px, py)
       fighting = true
     end
   end
-  audio.setBoss(fighting)
+  if fighting ~= hunterMusic then
+    hunterMusic = fighting -- (only on a change: the other bosses play their own themes through the same switch)
+    audio.setBoss(fighting)
+  end
   if #shots == 0 and #beams == 0 then
     return
   end
@@ -1074,6 +1078,7 @@ local prevClear = enemies.clear
 enemies.clear = function()
   prevClear()
   shots, beams, swoopHit = {}, {}, {}
+  hunterMusic = false
   audio.setBoss(false)
 end
 

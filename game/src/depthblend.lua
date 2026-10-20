@@ -2,10 +2,12 @@
 -- scenery changing in one hard line where one area ends and the next begins, the
 -- next area's backdrop and parallax are drawn over the current one with a
 -- feathered edge, so each bleeds into the other (design doc §2a). Also used for
--- the shop's void (see catacombs.drawVoidRect).
+-- the shop's void (see catacombs.drawVoidRect), and for a boss arena that has far
+-- scenery of its own inside a bigger area (the Sulfur Queen's, src.bossbg).
 local config = require("src.config")
 local catacombs = require("src.scenes.catacombs")
 local parallax = require("src.parallax")
+local bossbg = require("src.bossbg")
 
 local depthblend = {}
 
@@ -50,6 +52,46 @@ local function layer(i, camX, camY, x0, y0, x1, y1)
 end
 depthblend.layer = layer
 
+-- A boss arena's own backdrop and scenery over x0..x1, y0..y1 (box: the whole arena)
+local function arenaLayer(i, camX, camY, x0, y0, x1, y1, box)
+  local th = catacombs.theme(i)
+  local c = th.arenaBack or th.backTop
+  love.graphics.setColor(c[1], c[2], c[3])
+  love.graphics.rectangle("fill", x0, y0, x1 - x0, y1 - y0)
+  bossbg.box = box
+  parallax.draw(th.arenaParallax, camX, camY, x0, y0, x1, y1, th.pillars)
+  bossbg.box = nil
+end
+
+-- Draws drawFn(x0, y0, x1, y1) for the part of the box ax0..ay1 (feathered by half the
+-- feather outside it) that the view reaches, faded out toward the box's edges
+local function blendBox(drawFn, ax0, ay0, ax1, ay1, camX, camY, vx0, vy0, vx1, vy1, feather)
+  feather = feather or FEATHER
+  local half = feather / 2
+  local x0, y0, x1, y1 = math.max(ax0 - half, vx0), math.max(ay0 - half, vy0), math.min(ax1 + half, vx1), math.min(ay1 + half, vy1)
+  if x1 <= x0 or y1 <= y0 then
+    return
+  end
+  love.graphics.push("all")
+  love.graphics.setCanvas(canvas)
+  love.graphics.origin()
+  love.graphics.clear(0, 0, 0, 0)
+  love.graphics.translate(-camX, -camY)
+  love.graphics.setScissor(math.floor(x0 - camX), math.floor(y0 - camY), math.ceil(x1 - x0), math.ceil(y1 - y0))
+  drawFn(x0, y0, x1, y1)
+  love.graphics.pop()
+  love.graphics.push("all")
+  love.graphics.setBlendMode("alpha", "premultiplied")
+  love.graphics.setShader(shader)
+  shader:send("box", { ax0, ay0, ax1, ay1 })
+  shader:send("origin", { camX, camY })
+  shader:send("size", { canvas:getDimensions() })
+  shader:send("feather", feather)
+  love.graphics.setColor(1, 1, 1, 1)
+  love.graphics.draw(canvas, camX, camY)
+  love.graphics.pop()
+end
+
 -- Draws the backgrounds of area `primary` over the whole view, then every other
 -- (ordinary) area the view reaches over it with feathered edges.
 function depthblend.draw(primary, camX, camY, vx0, vy0, vx1, vy1, top)
@@ -63,28 +105,18 @@ function depthblend.draw(primary, camX, camY, vx0, vy0, vx1, vy1, top)
     local th = catacombs.theme(i)
     local ax0, ay0, ax1, ay1 = catacombs.bounds(i)
     if i ~= primary and ax0 and not th.profile and not th.open then
-      local half = FEATHER / 2
-      local x0, y0, x1, y1 = math.max(ax0 - half, vx0), math.max(ay0 - half, vy0), math.min(ax1 + half, vx1), math.min(ay1 + half, vy1)
-      if x1 > x0 and y1 > y0 then
-        love.graphics.push("all")
-        love.graphics.setCanvas(canvas)
-        love.graphics.origin()
-        love.graphics.clear(0, 0, 0, 0)
-        love.graphics.translate(-camX, -camY)
-        love.graphics.setScissor(math.floor(x0 - camX), math.floor(y0 - camY), math.ceil(x1 - x0), math.ceil(y1 - y0))
+      blendBox(function(x0, y0, x1, y1)
         layer(i, camX, camY, x0, y0, x1, y1)
-        love.graphics.pop()
-        love.graphics.push("all")
-        love.graphics.setBlendMode("alpha", "premultiplied")
-        love.graphics.setShader(shader)
-        shader:send("box", { ax0, ay0, ax1, ay1 })
-        shader:send("origin", { camX, camY })
-        shader:send("size", { canvas:getDimensions() })
-        shader:send("feather", FEATHER)
-        love.graphics.setColor(1, 1, 1, 1)
-        love.graphics.draw(canvas, camX, camY)
-        love.graphics.pop()
-      end
+      end, ax0, ay0, ax1, ay1, camX, camY, vx0, vy0, vx1, vy1)
+    end
+  end
+  -- The boss arenas that have scenery of their own, over the area they sit in
+  for i = 1, catacombs.count() do
+    local bx0, by0, bx1, by1 = catacombs.arenaBox(i)
+    if bx0 then
+      blendBox(function(x0, y0, x1, y1)
+        arenaLayer(i, camX, camY, x0, y0, x1, y1, { bx0, by0, bx1, by1 })
+      end, bx0, by0, bx1, by1, camX, camY, vx0, vy0, vx1, vy1, 24) -- (a tight edge: the scenery stays inside the arena)
     end
   end
 end

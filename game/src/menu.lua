@@ -475,7 +475,7 @@ local DEFAULT_FOCUS = { compendium = "comp:cell:", slots = "slots:", settings = 
 -- buttons brighten and warm toward it, and cast shadows away from it onto the
 -- backdrop. Shadows are drawn pixel-chunky (one canvas pixel per world pixel).
 local light = { x = nil, y = nil }
-local lightShader, glowImage, shadowCanvas
+local lightShader, shadowShader, glowImage, shadowCanvas
 
 local function getLightShader()
   if lightShader == nil then
@@ -494,6 +494,24 @@ local function getLightShader()
     lightShader = ok and shader or false
   end
   return lightShader or nil
+end
+
+-- Draws the shadow canvas, softened a little more with four offset taps
+local function getShadowShader()
+  if shadowShader == nil then
+    local ok, shader = pcall(love.graphics.newShader, [[
+      extern vec2 texel;
+      vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
+        float c = 0.25 * (Texel(tex, uv + texel * vec2(-0.75, -0.75)).a
+                        + Texel(tex, uv + texel * vec2(0.75, -0.75)).a
+                        + Texel(tex, uv + texel * vec2(-0.75, 0.75)).a
+                        + Texel(tex, uv + texel * vec2(0.75, 0.75)).a);
+        return vec4(color.rgb, c * color.a);
+      }
+    ]])
+    shadowShader = ok and shader or false
+  end
+  return shadowShader or nil
 end
 
 local function lightFlicker()
@@ -523,12 +541,13 @@ local function drawGlow(lx, ly)
 end
 
 -- Each caster's shadow is its shape smeared away from the light; it grows
--- with distance. They are drawn small and scaled up (twice, offset half a
--- pixel) so the edges are soft, and the casters' own footprints are cut out
+-- with distance. They are drawn small and scaled up smoothly, so the edges
+-- are soft, and the casters' own footprints are cut out
 -- with a stencil (the buttons are translucent).
 local function drawShadows(lx, ly, logoX, logoY, logoScale)
   local ww, wh = love.graphics.getDimensions()
-  local k = math.max(1, math.floor(render.scale + 0.5)) * 2
+  local cell = math.max(1, math.floor(render.scale + 0.5))
+  local k = cell * 2.6
   local cw, ch = math.ceil(ww / k), math.ceil(wh / k)
   if not shadowCanvas or shadowCanvas:getWidth() ~= cw or shadowCanvas:getHeight() ~= ch then
     shadowCanvas = love.graphics.newCanvas(cw, ch)
@@ -568,10 +587,14 @@ local function drawShadows(lx, ly, logoX, logoY, logoScale)
     end
   end, "replace", 1)
   love.graphics.setStencilTest("equal", 0)
-  local a = 1 - math.sqrt(1 - 0.72)
-  love.graphics.setColor(0.01, 0.005, 0.02, a)
-  love.graphics.draw(shadowCanvas, -k / 2, -k / 2, 0, k, k)
-  love.graphics.draw(shadowCanvas, k / 2, k / 2, 0, k, k)
+  local shader = getShadowShader()
+  if shader then
+    shader:send("texel", { 1 / cw, 1 / ch })
+    love.graphics.setShader(shader)
+  end
+  love.graphics.setColor(0.01, 0.005, 0.02, 0.65)
+  love.graphics.draw(shadowCanvas, 0, 0, 0, k, k)
+  love.graphics.setShader()
   love.graphics.setStencilTest()
 end
 

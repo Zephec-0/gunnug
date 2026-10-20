@@ -63,6 +63,7 @@ local RING, FILL, GLINT = { 0.80, 0.16, 0.19 }, { 0.30, 0.02, 0.05 }, { 1.0, 0.6
 local GLASS_LIT, GLASS, GLASS_DARK = { 0.86, 0.84, 0.94 }, { 0.66, 0.62, 0.76 }, { 0.50, 0.46, 0.60 }
 local slosh, bob = { a = 0, v = 0 }, { a = 0, v = 0 } -- the surface's tilt, and its bob (springs)
 local lastPvx, lastPvy
+local hpFade = 0 -- how visible the health number is (it fades in while the mouse is over the bottle)
 local K = math.sqrt(0.5)
 
 -- Profiles, in units: L x T the body, NL x NT the neck, corner = the chamfer on the far corners and
@@ -123,6 +124,20 @@ end
 
 -- Draws the bottle centred at (cx, cy); u screen pixels to a unit
 function hud.drawHealthBar(player, u, cx, cy)
+  -- The whole bottle is drawn 10% more see-through
+  local realSetColor = love.graphics.setColor
+  love.graphics.setColor = function(r, g, b, a)
+    realSetColor(r, g, b, (a or 1) * 0.9)
+  end
+  local ok, l, t, r, bo = pcall(hud.drawBottle, player, u, cx, cy)
+  love.graphics.setColor = realSetColor
+  if not ok then
+    error(l, 0)
+  end
+  return l, t, r, bo
+end
+
+function hud.drawBottle(player, u, cx, cy)
   local now = love.timer.getTime()
   local dt = math.min(0.1, lastBarTime and now - lastBarTime or 0)
   lastBarTime = now
@@ -461,24 +476,20 @@ function hud.draw(player, scale)
   -- right (the sigil over its count) and the gold's coin stack at its lower left.
   local el, et, er = hud.bottleExtent(u)
   local bcx, bcy = ww - margin - er, margin - et
-  local bl, _, _, bb = hud.drawHealthBar(player, u, bcx, bcy)
+  local bl, bt, br, bb = hud.drawHealthBar(player, u, bcx, bcy)
   love.graphics.setColor(1, 1, 1)
   local hpText = tostring(math.floor(player.hp))
   local hf = hud.font(scale * (player.hp < 20 and 2.1 or 1.4)) -- (bigger still when nearly gone)
   local tx, ty = math.floor(bcx - hf:getWidth(hpText) / 2), math.floor(bcy - hf:getHeight() / 2)
-  -- The blood's red with a light grey outline
-  love.graphics.setFont(hf)
-  local o = math.max(1, math.floor(scale * 0.35))
-  love.graphics.setColor(0.80, 0.82, 0.88)
-  for dx = -o, o, o do
-    for dy = -o, o, o do
-      if dx ~= 0 or dy ~= 0 then
-        love.graphics.print(hpText, tx + dx, ty + dy)
-      end
-    end
+  -- Only shown while the mouse is over the bottle: white with its dark shadow
+  local mx, my = love.mouse.getPosition()
+  local over = mx >= bl and mx <= br and my >= bt and my <= bb
+  local step = math.min(0.1, love.timer.getDelta()) / 0.12 -- (a fade takes about a tenth of a second)
+  hpFade = math.max(0, math.min(1, hpFade + (over and step or -step)))
+  if hpFade > 0 then
+    love.graphics.setColor(1, 1, 1, hpFade)
+    shadowText(hpText, tx, ty, hf)
   end
-  love.graphics.setColor(0.78, 0.10, 0.15)
-  love.graphics.print(hpText, tx, ty)
   local belowFlask = bb + 2 * u
   local meta = require("src.meta")
   local fh = f:getHeight()

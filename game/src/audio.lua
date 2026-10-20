@@ -2188,6 +2188,114 @@ local BOSS_TRACK = {
   },
 }
 
+-- The Big Fish's fight, in the Deep: a slow, heavy pulse in C# minor under a kick and a
+-- clap, a sub bass that leans on the beat, pings like sonar going out into the dark and not
+-- coming back, a cold pad and a lone, hollow lead, all in a long echo
+local FISH_TRACK = {
+  bpm = 100,
+  bars = 8,
+  echo = { delay = 0.45, fb = 0.5 },
+  prog = { "C#m", "C#m", "A", "A", "C#m", "C#m", "B", "G#" },
+  chords = {
+    ["C#m"] = { root = "C#2", fifth = "G#2", pad = { "C#3", "G#3", "C#4", "E4" }, notes = { "C#4", "E4", "G#4", "B4", "C#5" } },
+    A = { root = "A1", fifth = "E2", pad = { "A2", "E3", "A3", "C#4" }, notes = { "A3", "C#4", "E4", "G#4", "A4" } },
+    B = { root = "B1", fifth = "F#2", pad = { "B2", "F#3", "B3", "D#4" }, notes = { "B3", "D#4", "F#4", "A4", "B4" } },
+    ["G#"] = { root = "G#1", fifth = "D#2", pad = { "G#2", "D#3", "G#3", "C4" }, notes = { "G#3", "C4", "D#4", "F#4", "G#4" } },
+  },
+  channels = {
+    { drum = true, gain = 0.55, steps = 8, tokens = everyBar("k - - - s - - -") },
+    { drum = true, gain = 0.12, steps = 8, tokens = everyBar("- - h - - - h -") },
+    { wave = "sine", gain = 0.36, steps = 8, a = 0.02, r = 0.3, legato = 0.9, tokens = bassPattern("R . . . R . 5 .") },
+    { wave = "saw", gain = 0.045, steps = 1, a = 1.0, r = 0.8, legato = 1.0, tokens = padPattern() },
+    { wave = "tri", gain = 0.1, steps = 1, a = 0.8, r = 0.8, legato = 1.0, tokens = padPattern() },
+    {
+      wave = "sine", gain = 0.1, steps = 8, pluck = 1.4,
+      tokens = explicit({
+        "G#6 . . . - - - -", "- - - - - - - -", "E6 . . . - - - -", "- - - - - - - -",
+        "G#6 . . . - - - -", "- - - - - - - -", "F#6 . . . - - - -", "- - - - D#6 . . .",
+      }),
+    },
+    {
+      wave = "p50", gain = 0.05, steps = 8, pluck = 2.5,
+      tokens = explicit({
+        "C#5 . . . E5 . . .", "G#5 . . . - - F#5 .", "E5 . . . - - C#5 .", "A4 . . . C#5 . . .",
+        "C#5 . . . - - E5 .", "G#5 . . . B5 . . .", "F#5 . . . D#5 . . .", "B4 . . . C5 . . .",
+      }),
+    },
+  },
+}
+
+-- The Sulfur Queen's fight: fast and venomous in D phrygian, a wobbling saw bass, a hissing
+-- run of hats, a quick pulse arpeggio and a stabbing lead that climbs and falls
+local QUEEN_TRACK = {
+  bpm = 138,
+  bars = 8,
+  echo = { delay = 0.22, fb = 0.38 },
+  prog = { "Dm", "Dm", "Eb", "Eb", "Dm", "Dm", "C", "A" },
+  chords = {
+    Dm = { root = "D2", fifth = "A2", pad = { "D3", "A3", "D4", "F4" }, notes = { "D4", "F4", "A4", "C5", "D5" } },
+    Eb = { root = "Eb2", fifth = "Bb2", pad = { "Eb3", "Bb3", "Eb4", "G4" }, notes = { "Eb4", "G4", "Bb4", "D5", "Eb5" } },
+    C = { root = "C2", fifth = "G2", pad = { "C3", "G3", "C4", "E4" }, notes = { "C4", "E4", "G4", "B4", "C5" } },
+    A = { root = "A1", fifth = "E2", pad = { "A2", "E3", "A3", "C#4" }, notes = { "A3", "C#4", "E4", "G4", "A4" } },
+  },
+  channels = {
+    { drum = true, gain = 0.6, steps = 8, tokens = everyBar("k - k - s - k s") },
+    { drum = true, gain = 0.2, steps = 8, tokens = everyBar("h h h h h h h h") },
+    { wave = "saw", gain = 0.1, steps = 8, a = 0.01, r = 0.1, legato = 0.6, tokens = bassPattern("R R 8 R R R 8 5") },
+    { wave = "p25", gain = 0.06, steps = 16, pluck = 5, tokens = arpPattern({ 1, 3, 5, 3, 5, 3, 2, 4, 1, 3, 5, 4, 5, 3, 2, 3 }) },
+    { wave = "saw", gain = 0.04, steps = 1, a = 0.2, r = 0.5, legato = 1.0, tokens = padPattern() },
+    { wave = "tri", gain = 0.1, steps = 1, a = 0.3, r = 0.5, legato = 1.0, tokens = padPattern() },
+    {
+      wave = "p125", gain = 0.05, steps = 8, pluck = 3,
+      tokens = explicit({
+        "D5 . . E5 . F5 . .", "A5 . . . G5 . F5 .", "Eb5 . . G5 . Bb5 . .", "D5 . . . Eb5 . . .",
+        "F5 . A5 . D6 . . .", "C6 . . A5 . F5 . .", "E5 . G5 . C6 . . .", "C#5 . E5 . A5 . . .",
+      }),
+    },
+  },
+}
+
+-- The Colossus's fight: a slow, heavy march in E minor, a stomping kick and a flat snare, a
+-- grinding saw bass, a low drone, and metal ringing like a hammer on stone over a sparse,
+-- grim melody
+local GOLEM_TRACK = {
+  bpm = 80,
+  bars = 8,
+  echo = { delay = 0.375, fb = 0.45 },
+  prog = { "Em", "Em", "C", "C", "Em", "Em", "D", "B" },
+  chords = {
+    Em = { root = "E2", fifth = "B2", pad = { "E3", "B3", "E4", "G4" }, notes = { "E4", "G4", "B4", "D5", "E5" } },
+    C = { root = "C2", fifth = "G2", pad = { "C3", "G3", "C4", "E4" }, notes = { "C4", "E4", "G4", "B4", "C5" } },
+    D = { root = "D2", fifth = "A2", pad = { "D3", "A3", "D4", "F#4" }, notes = { "D4", "F#4", "A4", "C5", "D5" } },
+    B = { root = "B1", fifth = "F#2", pad = { "B2", "F#3", "B3", "D#4" }, notes = { "B3", "D#4", "F#4", "A4", "B4" } },
+  },
+  channels = {
+    { drum = true, gain = 0.65, steps = 8, tokens = everyBar("k - k - s - k -") },
+    { drum = true, gain = 0.14, steps = 8, tokens = everyBar("h - h - h - h h") },
+    { wave = "saw", gain = 0.09, steps = 4, a = 0.02, r = 0.2, legato = 0.8, tokens = bassPattern("R . R 5") },
+    { wave = "sine", gain = 0.32, steps = 1, a = 0.3, r = 0.8, legato = 1.0, tokens = bassPattern("R") },
+    { wave = "saw", gain = 0.05, steps = 1, a = 1.0, r = 0.8, legato = 1.0, tokens = padPattern() },
+    { wave = "tri", gain = 0.1, steps = 1, a = 0.8, r = 0.8, legato = 1.0, tokens = padPattern() },
+    {
+      wave = "p50", gain = 0.05, steps = 8, pluck = 8,
+      tokens = explicit({
+        "E6 . . . - - - -", "- - - - B5 . . .", "E6 . . . - - - -", "- - - - G5 . . .",
+        "E6 . . . - - - -", "- - - - B5 . . .", "D6 . . . - - - -", "- - - - F#5 . . .",
+      }),
+    },
+    {
+      wave = "p25", gain = 0.045, steps = 8, pluck = 2.2,
+      tokens = explicit({
+        "B4 . . . - - G4 .", "E5 . . . - - - -", "G4 . . . - - E4 .", "C5 . . . - - - -",
+        "B4 . . . D5 . . .", "- - G4 . . . B4 .", "A4 . . . F#4 . . .", "D#5 . . . - - B4 .",
+      }),
+    },
+  },
+}
+
+-- Each boss fight's theme (audio.setBoss): the Dark Hunter's is the "hunter" one
+local BOSS_TRACKS = { hunter = BOSS_TRACK, bigfish = FISH_TRACK, queen = QUEEN_TRACK, golem = GOLEM_TRACK }
+
 -- The title screen's theme: a slow, cold drift in D minor with a glassy bell
 -- line, falling away into a long echo
 local MENU_TRACK = {
@@ -2345,8 +2453,10 @@ local shopGain = 1
 local AREA_GAIN = {}
 local TARGET_RMS = 0.126 -- the loudness (RMS, 0..1) a recorded theme is brought to
 local menuMusic -- the title screen's theme
-local bossMusic -- a boss fight's own theme (see audio.setBoss)
-local bossOn, bossMix = false, 0
+local bossMusic = {} -- each boss fight's own theme, by kind (see audio.setBoss)
+local bossKind -- which of them is wanted now (nil: none)
+local bossFade = {} -- kind -> how far that theme is faded in, 0..1
+local bossMix = 0 -- the strongest of them: how far the area's own music has stepped aside
 local recapMusic -- the death recap's theme
 
 function audio.load()
@@ -2409,9 +2519,13 @@ function audio.load()
         tensionMusic[i] = src
       end
     end
-    bossMusic = love.audio.newSource(renderTrack(BOSS_TRACK), "static")
-    bossMusic:setLooping(true)
-    bossMusic:setVolume(0)
+    for kind, def in pairs(BOSS_TRACKS) do
+      local src = love.audio.newSource(renderTrack(def), "static")
+      src:setLooping(true)
+      src:setVolume(0)
+      bossMusic[kind] = src
+      bossFade[kind] = 0
+    end
     menuMusic = love.audio.newSource(renderTrack(MENU_TRACK), "static")
     menuMusic:setLooping(true)
     menuMusic:setVolume(0)
@@ -2638,8 +2752,8 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
     for _, src in pairs(tensionMusic) do
       src:setVolume(0)
     end
-    if bossMusic then
-      bossMusic:setVolume(0)
+    for _, src in pairs(bossMusic) do
+      src:setVolume(0)
     end
     music:setVolume(0)
     return
@@ -2664,12 +2778,19 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
   end
   local fade = math.min(1, dt * 1.2)
   -- A boss fight's theme takes over from the area's, and its tension layer
-  bossMix = bossMix + ((bossOn and 1 or 0) - bossMix) * math.min(1, dt * (bossOn and 1.5 or 0.6))
-  if bossMusic then
-    if bossMix > 0.01 and not bossMusic:isPlaying() then
-      bossMusic:play()
+  bossMix = 0
+  for kind, src in pairs(bossMusic) do
+    local want = kind == bossKind
+    local f = bossFade[kind] or 0
+    f = f + ((want and 1 or 0) - f) * math.min(1, dt * (want and 1.5 or 0.6))
+    bossFade[kind] = f
+    if f > 0.01 and not src:isPlaying() then
+      src:play()
+    elseif f <= 0.01 and not want and src:isPlaying() then
+      src:stop() -- (so the next fight's theme starts from its beginning)
     end
-    bossMusic:setVolume(bossMix * 0.16 * MASTER * 2 * volMaster * volMusic)
+    src:setVolume(f * 0.16 * MASTER * 2 * volMaster * volMusic)
+    bossMix = math.max(bossMix, f)
   end
   local wind = ambient.wind
   wind:setVolume(wind:getVolume() + (0.10 * windGain * (1 - underground) * MASTER * 2 * volMaster * volSfx - wind:getVolume()) * math.min(1, dt * 1.5))
@@ -2700,9 +2821,10 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
   end
 end
 
--- A boss fight's music on or off (the Dark Hunter)
-function audio.setBoss(on)
-  bossOn = on and true or false
+-- A boss fight's music on or off. kind picks its theme: "hunter" (the default, the Dark
+-- Hunter's), "bigfish", "queen" or "golem".
+function audio.setBoss(on, kind)
+  bossKind = on and (BOSS_TRACKS[kind or "hunter"] and (kind or "hunter")) or nil
 end
 
 -- Volume settings (src.settings): master, music and sound effects, each 0..1

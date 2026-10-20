@@ -186,6 +186,61 @@ local function nameOf(thing)
   return thing.name
 end
 
+-- One pixel of the interface's art: a world pixel at the usual zoom (the bar and the cards are drawn at
+-- their own scales, so this is taken from the scale each is given)
+local function cellOf(u)
+  return math.max(1, math.floor(u / require("src.config").UI_SCALE + 0.5))
+end
+
+-- A rectangle with its corners cut in a pixel step (a rounded look on the cell grid): the border colour
+-- first, then the fill one cell inside it. rad = how many cells round the corner is (1 or 2)
+local function pxRound(x, y, w, h, c, border, fill, rad)
+  rad = rad or 1
+  x, y = math.floor(x), math.floor(y)
+  local cols, rows = math.floor(w / c + 0.5), math.floor(h / c + 0.5)
+  -- How many cells a row is set in from the side, for a corner of radius r on a block of n rows
+  local function inset(row, n, r)
+    if row < r then
+      return r - row
+    elseif row >= n - r then
+      return r - (n - 1 - row)
+    end
+    return 0
+  end
+  local function band(row, from, to, col)
+    if to > from then
+      love.graphics.setColor(col[1], col[2], col[3], col[4] or 1)
+      love.graphics.rectangle("fill", x + from * c, y + row * c, (to - from) * c, c)
+    end
+  end
+  for row = 0, rows - 1 do
+    local oi = inset(row, rows, rad)
+    if row == 0 or row == rows - 1 then
+      band(row, oi, cols - oi, border)
+    else
+      local ii = inset(row - 1, rows - 2, rad - 1) + 1
+      band(row, oi, ii, border)
+      band(row, cols - ii, cols - oi, border)
+      if fill then
+        band(row, ii, cols - ii, fill)
+      end
+    end
+  end
+end
+
+-- A coloured glow behind an item's icon (instead of a rim round it): soft stepped layers, kept inside the slot
+local function drawGlow(x, y, size, ix, iy, box, col, alpha, u)
+  local c = cellOf(u)
+  local cx, cy = ix + box / 2, iy + box / 2
+  local limit = size - 2 * c
+  for i, layer in ipairs({ { 3, 0.06 }, { 2, 0.10 }, { 1, 0.16 } }) do
+    local side = math.min(box + 2 * layer[1] * c, limit)
+    side = math.floor(side / c) * c
+    local fillc = { col[1], col[2], col[3], layer[2] * alpha }
+    pxRound(cx - side / 2, cy - side / 2, side, side, c, fillc, fillc, 2)
+  end
+end
+
 local GUN_FILL = 0.92 -- how much of a slot a gun's model fills
 local gunCanvases = {} -- "WxH@q" -> the canvas a model is drawn into
 
@@ -227,29 +282,25 @@ local function drawThing(thing, x, y, size, u, alpha)
     local s = math.max(1, math.floor(size * 0.78 / 8))
     local box = 8 * s
     local ix, iy = x + (size - box) / 2, y + (size - box) / 2
+    local rarity = thing.rarity and thing.rarity ~= "common" and items.rarities[thing.rarity]
+    if rarity then
+      drawGlow(x, y, size, ix, iy, box, rarity.border, alpha * (0.85 + 0.15 * math.sin(love.timer.getTime() * 2.5)), u)
+    end
     love.graphics.setColor(1, 1, 1, alpha)
     love.graphics.draw(img, ix, iy, 0, s, s)
     if (thing.level or 0) > 0 then
       itemIcons.drawLevel(thing.level, x, y, size, alpha)
     end
-    local rarity = thing.rarity and thing.rarity ~= "common" and items.rarities[thing.rarity]
-    if rarity then
-      love.graphics.setLineWidth(math.max(1, u * 0.7))
-      love.graphics.setColor(rarity.border[1], rarity.border[2], rarity.border[3], alpha)
-      love.graphics.rectangle("line", x + u * 0.6, y + u * 0.6, size - u * 1.2, size - u * 1.2, u, u)
-    end
   else
     local c = thing.color or { 0.7, 0.7, 0.7 }
     local pad = size * 0.18
-    love.graphics.setColor(c[1], c[2], c[3], alpha)
-    love.graphics.rectangle("fill", x + pad, y + pad, size - 2 * pad, size - 2 * pad, u, u)
-    -- Rare items get a blue rim, cursed ones a red one
+    -- Rare items get a blue glow behind them, cursed ones a red one
     local rarity = thing.rarity and thing.rarity ~= "common" and items.rarities[thing.rarity]
     if rarity then
-      love.graphics.setLineWidth(math.max(1, u * 0.7))
-      love.graphics.setColor(rarity.border[1], rarity.border[2], rarity.border[3], alpha)
-      love.graphics.rectangle("line", x + pad - u * 0.5, y + pad - u * 0.5, size - 2 * pad + u, size - 2 * pad + u, u, u)
+      drawGlow(x, y, size, x + pad, y + pad, size - 2 * pad, rarity.border, alpha, u)
     end
+    love.graphics.setColor(c[1], c[2], c[3], alpha)
+    love.graphics.rectangle("fill", x + pad, y + pad, size - 2 * pad, size - 2 * pad, u, u)
     local f = font(size * 0.38)
     local label = thing.short or "?"
     love.graphics.setFont(f)
@@ -258,17 +309,36 @@ local function drawThing(thing, x, y, size, u, alpha)
   end
 end
 
-local function drawSlot(inv, ref, x, y, size, u, selected)
+local GOLD_TRIM = { 0.80, 0.64, 0.30 }
+
+-- tint (optional): { border = colour for the rim, wash = colour glowing behind the item }
+local function drawSlot(inv, ref, x, y, size, u, selected, tint)
   local thing = inv:get(ref)
-  love.graphics.setColor(0.08, 0.06, 0.10, 0.82)
-  love.graphics.rectangle("fill", x, y, size, size, u, u)
-  love.graphics.setLineWidth(math.max(1, u * 0.5))
+  local c = cellOf(u)
+  local border
   if selected then
-    love.graphics.setColor(0.55, 0.75, 1)
+    border = { 0.55, 0.75, 1 }
+  elseif ref.kind == "weapon" then
+    border = { GOLD_TRIM[1], GOLD_TRIM[2], GOLD_TRIM[3], 0.95 }
   else
-    love.graphics.setColor(0.55, 0.48, 0.42, 0.9)
+    border = { 0.55, 0.48, 0.42, 0.9 }
   end
-  love.graphics.rectangle("line", x, y, size, size, u, u)
+  local rad = size >= 12 * c and 3 or 2
+  if tint and tint.border then
+    border = tint.border
+  end
+  pxRound(x, y, size, size, c, border, { 0.08, 0.06, 0.10, 0.82 }, rad)
+  if tint and tint.wash then
+    pxRound(x + c, y + c, size - 2 * c, size - 2 * c, c, tint.wash, tint.wash, 2)
+  end
+  -- A bevel just inside: a light line along the top, a dark one along the bottom
+  if size >= 12 * c then
+    local cols = math.floor(size / c + 0.5)
+    love.graphics.setColor(1, 1, 1, 0.07)
+    love.graphics.rectangle("fill", math.floor(x) + (rad + 1) * c, math.floor(y) + c, (cols - 2 * rad - 2) * c, c)
+    love.graphics.setColor(0, 0, 0, 0.3)
+    love.graphics.rectangle("fill", math.floor(x) + (rad + 1) * c, math.floor(y) + (cols - 2) * c, (cols - 2 * rad - 2) * c, c)
+  end
   if thing then
     local dragged = drag and drag.ref.kind == ref.kind and drag.ref.index == ref.index and drag.ref.gun == ref.gun
     drawThing(thing, x, y, size, u, dragged and 0.3 or 1)
@@ -296,88 +366,105 @@ end
 
 local FUSE_TEAL = { 0.25, 1.0, 0.82 }
 
--- The fuser beside the item slots (src.fuser): two slots in a teal frame, the
--- lock toggle, and the ether gauge under them
-local fuseKnob = 0 -- the switch's knob, eased between 0 (off, down) and 1 (on, up)
+-- The fuser beside the item slots (src.fuser): a rounded teal capsule with the two slots either side of a
+-- little flask, which is the lock toggle (click it): dim and low when idle, filling with glowing ether as
+-- kills charge it once the pair is locked in (the flask is the gauge).
+local fuseKnob = 0 -- how lit the flask is, eased between 0 (idle) and 1 (locked)
+
+-- The flask, 9 x 13 cells: for each row, the outline cells and the inside (liquid / empty glass)
+local FLASK = {
+  { cork = { 3, 5 } },
+  { o = { 3, 5 }, i = { 4, 4 } }, { o = { 3, 5 }, i = { 4, 4 } }, { o = { 3, 5 }, i = { 4, 4 } },
+  { o = { 2, 6 }, i = { 3, 5 } }, { o = { 1, 7 }, i = { 2, 6 } },
+  { o = { 0, 8 }, i = { 1, 7 } }, { o = { 0, 8 }, i = { 1, 7 } }, { o = { 0, 8 }, i = { 1, 7 } },
+  { o = { 0, 8 }, i = { 1, 7 } }, { o = { 0, 8 }, i = { 1, 7 } },
+  { o = { 1, 7 }, i = { 2, 6 } },
+  { base = { 2, 6 } },
+}
+
+local function drawFlask(fx, fy, c, lit, level, t)
+  local function cell(col, row, a)
+    love.graphics.rectangle("fill", fx + col * c, fy + row * c, c, c)
+  end
+  local glassIdle, glassLit = { 0.62, 0.58, 0.70 }, { FUSE_TEAL[1] * 0.95, FUSE_TEAL[2] * 0.95, FUSE_TEAL[3] * 0.95 }
+  local glass = {
+    glassIdle[1] + (glassLit[1] - glassIdle[1]) * lit,
+    glassIdle[2] + (glassLit[2] - glassIdle[2]) * lit,
+    glassIdle[3] + (glassLit[3] - glassIdle[3]) * lit,
+  }
+  local liquid = { 0.14 + 0.16 * lit, 0.40 + 0.5 * lit, 0.38 + 0.44 * lit }
+  local rowsLiquid = math.max(1, math.min(8, level))
+  for r, row in ipairs(FLASK) do
+    local y = r - 1
+    if row.cork then
+      love.graphics.setColor(0.62, 0.42, 0.24)
+      for col = row.cork[1], row.cork[2] do
+        cell(col, y)
+      end
+    elseif row.base then
+      love.graphics.setColor(glass[1], glass[2], glass[3])
+      for col = row.base[1], row.base[2] do
+        cell(col, y)
+      end
+    else
+      love.graphics.setColor(glass[1], glass[2], glass[3])
+      cell(row.o[1], y)
+      cell(row.o[2], y)
+      -- (rows 4 to 11 hold the liquid, filling from the bottom)
+      local fromBottom = 12 - y
+      for col = row.i[1], row.i[2] do
+        if y >= 4 and fromBottom <= rowsLiquid then
+          local top = fromBottom == rowsLiquid
+          love.graphics.setColor(liquid[1] * (top and 1.25 or 1), liquid[2] * (top and 1.1 or 1), liquid[3] * (top and 1.1 or 1))
+        else
+          love.graphics.setColor(0.04, 0.09, 0.09, 0.7)
+        end
+        cell(col, y)
+      end
+    end
+  end
+  -- A glint on the glass, and while lit a bubble rising through the ether
+  love.graphics.setColor(1, 1, 1, 0.5)
+  cell(1, 6)
+  cell(1, 7)
+  if lit > 0.5 then
+    local rise = math.floor((t * 3) % math.max(1, rowsLiquid - 1))
+    love.graphics.setColor(0.85, 1, 0.95, 0.8)
+    cell(3 + math.floor(t * 2) % 3, 11 - rise)
+  end
+end
 
 local function drawFuser(inv, x, y, u, fusable, pip)
   local f = inv.fuse
   local size = ITEM_SIZE * u
+  local c = cellOf(u)
   local t = love.timer.getTime()
   local pulse = f.locked and (0.65 + 0.35 * math.sin(t * 4)) or 0.55
-  local toggleW = 9 * u
-  local w = size * 2 + 2 * u + 2 * u + toggleW
-  -- The frame
-  love.graphics.setColor(0.03, 0.08, 0.08, 0.75)
-  love.graphics.rectangle("fill", x - 1.5 * u, y - 1.5 * u, w + 3 * u, size + 6 * u, 1.5 * u, 1.5 * u)
-  love.graphics.setLineWidth(math.max(1, u * 0.5))
-  love.graphics.setColor(FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], 0.35 + 0.4 * pulse * (f.locked and 1 or 0.5))
-  love.graphics.rectangle("line", x - 1.5 * u, y - 1.5 * u, w + 3 * u, size + 6 * u, 1.5 * u, 1.5 * u)
+  local pad, gap = 2 * c, 2 * c
+  local fc = math.max(c, math.floor(size * 0.8 / 13)) -- the flask's pixel (bigger, so it reads beside the slots)
+  local flaskW = 9 * fc
+  local innerW = size * 2 + flaskW + 2 * gap
+  -- The capsule
+  local frameA = 0.35 + 0.4 * pulse * (f.locked and 1 or 0.5)
+  pxRound(x - pad, y - pad, innerW + 2 * pad, size + 2 * pad, c, { FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], frameA }, { 0.03, 0.08, 0.08, 0.75 }, 4)
+  local flaskX = x + size + gap
+  local slotX = { x, flaskX + flaskW + gap }
   for i = 1, 2 do
-    local sx = x + (i - 1) * (size + 2 * u)
-    drawSlot(inv, { kind = "fuse", index = i }, sx, y, size, u, false)
+    local sx = slotX[i]
+    local tint = f.locked and { border = { FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], pulse }, wash = { FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], 0.14 * pulse } } or nil
+    drawSlot(inv, { kind = "fuse", index = i }, sx, y, size, u, false, tint)
     local item = f.slots[i]
     if item and fusable and fusable[item] and pip then
       pip(math.floor(sx + 1.5 * u), math.floor(y + 1.5 * u))
     end
-    if f.locked then
-      -- Locked in: a teal wash and a pulsing rim
-      love.graphics.setColor(FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], 0.12 * pulse)
-      love.graphics.rectangle("fill", sx, y, size, size, u, u)
-      love.graphics.setColor(FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], pulse)
-      love.graphics.rectangle("line", sx, y, size, size, u, u)
-    end
   end
-  -- A "+" between the slots
-  love.graphics.setColor(FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], 0.8)
-  local cx, cy = x + size + u, y + size / 2
-  love.graphics.rectangle("fill", cx - 0.5 * u, cy - 1.5 * u, u, 3 * u)
-  love.graphics.rectangle("fill", cx - 1.5 * u, cy - 0.5 * u, 3 * u, u)
-  -- The toggle: a switch standing on end, in the same chunky pixels as the
-  -- icons. A 7x11 pill filling the whole slot, with a flat 3x3 knob that
-  -- slides up (on: the pill lit teal) or down (off: dark)
-  local tx = x + size * 2 + 4 * u
+  -- The flask between them is the toggle
   local dt = love.timer.getDelta()
   fuseKnob = fuseKnob + ((f.locked and 1 or 0) - fuseKnob) * math.min(1, dt * 14)
-  local cell = math.max(1, math.floor(math.min(toggleW / 7, size / 11)))
-  local gx = math.floor(tx + (toggleW - 7 * cell) / 2)
-  local gy = math.floor(y + (size - 11 * cell) / 2)
-  local function px(cx, cy, cw, ch, c, a)
-    love.graphics.setColor(c[1], c[2], c[3], a or 1)
-    love.graphics.rectangle("fill", gx + cx * cell, gy + cy * cell, cw * cell, ch * cell)
-  end
-  local outline, fill, knob
-  if f.locked then
-    local glow = 0.8 + 0.2 * pulse
-    outline = { FUSE_TEAL[1] * 0.5 * glow, FUSE_TEAL[2] * 0.62 * glow, FUSE_TEAL[3] * 0.55 * glow }
-    fill = { FUSE_TEAL[1] * 0.85, FUSE_TEAL[2] * 0.85, FUSE_TEAL[3] * 0.85 }
-    knob = { 1, 1, 1 }
-  else
-    outline = { 0.03, 0.06, 0.06 }
-    fill = { 0.10, 0.14, 0.15 }
-    knob = { 0.72, 0.76, 0.78 }
-  end
-  -- The pill: outline, then fill (the corners cut away)
-  px(2, 0, 3, 11, outline)
-  px(1, 1, 5, 9, outline)
-  px(0, 2, 7, 7, outline)
-  px(2, 1, 3, 9, fill)
-  px(1, 2, 5, 7, fill)
-  -- The knob, a flat square moving a cell at a time
-  local ky = 6 - math.floor(4 * fuseKnob + 0.5)
-  px(2, ky, 3, 3, knob)
-  hitboxes[#hitboxes + 1] = { x = tx, y = y, w = toggleW, h = size, ref = { kind = "fuseToggle" } }
-  -- The ether gauge
-  local gx, gy, gw, gh = x, y + size + 1.5 * u, size * 2 + 2 * u, math.max(2, 1.6 * u)
-  love.graphics.setColor(0.02, 0.05, 0.05, 0.9)
-  love.graphics.rectangle("fill", gx, gy, gw, gh)
   local k = fuser.progress(f)
-  if k > 0 then
-    love.graphics.setColor(FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], 0.9)
-    love.graphics.rectangle("fill", gx, gy, gw * k, gh)
-    love.graphics.setColor(0.85, 1, 0.95, 0.6 + 0.4 * math.sin(t * 6))
-    love.graphics.rectangle("fill", gx + gw * k - u, gy, u, gh)
-  end
+  local level = f.locked and math.floor(1 + k * 7 + 0.5) or 2
+  drawFlask(math.floor(flaskX), math.floor(y + (size - 13 * fc) / 2), fc, fuseKnob, level, t)
+  hitboxes[#hitboxes + 1] = { x = flaskX - gap / 2, y = y, w = flaskW + gap, h = size, ref = { kind = "fuseToggle" } }
 end
 
 -- What hovering over the fuser's toggle says
@@ -430,15 +517,24 @@ local function drawBar(inv, u)
     end
   end
   local t = love.timer.getTime()
+  -- The "can be fused" marker: a tiny glowing flask in the slot's corner, on a dark backing
   local function pip(px, py)
-    local p = math.max(2, math.floor(2.2 * u))
-    local glow = 0.75 + 0.25 * math.sin(t * 5)
-    love.graphics.setColor(0.02, 0.06, 0.06, 0.9)
-    love.graphics.rectangle("fill", px - 1, py - 1, p + 2, p + 2)
-    love.graphics.setColor(FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], glow)
-    love.graphics.rectangle("fill", px, py, p, p)
-    love.graphics.setColor(0.85, 1, 0.95, glow)
-    love.graphics.rectangle("fill", px, py, math.max(1, math.floor(p / 2)), math.max(1, math.floor(p / 2)))
+    local c = cellOf(u)
+    local glow = 0.7 + 0.3 * math.sin(t * 5)
+    love.graphics.setColor(0.02, 0.06, 0.06, 0.88)
+    love.graphics.rectangle("fill", px - c, py - c, 7 * c, 8 * c)
+    local function cell(col, row)
+      love.graphics.rectangle("fill", px + col * c, py + row * c, c, c)
+    end
+    love.graphics.setColor(0.62, 0.42, 0.24)
+    cell(2, 0)
+    love.graphics.setColor(FUSE_TEAL[1] * 0.8, FUSE_TEAL[2] * 0.8, FUSE_TEAL[3] * 0.8)
+    cell(1, 1) cell(3, 1) cell(0, 2) cell(4, 2) cell(0, 3) cell(4, 3) cell(0, 4) cell(4, 4)
+    cell(1, 5) cell(2, 5) cell(3, 5)
+    love.graphics.setColor(FUSE_TEAL[1] * glow, FUSE_TEAL[2] * glow, FUSE_TEAL[3] * glow)
+    cell(2, 1) cell(1, 2) cell(2, 2) cell(3, 2) cell(1, 3) cell(2, 3) cell(3, 3) cell(1, 4) cell(2, 4) cell(3, 4)
+    love.graphics.setColor(0.9, 1, 0.97, glow)
+    cell(1, 3)
   end
   for i = 1, inventory.ITEM_SLOTS do
     local size = ITEM_SIZE * u

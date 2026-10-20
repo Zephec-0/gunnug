@@ -1596,7 +1596,7 @@ function enemies.hitTest(px, py)
       e.hitX, e.hitY = px, py -- (a weak point standing outside its body)
       return e
     end
-    if not e.dead and px >= b.x and px < b.x + b.w and py >= b.y and py < b.y + b.h then
+    if not e.dead and px >= b.x and px < b.x + b.w and py >= b.y and py < b.y + b.h and not (e.def.noBodyHit and e.def.noBodyHit(e)) then
       e.hitX, e.hitY = px, py -- (where it was struck: see def.filter)
       return e
     end

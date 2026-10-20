@@ -65,15 +65,26 @@ end
 
 -- Chars the rim of a crater of the given radius at (x, y): solid pixels near
 -- open air darken to soot
+-- (the box's solidity is read once, a row at a time, into this: each pixel used to be looked up nine times)
+local solidAt = {}
 function gore.scorch(world, x, y, radius)
   local reach = radius + 5
   local r2 = reach * reach
   local r = love.math.random
+  local bx0, by0 = math.floor(x - reach) - 2, math.floor(y - reach) - 2
+  local bx1, by1 = math.ceil(x + reach) + 2, math.ceil(y + reach) + 2
+  local bw = bx1 - bx0 + 1
+  for py = by0, by1 do
+    world:solidRow(bx0, bx1, py, solidAt, (py - by0) * bw)
+  end
+  local function solid(px, py)
+    return solidAt[(py - by0) * bw + (px - bx0)] == 1
+  end
   for py = math.floor(y - reach), math.ceil(y + reach) do
     for px = math.floor(x - reach), math.ceil(x + reach) do
       local dx, dy = px + 0.5 - x, py + 0.5 - y
       local d2 = dx * dx + dy * dy
-      if d2 <= r2 and world:inBounds(px, py) and world:isSolid(px, py) and (not world:isSolid(px + 1, py) or not world:isSolid(px - 1, py) or not world:isSolid(px, py + 1) or not world:isSolid(px, py - 1) or not world:isSolid(px + 2, py) or not world:isSolid(px - 2, py) or not world:isSolid(px, py - 2) or not world:isSolid(px, py + 2)) then
+      if d2 <= r2 and world:inBounds(px, py) and solid(px, py) and (not solid(px + 1, py) or not solid(px - 1, py) or not solid(px, py + 1) or not solid(px, py - 1) or not solid(px + 2, py) or not solid(px - 2, py) or not solid(px, py - 2) or not solid(px, py + 2)) then
         local fall = 1 - math.sqrt(d2) / reach
         if r() < 0.35 + fall * 0.6 and world:shownAt(px, py) then
           local pr, pg, pb = world:pixelColor(px, py)

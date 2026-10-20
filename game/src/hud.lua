@@ -63,6 +63,7 @@ local RING, FILL, GLINT = { 0.80, 0.16, 0.19 }, { 0.30, 0.02, 0.05 }, { 1.0, 0.6
 local GLASS_LIT, GLASS, GLASS_DARK = { 0.86, 0.84, 0.94 }, { 0.66, 0.62, 0.76 }, { 0.50, 0.46, 0.60 }
 local slosh, bob = { a = 0, v = 0 }, { a = 0, v = 0 } -- the surface's tilt, and its bob (springs)
 local lastPvx, lastPvy
+local glassCache -- the glass drawn once into canvases (see hud.drawBottle)
 local hpFade = 0 -- how visible the health number is (it fades in while the mouse is over the bottle)
 local K = math.sqrt(0.5)
 
@@ -126,6 +127,7 @@ end
 function hud.drawHealthBar(player, u, cx, cy)
   -- The whole bottle is drawn 10% more see-through
   local realSetColor = love.graphics.setColor
+  hud.rawSetColor = realSetColor -- (the cached glass is drawn with it: its canvases are already faded)
   love.graphics.setColor = function(r, g, b, a)
     realSetColor(r, g, b, (a or 1) * 0.9)
   end
@@ -243,12 +245,18 @@ function hud.drawBottle(player, u, cx, cy)
     return 0, a, b
   end
 
+  -- The glass cell by cell. under: the glass's edge and its empty inside (true), or only one of them
+  -- ("edges", "empty"); over: the scorch round the bullet hole; liquid: the blood and its surface line.
+  -- (All at once is the original look; the cached path draws the glass once into canvases and only the
+  -- blood every frame. cells, if given, collects the blood's cells: inside the glass, off its edge and
+  -- the hole.)
+  local function glassCells(under, over, liquid, cells)
   for gx = math.floor((xL - margin) / c), math.ceil((xR + margin) / c) do
     for gy = math.floor((yTop - margin) / c), math.ceil((yBot + margin) / c) do
       local px, py = gx * c + c / 2, gy * c + c / 2
       local state, a, b = probe(px, py)
       local dHole = hole and math.sqrt((a - hole[1]) ^ 2 + (b - hole[2]) ^ 2) or 99
-      if state == 0 and alarm > 0 then
+      if state == 0 and alarm > 0 and under then
         -- The pulse: a red ring spreading out from the glass, thinning as it goes
         local aa = math.max(-hl - v.NL, math.min(hl, a))
         local w = halfWidth(v, aa) or 0
@@ -262,10 +270,15 @@ function hud.drawBottle(player, u, cx, cy)
         -- (shot clean through: nothing here at all)
       elseif state == 1 then
         local edge = probe(px - c, py) == 0 or probe(px + c, py) == 0 or probe(px, py - c) == 0 or probe(px, py + c) == 0
+        local draw = under == true or under == (edge and "edges" or "empty")
+        if not edge and cells then
+          cells[#cells + 1] = { gx, gy }
+        end
         if edge then
           local col = b < -ht * 0.4 and GLASS_LIT or (b > ht * 0.4 and GLASS_DARK or GLASS)
           love.graphics.setColor(col[1], col[2], col[3], 0.95)
-        elseif frac > 0 and py >= surfaceAt(px) then
+        elseif liquid and frac > 0 and py >= surfaceAt(px) then
+          draw = true
           -- The blood: blended down from the bright top through the red to the deep base
           local k = math.min(1, (py - surface) / range)
           local c1, c2, kk
@@ -293,25 +306,29 @@ function hud.drawBottle(player, u, cx, cy)
             love.graphics.setColor(0.24, 0.20, 0.34, 0.32)
           end
         end
-        love.graphics.rectangle("fill", gx * c, gy * c, c, c)
+        if draw then
+          love.graphics.rectangle("fill", gx * c, gy * c, c, c)
+        end
         -- The scorched ring round the bullet hole
-        if not edge and dHole < holeR + 1.1 then
+        if over and not edge and dHole < holeR + 1.1 then
           love.graphics.setColor(0.04, 0.02, 0.05, 0.85)
           love.graphics.rectangle("fill", gx * c, gy * c, c, c)
         end
         -- A bright line along the surface, and a glint on the lit side's glass
-        if not edge and frac > 0 and py >= surfaceAt(px) and py < surfaceAt(px) + c then
+        if liquid and not edge and frac > 0 and py >= surfaceAt(px) and py < surfaceAt(px) + c then
           love.graphics.setColor(0.95, 0.30, 0.32, 0.55)
           love.graphics.rectangle("fill", gx * c, gy * c, c, c)
-        elseif edge and b < -ht * 0.4 and a > -hl + 3 and a < hl - 9 then
+        elseif (under == true or under == "edges") and edge and b < -ht * 0.4 and a > -hl + 3 and a < hl - 9 then
           love.graphics.setColor(1, 1, 1, 0.35)
           love.graphics.rectangle("fill", gx * c, gy * c, c, c)
         end
       end
     end
   end
+  end
 
   -- Scratches and cracks: jagged lines plotted on the glass's own cell grid, so they match its pixel density
+  local function scratchLayer()
   if #scratches > 0 or #cracks > 0 then
     local f = c
     local function isEdge(x, y)
@@ -370,6 +387,131 @@ function hud.drawBottle(player, u, cx, cy)
         end
       end
     end
+  end
+  end
+
+  if alarm > 0 then
+    -- (shaking and pulsing: drawn cell by cell every frame, as it moves)
+    glassCells(true, true, true)
+    scratchLayer()
+  else
+    -- The glass, its scorch and its cracks only change with the damage, the size and the place: they are
+    -- drawn once into two canvases, and each frame just the blood is drawn between them, a run of cells
+    -- per row
+    local gx0, gy0 = math.floor((xL - margin) / c), math.floor((yTop - margin) / c)
+    local gx1, gy1 = math.ceil((xR + margin) / c), math.ceil((yBot + margin) / c)
+    local gc = glassCache
+    if not gc or gc.variant ~= hud.bottleVariant or gc.u ~= u or gc.c ~= c or gc.cx ~= cx or gc.cy ~= cy or gc.stage ~= stage then
+      local w, h = (gx1 - gx0 + 1) * c, (gy1 - gy0 + 1) * c
+      local cache = { variant = hud.bottleVariant, u = u, c = c, cx = cx, cy = cy, stage = stage, x = gx0 * c, y = gy0 * c, rows = {}, rowList = {}, tops = {} }
+      cache.under = love.graphics.newCanvas(w, h)
+      cache.empty = love.graphics.newCanvas(w, h)
+      cache.over = love.graphics.newCanvas(w, h)
+      cache.h, cache.columns = h, {}
+      for gx = gx0, gx1 do
+        cache.columns[gx] = love.graphics.newQuad(0, 0, c, h, w, h)
+      end
+      local cells = {}
+      love.graphics.push("all")
+      love.graphics.origin()
+      love.graphics.translate(-cache.x, -cache.y)
+      love.graphics.setCanvas(cache.under)
+      love.graphics.clear(0, 0, 0, 0)
+      glassCells("edges", false, false, cells)
+      love.graphics.setCanvas(cache.empty)
+      love.graphics.clear(0, 0, 0, 0)
+      glassCells("empty", false, false)
+      love.graphics.setCanvas(cache.over)
+      love.graphics.clear(0, 0, 0, 0)
+      glassCells(false, true, false)
+      scratchLayer()
+      love.graphics.pop()
+      for _, cell in ipairs(cells) do
+        local row = cache.rows[cell[2]]
+        if not row then
+          row = {}
+          cache.rows[cell[2]] = row
+          cache.rowList[#cache.rowList + 1] = cell[2]
+        end
+        row[#row + 1] = cell[1]
+      end
+      table.sort(cache.rowList)
+      for _, row in pairs(cache.rows) do
+        table.sort(row)
+      end
+      glassCache = cache
+    end
+    local cache = glassCache
+    local setColor = love.graphics.setColor
+    local rect = love.graphics.rectangle
+    love.graphics.push("all")
+    love.graphics.setBlendMode("alpha", "premultiplied")
+    hud.rawSetColor(1, 1, 1, 1)
+    love.graphics.draw(cache.under, cache.x, cache.y)
+    -- the surface's height in each column, worked out once; the empty glass shows above it, column by
+    -- column (the blood takes its place below)
+    local tops = cache.tops
+    for gx = gx0, gx1 do
+      tops[gx] = frac > 0 and surfaceAt(gx * c + c / 2) or math.huge
+      local dry = math.ceil((tops[gx] - c / 2) / c) * c - cache.y -- (the cells whose centres are above it)
+      dry = math.min(cache.h, dry)
+      if dry > 0 then
+        local q = cache.columns[gx]
+        q:setViewport(gx * c - cache.x, 0, c, dry, cache.empty:getDimensions())
+        love.graphics.draw(cache.empty, q, gx * c, cache.y)
+      end
+    end
+    love.graphics.pop()
+    if frac > 0 then
+      for _, gy in ipairs(cache.rowList) do
+        local py = gy * c + c / 2
+        local k = math.min(1, (py - surface) / range)
+        local c1, c2, kk
+        if k < 0.35 then
+          c1, c2, kk = LIQUID_TOP, LIQUID_MID, k / 0.35
+        else
+          c1, c2, kk = LIQUID_MID, LIQUID_BOTTOM, (k - 0.35) / 0.65
+        end
+        local r = math.min(1, c1[1] + (c2[1] - c1[1]) * kk + flare * (1 - k))
+        local g = c1[2] + (c2[2] - c1[2]) * kk + flare * 0.6 * (1 - k)
+        local bl = c1[3] + (c2[3] - c1[3]) * kk + flare * 0.6 * (1 - k)
+        local row = cache.rows[gy]
+        local runStart, runEnd
+        local lines
+        for i = 1, #row + 1 do
+          local gx = row[i]
+          local wet = gx and py >= tops[gx]
+          if wet and runEnd and gx == runEnd + 1 then
+            runEnd = gx
+          else
+            if runStart then
+              setColor(r, g, bl)
+              rect("fill", runStart * c, gy * c, (runEnd - runStart + 1) * c, c)
+            end
+            if wet then
+              runStart, runEnd = gx, gx
+            else
+              runStart, runEnd = nil, nil
+            end
+          end
+          if wet and py < tops[gx] + c then
+            lines = lines or {}
+            lines[#lines + 1] = gx
+          end
+        end
+        if lines then
+          setColor(0.95, 0.30, 0.32, 0.55)
+          for _, gx in ipairs(lines) do
+            rect("fill", gx * c, gy * c, c, c)
+          end
+        end
+      end
+    end
+    love.graphics.push("all")
+    love.graphics.setBlendMode("alpha", "premultiplied")
+    hud.rawSetColor(1, 1, 1, 1)
+    love.graphics.draw(cache.over, cache.x, cache.y)
+    love.graphics.pop()
   end
 
   -- Bubbles: a trickle when healthy, a roiling boil when low. Tiny pixel sprites on the cell grid, rising in
@@ -614,11 +756,21 @@ local function pipKind(gun, count)
 end
 
 -- One pip with its left edge at x and bottom at yb; q = one pip pixel
+-- (a pip's cells go into the rectangle batch, src.quads: a machine gun's belt is a few hundred a frame;
+-- the caller flushes it)
+local quads = require("src.quads")
+local qrect = quads.rect
+local px, pyb, pq, plift -- the pip being drawn
+local function cell(cx, cy, cw, ch, c, a)
+  qrect(c[1], c[2], c[3], a or 1, px + cx * pq, pyb - plift - (8 - cy) * pq, cw * pq, ch * pq)
+end
+local WHITE = { 1, 1, 1 }
+local SPENT_HULL, SPENT_BRASS, SPENT_GAP = { 0.30, 0.10, 0.10 }, { 0.34, 0.27, 0.15 }, { 0.08, 0.06, 0.06 }
+local CASE_EMPTY, CASE_MOUTH, CASE_RIM = { 0.42, 0.32, 0.14 }, { 0.10, 0.07, 0.05 }, { 0.30, 0.2, 0.08 }
+local PIP_GONE = { 0.45, 0.40, 0.35 }
+
 local function drawPip(kind, x, yb, q, filled, lift)
-  local function cell(cx, cy, cw, ch, c, a)
-    love.graphics.setColor(c[1], c[2], c[3], a or 1)
-    love.graphics.rectangle("fill", x + cx * q, yb - lift - (8 - cy) * q, cw * q, ch * q)
-  end
+  px, pyb, pq, plift = x, yb, q, lift
   if kind == "shell" then
     -- The base of a shotgun shell: red hull cut off above, a brass band, a rim
     if filled then
@@ -632,12 +784,12 @@ local function drawPip(kind, x, yb, q, filled, lift)
       cell(0, 7, 5, 1, BRASS)
       cell(0, 7, 5, 1, BRASS_D, 0.5)
       cell(0, 7, 1, 1, BRASS_L)
-      cell(2, 4, 1, 1, { 1, 1, 1 }, 0.25) -- a glint on the hull
+      cell(2, 4, 1, 1, WHITE, 0.25) -- a glint on the hull
     else
       -- Spent: a scorched, dull hull and a dark brass base
-      cell(0, 3, 5, 3, { 0.30, 0.10, 0.10 }, 0.55)
-      cell(0, 6, 5, 2, { 0.34, 0.27, 0.15 }, 0.55)
-      cell(1, 3, 3, 1, { 0.08, 0.06, 0.06 }, 0.6)
+      cell(0, 3, 5, 3, SPENT_HULL, 0.55)
+      cell(0, 6, 5, 2, SPENT_BRASS, 0.55)
+      cell(1, 3, 3, 1, SPENT_GAP, 0.6)
     end
     return
   end
@@ -660,11 +812,11 @@ local function drawPip(kind, x, yb, q, filled, lift)
     cell(0, 7, w, 1, RIM)
   elseif kind == "revolver" then
     -- The empty case stays in the cylinder
-    cell(0, 2, w, 5, { 0.42, 0.32, 0.14 }, 0.8)
-    cell(0, 2, w, 1, { 0.10, 0.07, 0.05 })
-    cell(0, 7, w, 1, { 0.30, 0.2, 0.08 }, 0.8)
+    cell(0, 2, w, 5, CASE_EMPTY, 0.8)
+    cell(0, 2, w, 1, CASE_MOUTH)
+    cell(0, 7, w, 1, CASE_RIM, 0.8)
   else
-    cell(0, 2, w, 6, { 0.45, 0.40, 0.35 }, 0.22)
+    cell(0, 2, w, 6, PIP_GONE, 0.22)
   end
 end
 
@@ -757,6 +909,7 @@ function hud.drawGunStatus(gun, ww, margin, top, u, f, opts)
     end
     drawPip(kind, x0 + ((i - 1) % perRow) * pitch, yb + math.floor((i - 1) / perRow) * rowH, q, i <= gun.chambers, math.floor(lift))
   end
+  quads.flush()
 
   for n = #st.puffs, 1, -1 do
     local pf = st.puffs[n]

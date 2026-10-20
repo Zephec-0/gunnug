@@ -194,55 +194,68 @@ end
 
 -- A rectangle with its corners cut in a pixel step (a rounded look on the cell grid): the border colour
 -- first, then the fill one cell inside it. rad = how many cells round the corner is (1 or 2)
+-- How many cells a row is set in from the side, for a corner of radius r on a block of n rows
+local function inset(row, n, r)
+  if row < r then
+    return r - row
+  elseif row >= n - r then
+    return r - (n - 1 - row)
+  end
+  return 0
+end
+-- n rows from `row`, cells from..to, of a pxRound at (x, y)
+local function band(x, y, c, row, n, from, to, col)
+  if to > from then
+    love.graphics.setColor(col[1], col[2], col[3], col[4] or 1)
+    love.graphics.rectangle("fill", x + from * c, y + row * c, (to - from) * c, n * c)
+  end
+end
+
 local function pxRound(x, y, w, h, c, border, fill, rad)
   rad = rad or 1
   x, y = math.floor(x), math.floor(y)
   local cols, rows = math.floor(w / c + 0.5), math.floor(h / c + 0.5)
-  -- How many cells a row is set in from the side, for a corner of radius r on a block of n rows
-  local function inset(row, n, r)
-    if row < r then
-      return r - row
-    elseif row >= n - r then
-      return r - (n - 1 - row)
-    end
-    return 0
-  end
-  local function band(row, from, to, col)
-    if to > from then
-      love.graphics.setColor(col[1], col[2], col[3], col[4] or 1)
-      love.graphics.rectangle("fill", x + from * c, y + row * c, (to - from) * c, c)
-    end
-  end
-  for row = 0, rows - 1 do
+  -- (rows that come out the same, the whole straight middle of the sides, are drawn as one tall band)
+  local row = 0
+  while row < rows do
     local oi = inset(row, rows, rad)
     if row == 0 or row == rows - 1 then
-      band(row, oi, cols - oi, border)
+      band(x, y, c, row, 1, oi, cols - oi, border)
+      row = row + 1
     else
       local ii = inset(row - 1, rows - 2, rad - 1) + 1
-      band(row, oi, ii, border)
-      band(row, cols - ii, cols - oi, border)
-      if fill then
-        band(row, ii, cols - ii, fill)
+      local n = 1
+      while row + n < rows - 1 and inset(row + n, rows, rad) == oi and inset(row + n - 1, rows - 2, rad - 1) + 1 == ii do
+        n = n + 1
       end
+      band(x, y, c, row, n, oi, ii, border)
+      band(x, y, c, row, n, cols - ii, cols - oi, border)
+      if fill then
+        band(x, y, c, row, n, ii, cols - ii, fill)
+      end
+      row = row + n
     end
   end
 end
 
 -- A coloured glow behind an item's icon (instead of a rim round it): soft stepped layers, kept inside the slot
+local GLOW_LAYERS = { { 3, 0.06 }, { 2, 0.10 }, { 1, 0.16 } }
+local glowColor = { 0, 0, 0, 0 } -- (filled in for each layer: pxRound only reads it)
 local function drawGlow(x, y, size, ix, iy, box, col, alpha, u)
   local c = cellOf(u)
   local cx, cy = ix + box / 2, iy + box / 2
   local limit = size - 2 * c
-  for i, layer in ipairs({ { 3, 0.06 }, { 2, 0.10 }, { 1, 0.16 } }) do
+  for i, layer in ipairs(GLOW_LAYERS) do
     local side = math.min(box + 2 * layer[1] * c, limit)
     side = math.floor(side / c) * c
-    local fillc = { col[1], col[2], col[3], layer[2] * alpha }
+    local fillc = glowColor
+    fillc[1], fillc[2], fillc[3], fillc[4] = col[1], col[2], col[3], layer[2] * alpha
     pxRound(cx - side / 2, cy - side / 2, side, side, c, fillc, fillc, 2)
   end
 end
 
 local GUN_FILL = 0.92 -- how much of a slot a gun's model fills
-local gunCanvases = {} -- "WxH@q" -> the canvas a model is drawn into
+local gunCanvases = setmetatable({}, { __mode = "k" }) -- gun -> "WxH@q" -> { canvas } its model is drawn into
 
 -- Draws a weapon icon or item badge centred in a box
 local function drawThing(thing, x, y, size, u, alpha)
@@ -255,19 +268,33 @@ local function drawThing(thing, x, y, size, u, alpha)
     local w, h = gunhud.size(thing)
     local fit = math.min(size * GUN_FILL / w, size * GUN_FILL / h) -- screen pixels per model pixel
     local q0 = math.max(1, math.ceil(fit))
-    local key = w .. "x" .. h .. "@" .. q0
-    local canvas = gunCanvases[key]
-    if not canvas then
-      canvas = love.graphics.newCanvas(w * q0, h * q0)
-      canvas:setFilter("linear", "linear")
-      gunCanvases[key] = canvas
+    -- (each gun keeps its own canvas, drawn again only while its picture can change: reloading, or a
+    -- Gatling's barrels; redrawing every gun's model every frame was most of the bar's cost)
+    local sizes = gunCanvases[thing]
+    if not sizes then
+      sizes = {}
+      gunCanvases[thing] = sizes
     end
-    love.graphics.push("all")
-    love.graphics.setCanvas(canvas)
-    love.graphics.clear(0, 0, 0, 0)
-    love.graphics.origin()
-    gunhud.drawModel(thing, 0, 0, q0, 1)
-    love.graphics.pop()
+    local key = w .. "x" .. h .. "@" .. q0
+    local cached = sizes[key]
+    local rp = thing.isReloading and thing:isReloading() and thing:reloadProgress() or nil
+    if not cached then
+      local canvas = love.graphics.newCanvas(w * q0, h * q0)
+      canvas:setFilter("linear", "linear")
+      cached = { canvas = canvas, stale = true }
+      sizes[key] = cached
+    end
+    if cached.stale or rp or cached.rp or thing.def.model == "gatling" then
+      love.graphics.push("all")
+      love.graphics.setCanvas(cached.canvas)
+      love.graphics.clear(0, 0, 0, 0)
+      love.graphics.origin()
+      gunhud.drawModel(thing, 0, 0, q0, 1)
+      love.graphics.pop()
+      cached.stale = false
+    end
+    cached.rp = rp
+    local canvas = cached.canvas
     love.graphics.setColor(alpha, alpha, alpha, alpha) -- (premultiplied)
     love.graphics.setBlendMode("alpha", "premultiplied")
     love.graphics.draw(canvas, math.floor(x + (size - w * fit) / 2), math.floor(y + (size - h * fit) / 2), 0, fit / q0, fit / q0)
@@ -312,22 +339,39 @@ end
 local GOLD_TRIM = { 0.80, 0.64, 0.30 }
 
 -- tint (optional): { border = colour for the rim, wash = colour glowing behind the item }
+local SEL_BORDER, ITEM_BORDER = { 0.55, 0.75, 1 }, { 0.55, 0.48, 0.42, 0.9 }
+local WEAPON_BORDER -- (GOLD_TRIM at 95%, made on first use)
+local SLOT_FILL = { 0.08, 0.06, 0.10, 0.82 }
+-- The hitbox records are reused from frame to frame (a few dozen new tables a frame otherwise)
+local hitboxPool = {}
+local function addHitbox(x, y, w, h, ref)
+  local n = #hitboxes + 1
+  local box = hitboxPool[n]
+  if not box then
+    box = {}
+    hitboxPool[n] = box
+  end
+  box.x, box.y, box.w, box.h, box.ref = x, y, w, h, ref
+  hitboxes[n] = box
+end
+
 local function drawSlot(inv, ref, x, y, size, u, selected, tint)
   local thing = inv:get(ref)
   local c = cellOf(u)
   local border
   if selected then
-    border = { 0.55, 0.75, 1 }
+    border = SEL_BORDER
   elseif ref.kind == "weapon" then
-    border = { GOLD_TRIM[1], GOLD_TRIM[2], GOLD_TRIM[3], 0.95 }
+    WEAPON_BORDER = WEAPON_BORDER or { GOLD_TRIM[1], GOLD_TRIM[2], GOLD_TRIM[3], 0.95 }
+    border = WEAPON_BORDER
   else
-    border = { 0.55, 0.48, 0.42, 0.9 }
+    border = ITEM_BORDER
   end
   local rad = size >= 12 * c and 3 or 2
   if tint and tint.border then
     border = tint.border
   end
-  pxRound(x, y, size, size, c, border, { 0.08, 0.06, 0.10, 0.82 }, rad)
+  pxRound(x, y, size, size, c, border, SLOT_FILL, rad)
   if tint and tint.wash then
     pxRound(x + c, y + c, size - 2 * c, size - 2 * c, c, tint.wash, tint.wash, 2)
   end
@@ -343,7 +387,7 @@ local function drawSlot(inv, ref, x, y, size, u, selected, tint)
     local dragged = drag and drag.ref.kind == ref.kind and drag.ref.index == ref.index and drag.ref.gun == ref.gun
     drawThing(thing, x, y, size, u, dragged and 0.3 or 1)
   end
-  hitboxes[#hitboxes + 1] = { x = x, y = y, w = size, h = size, ref = ref }
+  addHitbox(x, y, size, size, ref)
 end
 
 local function hitTest(mx, my)
@@ -365,6 +409,7 @@ local function shadowPrint(text, x, y, f, color)
 end
 
 local FUSE_TEAL = { 0.25, 1.0, 0.82 }
+local FUSE_TOGGLE_REF = { kind = "fuseToggle" }
 
 -- The fuser beside the item slots (src.fuser): a rounded teal capsule with the two slots either side of a
 -- little flask, which is the lock toggle (click it): dim and low when idle, filling with glowing ether as
@@ -464,7 +509,7 @@ local function drawFuser(inv, x, y, u, fusable, pip)
   local k = fuser.progress(f)
   local level = f.locked and math.floor(1 + k * 7 + 0.5) or 2
   drawFlask(math.floor(flaskX), math.floor(y + (size - 13 * fc) / 2), fc, fuseKnob, level, t)
-  hitboxes[#hitboxes + 1] = { x = flaskX - gap / 2, y = y, w = flaskW + gap, h = size, ref = { kind = "fuseToggle" } }
+  addHitbox(flaskX - gap / 2, y, flaskW + gap, size, FUSE_TOGGLE_REF)
 end
 
 -- What hovering over the fuser's toggle says
@@ -831,7 +876,9 @@ local function drawFuseHints(inv, u, mx, my)
 end
 
 function itembar.draw(inv, u)
-  hitboxes = {}
+  for i = #hitboxes, 1, -1 do
+    hitboxes[i] = nil
+  end
   if isOpen then
     drawPanel(inv, u)
   end

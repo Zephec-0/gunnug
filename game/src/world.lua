@@ -66,6 +66,7 @@ function World.new(width, height, left, top)
     end
   end
   self.ct = self.tiles[1] -- the tile last looked up (a cache: neighbouring lookups are near each other)
+  self.dirtyTiles = {} -- tiles written since their texture was last updated (see World:refresh)
   return self
 end
 
@@ -117,9 +118,17 @@ local function paintLazy(tile, upTo)
   tile.painting = false
 end
 
+-- A tile's picture, and (with the FFI) a pointer to its bytes for writePixel
+local function newData(tile)
+  tile.data = love.image.newImageData(tile.w, tile.h)
+  if hasFFI then
+    tile.px = ffi.cast("uint8_t*", tile.data:getFFIPointer())
+  end
+end
+
 local function tileData(tile)
   if not tile.data then
-    tile.data = love.image.newImageData(tile.w, tile.h)
+    newData(tile)
     tile.lazyY = tile.y
   end
   -- Parts of the world marked lazy are painted only now, from the cells
@@ -135,7 +144,7 @@ end
 local READY_ROWS = 16
 readyTile = function(tile, tick)
   if not tile.data then
-    tile.data = love.image.newImageData(tile.w, tile.h)
+    newData(tile)
     tile.lazyY = tile.y
   end
   while tile.lazyY < tile.y1 and not tile.painting do
@@ -160,7 +169,7 @@ function World:prewarm(viewX, viewY, viewW, viewH)
       local tile = self.tiles[ty * self.tilesX + tx + 1]
       if not tile.image then
         if not tile.data then
-          tile.data = love.image.newImageData(tile.w, tile.h)
+          newData(tile)
           tile.lazyY = tile.y
           return
         elseif tile.lazyY < tile.y1 then
@@ -177,20 +186,51 @@ function World:prewarm(viewX, viewY, viewW, viewH)
   end
 end
 
--- Writes a colour into the tile image covering (x, y)
+-- Writes a colour into the tile image covering (x, y). (Straight into the
+-- ImageData's bytes, rounded the way its setPixel rounds them: setPixel's own
+-- checks and conversions were most of the cost of painting the terrain.)
+local function byte(v)
+  if v <= 0 then
+    return 0
+  elseif v >= 1 then
+    return 255
+  end
+  v = v * 255 + 0.5
+  return v - v % 1
+end
+
 function World:writePixel(x, y, r, g, b, a)
+  x, y = x - x % 1, y - y % 1
   local tile = self.ct
   if x < tile.x or x >= tile.x1 or y < tile.y or y >= tile.y1 then
     tile = self:locate(x, y)
   end
-  tileData(tile):setPixel(x - tile.x, y - tile.y, r, g, b, a)
-  tile.dirty = true
+  local data = tileData(tile)
+  local px = tile.px
+  if px then
+    local i = ((y - tile.y) * tile.w + (x - tile.x)) * 4
+    px[i], px[i + 1], px[i + 2], px[i + 3] = byte(r), byte(g), byte(b), byte(a or 1)
+  else
+    data:setPixel(x - tile.x, y - tile.y, r, g, b, a)
+  end
+  if not tile.dirty then
+    tile.dirty = true
+    local list = self.dirtyTiles
+    list[#list + 1] = tile
+  end
 end
 
 -- The colour currently shown for a terrain pixel
 function World:pixelColor(x, y)
   local tile = self:locate(x, y)
-  return tileData(tile):getPixel(x - tile.x, y - tile.y)
+  local data = tileData(tile)
+  local px = tile.px
+  if px and x % 1 == 0 and y % 1 == 0 then
+    -- (straight from the bytes, as getPixel gives them: byte / 255)
+    local i = ((y - tile.y) * tile.w + (x - tile.x)) * 4
+    return px[i] / 255, px[i + 1] / 255, px[i + 2] / 255, px[i + 3] / 255
+  end
+  return data:getPixel(x - tile.x, y - tile.y)
 end
 
 function World:inBounds(x, y)
@@ -216,6 +256,47 @@ end
 
 function World:isSolid(x, y)
   return solid[self:get(x, y)]
+end
+
+-- Fills out[at + 0 .. at + (x1 - x0)] with 1 where the pixels x0..x1 of row y
+-- are solid and 0 where not (outside the world counts as solid, as in get):
+-- a whole row read tile by tile, for the sweeps that look at every pixel
+function World:solidRow(x0, x1, y, out, at)
+  x0, x1, y = x0 - x0 % 1, x1 - x1 % 1, y - y % 1
+  local i = at
+  if y < self.top or y >= self.bottom then
+    for _ = x0, x1 do
+      out[i] = 1
+      i = i + 1
+    end
+    return
+  end
+  local x = x0
+  while x <= x1 do
+    if x < self.left or x >= self.right then
+      out[i] = 1
+      i = i + 1
+      x = x + 1
+    else
+      local t = self:locate(x, y)
+      local runEnd = math.min(x1, t.x1 - 1)
+      local c = t.cells
+      if c then
+        local base = (y - t.y) * t.w - t.x + 1
+        for xx = x, runEnd do
+          out[i] = solid[c[base + xx]] and 1 or 0
+          i = i + 1
+        end
+      else
+        local v = solid[t.uniform] and 1 or 0
+        for _ = x, runEnd do
+          out[i] = v
+          i = i + 1
+        end
+      end
+      x = runEnd + 1
+    end
+  end
 end
 
 -- Raw write without recolouring; use for bulk generation, then call repaintAll()
@@ -617,51 +698,74 @@ local BAND = 128
 -- so a crater repainted meanwhile can't overwrite it.
 -- They are byte arrays when the FFI is there: as Lua tables of ~460,000
 -- numbers each, the collector went through every entry on every cycle.
-local depthBuf, depthBufGen = {}, {}
-local function depthBuffer(gen, n)
-  if not hasFFI then
-    return gen and depthBufGen or depthBuf
+-- They are kept per coroutine and per level of nesting: generation yields
+-- part-way through a repaint and two areas' generators can take turns (the one
+-- the hunter needs first goes ahead), and painting a pixel can paint the rest
+-- of its tile first, a repaint inside a repaint. Each of those has its own.
+local MAIN = {} -- (stands for the main thread, which has no coroutine object)
+local buffers = setmetatable({}, { __mode = "k" }) -- coroutine -> level -> { depth =, solid = }
+local busy = setmetatable({}, { __mode = "k" }) -- coroutine -> repaints under way in it
+local function buffer(co, level, which, n)
+  local byLevel = buffers[co]
+  if not byLevel then
+    byLevel = {}
+    buffers[co] = byLevel
   end
-  local cur = gen and depthBufGen or depthBuf
-  if type(cur) == "table" or cur.n < n then
+  local set = byLevel[level]
+  if not set then
+    set = {}
+    byLevel[level] = set
+  end
+  local cur = set[which]
+  if not cur or cur.n < n then -- (made once and kept)
     local size = math.max(n, 65536)
-    cur = { buf = ffi.new("uint8_t[?]", size), n = size }
-    if gen then
-      depthBufGen = cur
-    else
-      depthBuf = cur
-    end
+    cur = { buf = hasFFI and ffi.new("uint8_t[?]", size) or {}, n = size }
+    set[which] = cur
   end
   return cur.buf
 end
 
 function World:repaintRect(x0, y0, x1, y1, tick)
+  local co = coroutine.running() or MAIN
+  local level = (busy[co] or 0) + 1
+  busy[co] = level
   local cap = SHADE_DEPTH + 1
+  x0, y0, x1, y1 = floor(x0), floor(y0), floor(x1), floor(y1) -- (whole pixels: the buffers are indexed by them)
   x0, y0 = math.max(self.left, x0), math.max(self.top, y0)
   x1, y1 = math.min(self.right - 1, x1), math.min(self.bottom - 1, y1)
   -- Extended area the sweeps run over
   local ex0, ex1 = x0 - cap, x1 + cap
   local ew = ex1 - ex0 + 1
-  local get = self.get
-  local function isSolidAt(x, y)
-    return solid[get(self, x, y)] -- (outside the level counts as solid: bedrock)
-  end
-  local depth = depthBuffer(tick ~= nil, (math.min(BAND, y1 - y0 + 1) + 2 * cap) * ew + 1)
+  local depth = buffer(co, level, "depth", (math.min(BAND, y1 - y0 + 1) + 2 * cap) * ew + 1)
+  -- (each pixel's solidity is read once into this, a row at a time, and the
+  -- four sweeps read it from there: they used to look every pixel up four times)
+  local solidBuf = buffer(co, level, "solid", (math.min(BAND, y1 - y0 + 1) + 2 * cap) * ew + 1)
   for by0 = y0, y1, BAND do
     local by1 = math.min(y1, by0 + BAND - 1)
     local ey0, ey1 = by0 - cap, by1 + cap
+    for y = ey0, ey1 do
+      self:solidRow(ex0, ex1, y, solidBuf, (y - ey0) * ew)
+    end
     -- Vertical sweeps
     for x = ex0, ex1 do
       local run = cap
       for y = ey0, ey1 do
         local i = (y - ey0) * ew + (x - ex0)
-        run = isSolidAt(x, y) and math.min(run + 1, cap) or 0
+        if solidBuf[i] == 1 then
+          run = run < cap and run + 1 or cap
+        else
+          run = 0
+        end
         depth[i] = run
       end
       run = cap
       for y = ey1, ey0, -1 do
         local i = (y - ey0) * ew + (x - ex0)
-        run = isSolidAt(x, y) and math.min(run + 1, cap) or 0
+        if solidBuf[i] == 1 then
+          run = run < cap and run + 1 or cap
+        else
+          run = 0
+        end
         if run < depth[i] then
           depth[i] = run
         end
@@ -675,14 +779,22 @@ function World:repaintRect(x0, y0, x1, y1, tick)
       local row = (y - ey0) * ew - ex0
       local run = cap
       for x = ex0, ex1 do
-        run = isSolidAt(x, y) and math.min(run + 1, cap) or 0
+        if solidBuf[row + x] == 1 then
+          run = run < cap and run + 1 or cap
+        else
+          run = 0
+        end
         if run < depth[row + x] then
           depth[row + x] = run
         end
       end
       run = cap
       for x = ex1, ex0, -1 do
-        run = isSolidAt(x, y) and math.min(run + 1, cap) or 0
+        if solidBuf[row + x] == 1 then
+          run = run < cap and run + 1 or cap
+        else
+          run = 0
+        end
         if run < depth[row + x] then
           depth[row + x] = run
         end
@@ -733,6 +845,7 @@ function World:repaintRect(x0, y0, x1, y1, tick)
       end
     end
   end
+  busy[co] = level - 1
 end
 
 function World:repaintAll(tick)
@@ -762,7 +875,11 @@ end
 -- Uploads changed tiles that have been drawn before (others upload when
 -- they first come on screen)
 function World:refresh()
-  for _, tile in ipairs(self.tiles) do
+  -- (only the tiles written to: going through every tile of the whole world each frame added up)
+  local list = self.dirtyTiles
+  for i = 1, #list do
+    local tile = list[i]
+    list[i] = nil
     if tile.dirty and tile.image then
       tile.image:replacePixels(tile.data)
       tile.dirty = false

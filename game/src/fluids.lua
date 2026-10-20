@@ -64,6 +64,7 @@ local dry = {} -- cells water may not enter (shop rooms in a flooded area)
 local floodRows = {} -- grid row -> list of { gx0, gx1, top } runs not yet filled
 local FLOOD_BUDGET = 6000 -- cells filled per frame at most
 local lava, acid = {}, {} -- pools that stay where they are (cells keyed like the rest), and their surface spots
+local acidRows = {} -- grid row -> how many acid cells it holds (see setAcid)
 local lavaTop, acidTop = {}, {} -- { x, y } of cells with open air above, every few px: lights and bubbles
 local LAVA_DAMAGE, ACID_DAMAGE = 10, 6
 local liquidTimer = 0
@@ -92,8 +93,9 @@ function fluids.clear()
   lavaFlow.active, lavaFlow.rows, lavaFlow.tick, lavaFlow.moved = {}, {}, 0, false
   addJobs = {}
   lava, acid, lavaTop, acidTop = {}, {}, {}, {}
+  acidRows = {}
   dry, floodRows = {}, {}
-  rowVer = {}
+  blockVer = {}
   active, waterRows, gasRows = {}, {}, {}
   gasTimer, fireTimer, drownTimer = TICK, TICK, TICK
   breathPlayer = nil
@@ -126,10 +128,15 @@ local function rowOf(k)
 end
 
 -- Every change to water or gas goes through these, to keep the row counts
-local rowVer = {} -- per grid row: bumped whenever its water changes (the drawing caches its runs by it)
+-- Per stretch of WATER_BLOCK cells of a row: bumped whenever its water changes (the drawing caches its
+-- runs by it). Per stretch rather than per row, so water pouring through a gap only has its own part of
+-- each row worked out again, not the whole width of the view.
+local WATER_BLOCK = 64 -- (K and KOFF are multiples of it, so floor(k / WATER_BLOCK) names the stretch)
+local blockVer = {}
 
 local function setWater(k, v)
-  rowVer[rowOf(k)] = (rowVer[rowOf(k)] or 0) + 1
+  local bk = floor(k / WATER_BLOCK)
+  blockVer[bk] = (blockVer[bk] or 0) + 1
   local had = water[k] ~= nil
   if v and not had then
     local r = rowOf(k)
@@ -163,6 +170,15 @@ local function setLava(k, v)
     lavaFlow.rows[r] = lavaFlow.rows[r] - 1
   end
   lava[k] = v or nil
+end
+
+-- (acid never drains away: its cells are only ever added)
+local function setAcid(k)
+  if not acid[k] then
+    local r = rowOf(k)
+    acidRows[r] = (acidRows[r] or 0) + 1
+    acid[k] = true
+  end
 end
 
 local function setGas(k, v)
@@ -258,7 +274,7 @@ addNow = function(info)
     end
   end
   addStatic(lava, info.lava, lavaTop, setLava)
-  addStatic(acid, info.acid, acidTop)
+  addStatic(acid, info.acid, acidTop, setAcid)
   -- (pools start asleep: the periodic sweep wakes the water near the hunter
   -- that can move; marking every pool active made each water step walk all
   -- the water in the world)
@@ -780,8 +796,18 @@ end
 
 -- Simulation --------------------------------------------------------------------
 
+-- The simulated region: what the camera shows (at any zoom, wherever it leans or a boss fight pulls
+-- it) plus VIEW_MARGIN px all round, so liquids are already moving before they come into view; and
+-- always a box round the hunter himself. Gas is stepped over a tighter margin (GAS_MARGIN).
+local VIEW_MARGIN, GAS_MARGIN = 128, 48
+local camera = require("src.camera")
+local config = require("src.config")
 local function region(px, py)
-  return floor((px - RANGE_X) / C), floor((py - RANGE_Y) / C), floor((px + RANGE_X) / C), floor((py + RANGE_Y) / C)
+  local x0, y0 = camera.x - VIEW_MARGIN, camera.y - VIEW_MARGIN
+  local x1, y1 = camera.x + config.VIRTUAL_W + VIEW_MARGIN, camera.y + config.VIRTUAL_H + VIEW_MARGIN
+  x0, y0 = math.min(x0, px - 200), math.min(y0, py - 150)
+  x1, y1 = math.max(x1, px + 200), math.max(y1, py + 150)
+  return floor(x0 / C), floor(y0 / C), floor(x1 / C), floor(y1 / C)
 end
 
 -- Gas diffuses toward emptier neighbours: slowly sideways, faster down, a
@@ -961,8 +987,12 @@ end
 
 -- Smoke rises, wanders and thins (stepped twice as often as before, on
 -- cells half the size, so it drifts as fast as ever)
+local smokeCells = {} -- (kept from step to step)
 local function stepSmoke(gx0, gy0, gx1, gy1)
-  local cells = {}
+  local cells = smokeCells
+  for i = #cells, 1, -1 do
+    cells[i] = nil
+  end
   for k in pairs(smoke) do
     local gx, gy = coords(k)
     if gx >= gx0 and gx <= gx1 and gy >= gy0 and gy <= gy1 then
@@ -1005,8 +1035,22 @@ end
 -- one that can't move goes to sleep until a neighbour moves (or the periodic
 -- sweep wakes it), so still pools cost nothing.
 local NEIGHBOURS = { -K - 1, -K, -K + 1, -1, 1, K - 1, K, K + 1 }
+-- During a water step the terrain can't change, and the sideways scans ask about the same cells over
+-- and over: the step remembers what it learned about each cell's rock (see stepWater)
+local solidMemo, memoOn = {}, false
 local function free(k)
-  return not water[k] and not oil[k] and not lava[k] and not acid[k] and not dry[k] and not solidAt(k)
+  if water[k] or oil[k] or lava[k] or acid[k] or dry[k] then
+    return false
+  end
+  if memoOn then
+    local v = solidMemo[k]
+    if v == nil then
+      v = solidAt(k) and true or false
+      solidMemo[k] = v
+    end
+    return not v
+  end
+  return not solidAt(k)
 end
 
 -- Oil flows the same way, but it can't push into water, so it settles on top
@@ -1180,9 +1224,43 @@ function lavaFlow.prune()
   end
 end
 
-local function stepWater(gx0, gy0, gx1, gy1)
+-- (its lists and the sort orders are kept from step to step: a pouring pool is thousands of cells a step,
+-- and a new table or two for each was a stream of garbage)
+local stepList, stepMoved = {}, {}
+-- The cells a move can free up: water falls, slides diagonally down and runs along its own row, so
+-- emptying a cell only helps the three cells over it and the two beside it. (The three under it used to
+-- be woken too, only to look around, find nothing and go back to sleep: most of a pouring pool's cost.)
+local UPWARD = { -K - 1, -K, -K + 1, -1, 1 }
+local function moveWater(k, n)
+  setWater(k, nil)
+  setWater(n, true)
+  stepMoved[n] = true
+  if gas[n] then
+    setGas(n, nil)
+  end
+  fire[n] = nil
+  active[k] = nil
+  active[n] = true
+  for i = 1, 5 do
+    local c = k + UPWARD[i]
+    if water[c] then
+      active[c] = true
+    end
+  end
+end
+-- A step is begun (the cells to move, in order) and then worked through a budget of cells at a time,
+-- spread over the frames until the next step is due: a pool pouring through a gap is thousands of
+-- cells a step, and doing them all in one frame was a stutter 40 times a second. With the budget the
+-- water moves exactly as before; only a really huge flood, more than the budget can keep up with,
+-- flows a little slower instead of dragging the frame rate down.
+local stepPos, stepEnd, stepRight, rowStart, rowEnd, stepRow -- (where the step being worked through is)
+local stepping = false
+local function beginWaterStep(gx0, gy0, gx1, gy1)
   local r = love.math.random
-  local list = {}
+  local list = stepList
+  for i = #list, 1, -1 do
+    list[i] = nil
+  end
   for k in pairs(active) do
     local gx, gy = coords(k)
     if gx >= gx0 and gx <= gx1 and gy >= gy0 and gy <= gy1 then
@@ -1194,77 +1272,94 @@ local function stepWater(gx0, gy0, gx1, gy1)
   if #list == 0 then
     return
   end
-  -- Bottom rows first; each row swept left or right at random
-  if r() < 0.5 then
-    table.sort(list, function(a, b)
-      return a > b
-    end)
-  else
-    table.sort(list, function(a, b)
-      local ra, rb = a - a % K, b - b % K
-      if ra ~= rb then
-        return ra > rb
-      end
-      return a < b
-    end)
+  -- Bottom rows first; each row swept left or right at random. (Sorted with the plain numeric order,
+  -- which is far quicker than a comparison function, then walked in the order wanted: from the end for
+  -- bottom rows first and right to left, or row by row from the bottom, each row left to right.)
+  stepRight = r() < 0.5
+  table.sort(list)
+  for k in pairs(stepMoved) do
+    stepMoved[k] = nil
   end
-  local moved = {}
-  local function move(k, n)
-    setWater(k, nil)
-    setWater(n, true)
-    moved[n] = true
-    setGas(n, nil)
-    fire[n] = nil
-    active[k] = nil
-    active[n] = true
-    for _, d in ipairs(NEIGHBOURS) do
-      if water[k + d] then
-        active[k + d] = true
-      end
+  stepPos, stepRow = #list, nil
+  stepping = true
+end
+
+-- Is there a drop within SPREAD cells along the row toward d, with open water-free cells all the way?
+local function slidesToward(k, d)
+  for i = 1, SPREAD do
+    local c = k + d * i
+    if not free(c) then
+      return false
+    end
+    if free(c + K) then
+      return true
     end
   end
-  for _, k in ipairs(list) do
+  return false
+end
+
+-- Works through up to `budget` cells of the step under way; returns how many it did
+local function continueWaterStep(budget)
+  local r = love.math.random
+  local list, moved = stepList, stepMoved
+  for k in pairs(solidMemo) do
+    solidMemo[k] = nil -- (the terrain may have changed since the last frame)
+  end
+  memoOn = true
+  local done_ = 0
+  while done_ < budget do
+    local k
+    if stepRight then
+      if stepPos < 1 then
+        stepping = false
+        break
+      end
+      k = list[stepPos]
+      stepPos = stepPos - 1
+    else
+      if not stepRow or stepRow > rowEnd then
+        if stepPos < 1 then
+          stepping = false
+          break
+        end
+        local row = list[stepPos] - list[stepPos] % K
+        rowEnd = stepPos
+        while stepPos >= 1 and list[stepPos] - list[stepPos] % K == row do
+          stepPos = stepPos - 1
+        end
+        rowStart = stepPos + 1
+        stepRow = rowStart
+      end
+      k = list[stepRow]
+      stepRow = stepRow + 1
+    end
+    done_ = done_ + 1
+    -- (straight-line code: the little two-way loops this used to be made LuaJIT give up compiling
+    -- the step, and run it in the interpreter, several times slower)
     if water[k] and not moved[k] then
       local below = k + K
-      local done = false
       if free(below) then
-        move(k, below)
-        done = true
+        moveWater(k, below)
       else
         local side = r() < 0.5 and -1 or 1
-        for _, d in ipairs({ side, -side }) do
-          if free(below + d) and free(k + d) then
-            move(k, below + d)
-            done = true
-            break
-          end
+        if free(below + side) and free(k + side) then
+          moveWater(k, below + side)
+        elseif free(below - side) and free(k - side) then
+          moveWater(k, below - side)
+        elseif slidesToward(k, side) then
+          moveWater(k, k + side)
+        elseif slidesToward(k, -side) then
+          moveWater(k, k - side)
+        else
+          active[k] = nil
         end
-        if not done then
-          for _, d in ipairs({ side, -side }) do
-            for i2 = 1, SPREAD do
-              local c = k + d * i2
-              if not free(c) then
-                break
-              end
-              if free(c + K) then
-                move(k, k + d)
-                done = true
-                break
-              end
-            end
-            if done then
-              break
-            end
-          end
-        end
-      end
-      if not done then
-        active[k] = nil
       end
     elseif not water[k] then
       active[k] = nil
     end
   end
+  memoOn = false
+  return done_
 end
 
 -- Lava and acid ----------------------------------------------------------------------
@@ -1272,6 +1367,37 @@ end
 -- The things lava and acid do, a few times a second: hurt whatever stands in
 -- them, ignite gas over lava, boil away water that touches it, burn and
 -- dissolve wood, and bubble
+-- The liquids' steps for this frame: water a budget of cells at a time (see beginWaterStep), oil and
+-- lava whenever a water step begins
+local function runSteps(dt, gx0, gy0, gx1, gy1)
+  accWater = accWater + dt
+  local steps = 0
+  -- (the budget scales with the frame's length: about 120,000 cells a second, at least 800 a frame)
+  local budget = math.max(800, math.floor(120000 * dt))
+  while budget > 0 do
+    if stepping then
+      budget = budget - continueWaterStep(budget)
+    end
+    if stepping or accWater < WATER_STEP or steps >= 2 then
+      break
+    end
+    accWater = accWater - WATER_STEP
+    steps = steps + 1
+    beginWaterStep(gx0, gy0, gx1, gy1)
+    if next(oilActive) then
+      stepOil(gx0, gy0, gx1, gy1)
+    end
+    lavaFlow.tick = lavaFlow.tick + 1
+    if lavaFlow.tick >= lavaFlow.every then
+      lavaFlow.tick = 0
+      if next(lavaFlow.active) then
+        lavaFlow.step(gx0, gy0, gx1, gy1)
+      end
+    end
+  end
+  accWater = math.min(accWater, WATER_STEP)
+end
+
 function fluids.updateLiquids(dt, player, enemies, px, py, b, gx0, gy0, gx1, gy1)
   if next(lava) == nil and next(acid) == nil then
     return
@@ -1403,6 +1529,64 @@ end
 -- Per frame ------------------------------------------------------------------------
 
 -- player: the hunter; enemies: the enemies module (for fire and water on monsters)
+-- Wakes the liquid in a rectangle of cells that could move (the periodic sweep, and the strips the
+-- region newly covers as the view moves)
+local function wakeRect(gx0, gy0, gx1, gy1)
+  for gy = gy0, gy1 do
+    if (waterRows[gy] or 0) > 0 then
+      for gx = gx0, gx1 do
+        local k = gy * K + KOFF + gx
+        -- (only water that could move: open space under it or beside it. Water merely touching rock
+        -- used to count too, which woke a couple of thousand cells for nothing every sweep: a stutter)
+        if water[k] and (not water[k + K] or not water[k - 1] or not water[k + 1]) and (free(k + K) or free(k - 1) or free(k + 1)) then
+          active[k] = true
+        end
+      end
+    end
+    if (oilRows[gy] or 0) > 0 then
+      for gx = gx0, gx1 do
+        local k = gy * K + KOFF + gx
+        if oil[k] and (not oil[k + K] or not oil[k - 1] or not oil[k + 1]) then
+          oilActive[k] = true
+        end
+      end
+    end
+    if (lavaFlow.rows[gy] or 0) > 0 then
+      for gx = gx0, gx1 do
+        local k = gy * K + KOFF + gx
+        if lava[k] and (not lava[k + K] or not lava[k - 1] or not lava[k + 1]) then
+          lavaFlow.active[k] = true
+        end
+      end
+    end
+  end
+end
+
+-- The region last frame: the strips it newly covers are woken at once, so liquid coming into range
+-- (or back into it) carries on moving straight away instead of waiting for the sweep
+local lastRegion = { 0, 0, -1, -1 }
+local function wakeNewStrips(gx0, gy0, gx1, gy1)
+  local l = lastRegion
+  if gx1 < l[1] or gx0 > l[3] or gy1 < l[2] or gy0 > l[4] then
+    wakeRect(gx0, gy0, gx1, gy1) -- (a jump: all of it is new)
+  else
+    -- (a couple of cells back inside the old edge too: what was cut off there wakes again)
+    if gx0 < l[1] then
+      wakeRect(gx0, gy0, l[1] + 2, gy1)
+    end
+    if gx1 > l[3] then
+      wakeRect(l[3] - 2, gy0, gx1, gy1)
+    end
+    if gy0 < l[2] then
+      wakeRect(gx0, gy0, gx1, l[2] + 2)
+    end
+    if gy1 > l[4] then
+      wakeRect(gx0, l[4] - 2, gx1, gy1)
+    end
+  end
+  l[1], l[2], l[3], l[4] = gx0, gy0, gx1, gy1
+end
+
 function fluids.update(dt, player, enemies)
   if not world then
     return
@@ -1421,53 +1605,12 @@ function fluids.update(dt, player, enemies)
   if accSweep >= SWEEP then
     -- Wake the water near the hunter, in case the rock under it was dug away
     accSweep = 0
-    for gy = gy0, gy1 do
-      if (waterRows[gy] or 0) > 0 then
-        for gx = gx0, gx1 do
-          local k = gy * K + KOFF + gx
-          -- (only water that could move: nothing under it, or room beside it)
-          if water[k] and (not water[k + K] or not water[k - 1] or not water[k + 1]) then
-            active[k] = true
-          end
-        end
-      end
-      if (oilRows[gy] or 0) > 0 then
-        for gx = gx0, gx1 do
-          local k = gy * K + KOFF + gx
-          if oil[k] and (not oil[k + K] or not oil[k - 1] or not oil[k + 1]) then
-            oilActive[k] = true
-          end
-        end
-      end
-      if (lavaFlow.rows[gy] or 0) > 0 then
-        for gx = gx0, gx1 do
-          local k = gy * K + KOFF + gx
-          if lava[k] and (not lava[k + K] or not lava[k - 1] or not lava[k + 1]) then
-            lavaFlow.active[k] = true
-          end
-        end
-      end
-    end
+    wakeRect(gx0, gy0, gx1, gy1)
   end
-  accWater = accWater + dt
-  local steps = 0
-  while accWater >= WATER_STEP and steps < 2 do
-    accWater = accWater - WATER_STEP
-    steps = steps + 1
-    stepWater(gx0, gy0, gx1, gy1)
-    if next(oilActive) then
-      stepOil(gx0, gy0, gx1, gy1)
-    end
-    lavaFlow.tick = lavaFlow.tick + 1
-    if lavaFlow.tick >= lavaFlow.every then
-      lavaFlow.tick = 0
-      if next(lavaFlow.active) then
-        lavaFlow.step(gx0, gy0, gx1, gy1)
-      end
-    end
-  end
-  accWater = math.min(accWater, WATER_STEP)
-  stepGasFrame(dt, gx0 + 20, gy0 + 22, gx1 - 20, gy1 - 22) -- (the gas is stepped a little closer round the hunter than the water: cells past the screen's edge wait)
+  wakeNewStrips(gx0, gy0, gx1, gy1)
+  runSteps(dt, gx0, gy0, gx1, gy1)
+  local gm = (VIEW_MARGIN - GAS_MARGIN) / C -- (the gas is stepped a little closer round the view than the water: cells further off wait)
+  stepGasFrame(dt, gx0 + gm, gy0 + gm, gx1 - gm, gy1 - gm)
   accSmoke = accSmoke + dt
   if accSmoke >= 0.05 then
     accSmoke = 0
@@ -1742,11 +1885,14 @@ for i = 1, GAS_LEVELS do
 end
 
 -- Lava and acid: rows of cells drawn as runs, glowing (they ignore the dark)
-local function drawStatic(cells, view, gx0, gy0, gx1, gy1, t, isLava)
+local function drawStatic(cells, view, gx0, gy0, gx1, gy1, t, isLava, rows)
   local floor_ = math.floor
   for gy = gy0, gy1 do
     local row = gy * K + KOFF
     local gx = gx0
+    if (rows[gy] or 0) <= 0 then
+      gx = gx1 + 1 -- (nothing in this row: the counts are kept by setLava and setAcid)
+    end
     while gx <= gx1 do
       if cells[row + gx] then
         local a = gx
@@ -1846,10 +1992,10 @@ function fluids.drawEmissive(view)
   local t = love.timer.getTime()
   drawBreath(t)
   if next(lava) ~= nil then
-    drawStatic(lava, view, gx0, gy0, gx1, gy1, t, true)
+    drawStatic(lava, view, gx0, gy0, gx1, gy1, t, true, lavaFlow.rows)
   end
   if next(acid) ~= nil then
-    drawStatic(acid, view, gx0, gy0, gx1, gy1, t, false)
+    drawStatic(acid, view, gx0, gy0, gx1, gy1, t, false, acidRows)
   end
   bubble(view, love.timer.getDelta())
   -- Gas: each cell a 2-px square whose strength shimmers slowly, sorted into
@@ -2098,36 +2244,48 @@ end
 -- Open water surfaces in view, found once a frame: { x0, x1, y, depth }
 local surfaces = {}
 local surfaceLines = {} -- every open surface run, however short (for the ripple line)
+local surfacePoolA, surfacePoolB = {}, {} -- (their records, reused frame to frame)
 
 -- What the drawing needs about the water in a stretch of a row, kept until the
 -- water in that row or the one above it changes: its runs of cells, and the
 -- spans of those with open air above (the surface). Blocks of 256 cells.
-local BLOCK = 256
+local BLOCK = WATER_BLOCK
 local runCache = {}
 local runCacheCount = 0
 
+local aboveRow = {}
 local function rowBlock(gy, block)
-  local ver = (rowVer[gy] or 0) + (rowVer[gy - 1] or 0)
-  local rc = runCache[gy]
-  if not rc or rc.ver ~= ver then
-    if not rc then
-      runCacheCount = runCacheCount + 1
-    end
-    rc = { ver = ver }
-    runCache[gy] = rc
-  end
-  local entry = rc[block]
+  local bk = (gy * K + KOFF) / BLOCK + block -- (see WATER_BLOCK; also the cache's key)
+  local ver = (blockVer[bk] or 0) + (blockVer[bk - K / BLOCK] or 0)
+  local entry = runCache[bk]
   if not entry then
-    local runs, spans = {}, {}
+    runCacheCount = runCacheCount + 1
+  end
+  if not entry or entry.ver ~= ver then
+    local runs, spans = entry and entry.runs or {}, entry and entry.spans or {}
+    for i = #runs, 1, -1 do
+      runs[i] = nil
+    end
+    for i = #spans, 1, -1 do
+      spans[i] = nil
+    end
     local row = gy * K + KOFF
     local g0, g1 = block * BLOCK, block * BLOCK + BLOCK - 1
     local gx = g0
+    local above -- (the rock over the stretch, read in one go the first time it is needed: see solidAt)
     while gx <= g1 do
       if water[row + gx] then
         local a = gx
         local s0
         while gx <= g1 and water[row + gx] do
-          local open = not water[row + gx - K] and not solidAt(row + gx - K)
+          local open = not water[row + gx - K]
+          if open then
+            if not above then
+              above = aboveRow
+              world:solidRow(g0 * C + HALF, g1 * C + HALF, (gy - 1) * C + HALF, above, 0)
+            end
+            open = above[(gx - g0) * C] == 0
+          end
           if open and not s0 then
             s0 = gx
           elseif not open and s0 then
@@ -2147,16 +2305,22 @@ local function rowBlock(gy, block)
         gx = gx + 1
       end
     end
-    entry = { runs = runs, spans = spans }
-    rc[block] = entry
+    entry = entry or {}
+    entry.runs, entry.spans, entry.ver = runs, spans, ver
+    runCache[bk] = entry
   end
   return entry
 end
 
 local function findSurfaces(view)
   local gx0, gy0, gx1, gy1 = visibleRange(view)
-  surfaces, surfaceLines = {}, {}
-  if runCacheCount > 4000 then
+  for i = #surfaces, 1, -1 do
+    surfaces[i] = nil
+  end
+  for i = #surfaceLines, 1, -1 do
+    surfaceLines[i] = nil
+  end
+  if runCacheCount > 20000 then
     runCache, runCacheCount = {}, 0 -- (drop it all rather than let it grow as the hunter wanders)
   end
   local b0, b1 = floor(gx0 / BLOCK), floor(gx1 / BLOCK)
@@ -2166,7 +2330,14 @@ local function findSurfaces(view)
         local spans = rowBlock(gy, block).spans
         for i = 1, #spans, 2 do
           local a, z = spans[i], spans[i + 1] + 1
-          surfaceLines[#surfaceLines + 1] = { a * C, z * C, gy * C }
+          local n = #surfaceLines + 1
+          local l = surfacePoolB[n]
+          if not l then
+            l = {}
+            surfacePoolB[n] = l
+          end
+          l[1], l[2], l[3] = a * C, z * C, gy * C
+          surfaceLines[n] = l
           if z - a >= 6 then
             local row = gy * K + KOFF
             local mid = floor((a + z) / 2)
@@ -2174,7 +2345,14 @@ local function findSurfaces(view)
             while d < 14 and water[row + mid + d * K] do
               d = d + 1
             end
-            surfaces[#surfaces + 1] = { x0 = a * C, x1 = z * C, y = gy * C, depth = d * C }
+            local n = #surfaces + 1
+            local sf = surfacePoolA[n]
+            if not sf then
+              sf = {}
+              surfacePoolA[n] = sf
+            end
+            sf.x0, sf.x1, sf.y, sf.depth = a * C, z * C, gy * C, d * C
+            surfaces[n] = sf
           end
         end
       end
@@ -2322,6 +2500,8 @@ local function drawWaterOld(gx0, gy0, gx1, gy1, t)
   end
 end
 
+local surfacePoints, surfacePool = {}, {}
+local quads = require("src.quads")
 local function drawWaterShaded(view, gx0, gy0, gx1, gy1, t, mask)
   if waterBody == nil then
     local ok, sh = pcall(love.graphics.newShader, WATER_BODY)
@@ -2337,27 +2517,40 @@ local function drawWaterShaded(view, gx0, gy0, gx1, gy1, t, mask)
   love.graphics.setShader(waterBody)
   love.graphics.setColor(1, 1, 1)
   local b0, b1 = floor(gx0 / BLOCK), floor(gx1 / BLOCK)
+  -- (the runs go into the rectangle batch, src.quads: water broken up by a drain is thousands of them)
+  local qrect = quads.rect
   for gy = gy0, gy1 do
     if (waterRows[gy] or 0) > 0 then
       for block = b0, b1 do
         local runs = rowBlock(gy, block).runs
         for i = 1, #runs, 2 do
           local a, z = runs[i], runs[i + 1] + 1
-          love.graphics.rectangle("fill", a * C, gy * C, (z - a) * C, C)
+          qrect(1, 1, 1, 1, a * C, gy * C, (z - a) * C, C)
         end
       end
     end
   end
+  quads.flush()
   love.graphics.setShader()
-  -- The surface: a pale rippling line where there is open air above
-  local points = {}
+  -- The surface: a pale rippling line where there is open air above (its points kept frame to frame)
+  local points, pool, np = surfacePoints, surfacePool, 0
   for _, l in ipairs(surfaceLines) do
     for sx = l[1], l[2] - 1 do
       if not world:isSolid(sx, l[3] - 1) then
         local off = math.sin(sx * 0.35 + t * 2.2) > 0.5 and 1 or 0
-        points[#points + 1] = { sx + 0.5, l[3] + off + 0.5 }
+        np = np + 1
+        local pt = pool[np]
+        if not pt then
+          pt = {}
+          pool[np] = pt
+        end
+        pt[1], pt[2] = sx + 0.5, l[3] + off + 0.5
+        points[np] = pt
       end
     end
+  end
+  for i = #points, np + 1, -1 do
+    points[i] = nil
   end
   if #points > 0 then
     love.graphics.setColor(0.74, 0.84, 0.76, 0.95)

@@ -974,10 +974,20 @@ end
 local TIMBER = { 0.30, 0.22, 0.16 }
 local TIMBER_LIT = { 0.42, 0.31, 0.22 }
 
+-- The view's horizontal reach this frame (set by overworld.drawDecor): the set pieces below are skipped
+-- when they are wholly off it
+local cullX0, cullX1 = -math.huge, math.huge
+local function visibleX(a, b)
+  return b >= cullX0 and a <= cullX1
+end
+
 -- The headframe over the shaft: two leaning legs, crossbeams and braces, a
 -- back-brace down to the step, the sheave wheel on top, and the hoist rope
 -- running down the shaft and over to the winch house
 local function drawHeadframe()
+  if not visibleX(SHAFT_X0 - 24, math.max(WINCH_X + 10, PIT_X1 + 20)) then
+    return
+  end
   local legL0, legR0 = SHAFT_X0 - 16, SHAFT_X1 + 14
   local legL1, legR1 = SHAFT_X0 - 5, SHAFT_X1 + 3
   local midY = PIT_Y - 72
@@ -1032,6 +1042,9 @@ end
 
 -- A lantern hanging from a crooked post (the flame is drawn emissive)
 local function drawLanternPost(x)
+  if not visibleX(x - 3, x + 7) then
+    return
+  end
   local g = surface(x)
   love.graphics.setColor(TIMBER)
   rect(x + 4, g - 28, 2, 28)
@@ -1077,6 +1090,9 @@ end
 
 -- The winch house: a plank shack with a slanted roof, a door and a lit window
 local function drawWinchHouse()
+  if not visibleX(WINCH_X - 4, WINCH_X + 42) then
+    return
+  end
   local x, g = WINCH_X, surface(WINCH_X + 18)
   love.graphics.setColor(0.33, 0.24, 0.17)
   rect(x, g - 24, 38, 24)
@@ -1097,6 +1113,9 @@ end
 
 -- The hunter's camp: a canvas lean-to, a bedroll, and the campfire ring
 local function drawCamp()
+  if not visibleX(math.min(TENT_X - 30, CAMPFIRE_X - 10), math.max(TENT_X + 20, CAMPFIRE_X + 10)) then
+    return
+  end
   local g = surface(TENT_X)
   -- Lean-to: a sloping canvas sheet over a ridge pole, open toward the fire
   love.graphics.setColor(TIMBER)
@@ -1132,6 +1151,20 @@ end
 local BONE, BONE_DARK = { 0.76, 0.70, 0.58 }, { 0.52, 0.47, 0.39 }
 local function drawBones()
   local x0 = 1396 -- (moved east of the pond, out of the town's lots)
+  if not visibleX(x0 - 16, x0 + 70) then
+    -- (only the small skull out west might be in view)
+    if visibleX(464, 476) then
+      local tx, tg = 468, surface(468)
+      love.graphics.setColor(BONE)
+      rect(tx, tg - 4, 6, 4)
+      rect(tx - 2, tg - 6, 2, 1)
+      rect(tx + 6, tg - 6, 2, 1)
+      love.graphics.setColor(BONE_DARK)
+      rect(tx + 1, tg - 3, 1, 1)
+      rect(tx + 4, tg - 3, 1, 1)
+    end
+    return
+  end
   -- Spine along the ground
   for x = x0, x0 + 58, 3 do
     love.graphics.setColor(BONE_DARK)
@@ -1230,6 +1263,17 @@ local function drawMountainDepth(camX, camY, vx0, vy0, vx1, vy1)
   for _, m in ipairs(catacombs.climbLevels()) do
     local top, bottom = math.max(vy0, m.y0, -1e9), math.min(vy1, m.y1, CAVE_TOP - 120)
     if bottom > top then
+      -- The far scenery of a run of bands the same width is drawn in one go once the run ends (its
+      -- pixels don't depend on where the bands split, and the bands don't overlap): drawn band by band
+      -- it was ten passes over the scenery and a few hundred draw calls a frame
+      local runX0, runX1, runY0, runY1
+      local function flushRun()
+        if runX0 then
+          love.graphics.setScissor(math.floor(runX0 - camX), math.floor(runY0 - camY), math.ceil(runX1 - runX0), runY1 - runY0)
+          parallax.draw(m.theme.parallax or m.index, camX, camY, runX0, runY0, runX1, runY1, m.theme.pillars)
+          runX0 = nil
+        end
+      end
       local y = math.floor(top / NEEDLE_BAND) * NEEDLE_BAND
       while y < bottom do
         local xa, xb = m.theme.profile(math.max(y, m.y0))
@@ -1255,12 +1299,26 @@ local function drawMountainDepth(camX, camY, vx0, vy0, vx1, vy1)
               love.graphics.setScissor(math.floor(sx0 - camX), math.floor(y - camY), math.ceil(bx1 - sx0), NEEDLE_BAND)
               love.graphics.setColor(catacombs.backdrop(y, sx0))
               love.graphics.rectangle("fill", sx0, y, bx1 - sx0, NEEDLE_BAND)
-              parallax.draw(m.theme.parallax or m.index, camX, camY, sx0, y, bx1, y + NEEDLE_BAND, m.theme.pillars)
+              if runX0 and (runX0 ~= sx0 or runX1 ~= bx1 or runY1 ~= y) then
+                flushRun()
+              end
+              if runX0 then
+                runY1 = y + NEEDLE_BAND
+              else
+                runX0, runX1, runY0, runY1 = sx0, bx1, y, y + NEEDLE_BAND
+              end
+            else
+              flushRun()
             end
+          else
+            flushRun()
           end
+        else
+          flushRun()
         end
         y = y + NEEDLE_BAND
       end
+      flushRun()
       love.graphics.setScissor()
     end
   end
@@ -1274,12 +1332,23 @@ function overworld.drawDecor(camX, camY)
   -- earth and rock rather than sky. Its top follows the surface.
   -- (warm earth just under the ground, fading to the cave dark by 150 px down,
   -- so a hole dug near the surface is not black)
+  -- (a column whose surface and gradient bands are all above the view is plain earth over the whole
+  -- view: those are drawn together as one rectangle instead of six polygons each)
+  local deepFrom
   for x = math.floor(vx0 / 8) * 8, vx1, 8 do
     local a, b = surface(x) + 4, surface(x + 8) + 4
     if math.abs(a - b) > 12 then
       a, b = math.max(a, b), math.max(a, b) -- a sheer step: stay under its lower side
     end
-    if math.min(a, b) < vy1 then
+    local deep = math.max(a, b) + 4 * 30 + 31 < vy0
+    if deep then
+      deepFrom = deepFrom or x
+    elseif deepFrom then
+      love.graphics.setColor(EARTH)
+      love.graphics.rectangle("fill", deepFrom, vy0, x - deepFrom, vy1 - vy0)
+      deepFrom = nil
+    end
+    if not deep and math.min(a, b) < vy1 then
       love.graphics.setColor(EARTH)
       love.graphics.polygon("fill", x, a, x + 8, b, x + 8, vy1, x, vy1)
       for k = 0, 4 do
@@ -1288,6 +1357,14 @@ function overworld.drawDecor(camX, camY)
         love.graphics.polygon("fill", x, a + k * 30, x + 8, b + k * 30, x + 8, math.min(vy1, math.max(a, b) + k * 30 + 31), x, math.min(vy1, math.max(a, b) + k * 30 + 31))
       end
     end
+  end
+  if deepFrom then
+    local x1 = math.floor(vx0 / 8) * 8
+    while x1 <= vx1 do
+      x1 = x1 + 8
+    end
+    love.graphics.setColor(EARTH)
+    love.graphics.rectangle("fill", deepFrom, vy0, x1 - deepFrom, vy1 - vy0)
   end
   -- (above the caves: the earth fading into the cave dark; below, each area's own backdrop,
   -- with the next area's bleeding over it at the borders: src.depthblend)
@@ -1304,6 +1381,7 @@ function overworld.drawDecor(camX, camY)
   if vy0 > CAVE_TOP then
     return -- the rest is all on the surface
   end
+  cullX0, cullX1 = vx0, vx1
   for _, tree in ipairs(trees) do
     if tree.x > vx0 - 40 and tree.x < vx1 + 40 then
       drawTree(tree)

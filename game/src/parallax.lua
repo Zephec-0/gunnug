@@ -16,9 +16,52 @@ local function hash(a, b)
   return n - math.floor(n)
 end
 
+-- (the rectangles go into one batch, src.quads: thousands of them a frame in the busier styles)
+local quads = require("src.quads")
+local qrect, flush = quads.rect, quads.flush
+local TWO_1A, TWO_1B = { 0.6, 0.85, 1 }, { 1, 0.8, 0.3 }
+local TWO_2A, TWO_2B = { 0.20, 0.52, 0.62 }, { 0.28, 0.38, 0.70 }
+local TWO_3A, TWO_3B = { 0.10, 0.30, 0.26 }, { 0.12, 0.34, 0.24 }
+-- (constant colours, made once: built inline they were new tables every frame)
+local PCOL_1 = { 0.4, 0.3, 0.2 }
+local PCOL_2 = { 1, 0.7, 0.3 }
+local PCOL_3 = { 0.07, 0.14, 0.16 }
+local PCOL_4 = { 0.08, 0.24, 0.24 }
+local PCOL_5 = { 0.3, 1, 0.55 }
+local PCOL_6 = { 0.14, 0.30, 0.20 }
+local PCOL_7 = { 0.5, 1, 0.65 }
+local PCOL_8 = { 0.24, 0.24, 0.07 }
+local PCOL_9 = { 0.60, 0.58, 0.22 }
+local PCOL_10 = { 0.9, 0.85, 0.3 }
+local PCOL_11 = { 0.15, 0.15, 0.05 }
+local PCOL_12 = { 0.28, 0.27, 0.09 }
+local PCOL_13 = { 0.80, 0.80, 0.50 }
+local PCOL_14 = { 0.07, 0.04, 0.04 }
+local PCOL_15 = { 0.40, 0.18, 0.11 }
+local PCOL_16 = { 0.12, 0.06, 0.05 }
+local PCOL_17 = { 0.04, 0.02, 0.02 }
+local PCOL_18 = { 1, 0.3, 0.08 }
+local PCOL_19 = { 1, 0.5, 0.12 }
+local PCOL_20 = { 1, 0.85, 0.4 }
+local PCOL_21 = { 1, 0.55, 0.15 }
+local PCOL_22 = { 0.05, 0.11, 0.14 }
+local PCOL_23 = { 0.16, 0.30, 0.36 }
+local PCOL_24 = { 0.03, 0.07, 0.10 }
+local PCOL_25 = { 0.12, 0.24, 0.30 }
+local PCOL_26 = { 0.22, 0.34, 0.38 }
+local PCOL_27 = { 0.6, 0.9, 1 }
+local PCOL_28 = { 0.02, 0.02, 0.025 }
+local PCOL_29 = { 0.035, 0.03, 0.035 }
+local PCOL_30 = { 0.11, 0.095, 0.10 }
+local PCOL_31 = { 0.26, 0.22, 0.19 }
+local PCOL_32 = { 0.09, 0.08, 0.09 }
+local PCOL_33 = { 1, 1, 1 }
+local PCOL_34 = { 0.7, 0.95, 1 }
+local PCOL_35 = { 0.75, 0.95, 1 }
+local PCOL_36 = { 0.17, 0.11, 0.08 }
+local floor, max = math.floor, math.max
 local function rect(c, a, x, y, w, h)
-  love.graphics.setColor(c[1], c[2], c[3], a)
-  love.graphics.rectangle("fill", math.floor(x), math.floor(y), math.max(1, math.floor(w)), math.max(1, math.floor(h)))
+  qrect(c[1], c[2], c[3], a, floor(x), floor(y), max(1, floor(w)), max(1, floor(h)))
 end
 
 -- Calls fn(i, j, x, y) for every cell of a layer that parallaxes at p, covering
@@ -75,9 +118,9 @@ local function mineStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
       -- A lantern hung from the beam, a warm spark in the dark
       if hash(i, j + 17) < 0.5 then
         local flick = 0.55 + 0.25 * math.sin(t * 7 + i * 3 + j)
-        rect({ 0.4, 0.3, 0.2 }, 0.6, fx + gap / 2, fy + 3, 1, 5)
-        rect({ 1, 0.7, 0.3 }, flick, fx + gap / 2 - 1, fy + 8, 3, 4)
-        rect({ 1, 0.7, 0.3 }, flick * 0.25, fx + gap / 2 - 4, fy + 5, 9, 10)
+        rect(PCOL_1, 0.6, fx + gap / 2, fy + 3, 1, 5)
+        rect(PCOL_2, flick, fx + gap / 2 - 1, fy + 8, 3, 4)
+        rect(PCOL_2, flick * 0.25, fx + gap / 2 - 4, fy + 5, 9, 10)
       end
     end
   end)
@@ -96,16 +139,16 @@ local function hollowsStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
     local h = 70 + math.floor(hash(i + 6, j) * 90)
     local w = 5 + math.floor(hash(i, j + 8) * 6)
     local cap = 22 + math.floor(hash(i + 9, j) * 24)
-    rect({ 0.07, 0.14, 0.16 }, 0.8, sx, base - h, w, h)
+    rect(PCOL_3, 0.8, sx, base - h, w, h)
     -- The cap: stacked rows narrowing upward, glowing at its rim
     local rows = math.floor(cap / 3)
     for r = 0, rows do
       local rw = cap * math.sqrt(math.max(0, 1 - ((rows - r) / rows) ^ 2))
-      rect({ 0.08, 0.24, 0.24 }, 0.8, sx + w / 2 - rw / 2, base - h - rows + r, rw, 1)
+      rect(PCOL_4, 0.8, sx + w / 2 - rw / 2, base - h - rows + r, rw, 1)
     end
     local pulse = 0.55 + 0.2 * math.sin(t * 1.2 + i * 2 + j)
-    rect({ 0.3, 1, 0.55 }, pulse, sx + w / 2 - cap / 2, base - h, cap, 1)
-    rect({ 0.3, 1, 0.55 }, pulse * 0.4, sx + w / 2 - cap / 2 - 2, base - h + 1, cap + 4, 2)
+    rect(PCOL_5, pulse, sx + w / 2 - cap / 2, base - h, cap, 1)
+    rect(PCOL_5, pulse * 0.4, sx + w / 2 - cap / 2 - 2, base - h + 1, cap + 4, 2)
   end)
   -- Roots hanging from the ceiling, swaying, and spores drifting up
   cells(0.78, 46, 260, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
@@ -116,10 +159,10 @@ local function hollowsStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
     local sway = math.sin(t * 0.8 + i * 1.7) * 2
     for k = 0, len, 2 do
       local bend = sway * (k / len) ^ 2
-      rect({ 0.14, 0.30, 0.20 }, 0.6, x + 10 + bend, y + k, 1, 2)
+      rect(PCOL_6, 0.6, x + 10 + bend, y + k, 1, 2)
     end
     local sp = (t * 6 + hash(i, j) * 100) % 120
-    rect({ 0.5, 1, 0.65 }, 0.35, x + 6 + math.sin(sp * 0.2 + i) * 4, y + 200 - sp, 1, 1)
+    rect(PCOL_7, 0.35, x + 6 + math.sin(sp * 0.2 + i) * 4, y + 200 - sp, 1, 1)
   end)
 end
 
@@ -137,10 +180,10 @@ local function ventsStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
     local w = 10 + math.floor(hash(i + 4, j) * 14)
     for r = 0, h, 2 do
       local rw = w * (1 - r / h)
-      rect({ 0.24, 0.24, 0.07 }, 0.75, sx + (w - rw) / 2, base - r, rw, 2)
+      rect(PCOL_8, 0.75, sx + (w - rw) / 2, base - r, rw, 2)
     end
-    rect({ 0.60, 0.58, 0.22 }, 0.6, sx + w * 0.5, base - h, 1, h) -- the lit facet
-    rect({ 0.9, 0.85, 0.3 }, 0.3 + 0.1 * math.sin(t * 2 + i), sx + w / 2, base - h - 1, 1, 2)
+    rect(PCOL_9, 0.6, sx + w * 0.5, base - h, 1, h) -- the lit facet
+    rect(PCOL_10, 0.3 + 0.1 * math.sin(t * 2 + i), sx + w / 2, base - h - 1, 1, 2)
   end)
   -- Vent chimneys, each breathing a slow plume of pale steam
   cells(0.78, 130, 250, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
@@ -150,13 +193,13 @@ local function ventsStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
     local cx = x + 30 + math.floor(hash(i, j) * 60)
     local base = y + 230
     local h = 30 + math.floor(hash(i, j + 2) * 50)
-    rect({ 0.15, 0.15, 0.05 }, 0.55, cx - 5, base - h, 10, h)
-    rect({ 0.28, 0.27, 0.09 }, 0.5, cx - 6, base - h, 12, 3)
+    rect(PCOL_11, 0.55, cx - 5, base - h, 10, h)
+    rect(PCOL_12, 0.5, cx - 6, base - h, 12, 3)
     for k = 0, 7 do
       local age = ((t * 0.35 + k / 8 + hash(i, j) * 5) % 1)
       local px = cx + math.sin(age * 5 + k) * (3 + age * 10)
       local py = base - h - age * 110
-      rect({ 0.80, 0.80, 0.50 }, 0.22 * (1 - age), px - 4 - age * 6, py, 9 + age * 14, 5)
+      rect(PCOL_13, 0.22 * (1 - age), px - 4 - age * 6, py, 9 + age * 14, 5)
     end
   end)
 end
@@ -170,11 +213,11 @@ local function warrensStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
   for i = math.floor((vx0 - off) / spacing) - 1, math.floor((vx1 - off) / spacing) + 1 do
     local w = 12 + math.floor(hash(i, 3) * 14)
     local x = math.floor(i * spacing + off + hash(i, 9) * spacing * 0.5)
-    rect({ 0.07, 0.04, 0.04 }, 0.6, x, vy0, w, vy1 - vy0)
-    rect({ 0.40, 0.18, 0.11 }, 0.55, x, vy0, 1, vy1 - vy0)
-    rect({ 0.12, 0.06, 0.05 }, 0.6, x + w - 2, vy0, 2, vy1 - vy0)
+    rect(PCOL_14, 0.6, x, vy0, w, vy1 - vy0)
+    rect(PCOL_15, 0.55, x, vy0, 1, vy1 - vy0)
+    rect(PCOL_16, 0.6, x + w - 2, vy0, 2, vy1 - vy0)
     for y = math.floor(vy0 / 14) * 14, vy1, 14 do
-      rect({ 0.04, 0.02, 0.02 }, 0.55, x + 1, y + math.floor(hash(i, y) * 8), w - 3, 1)
+      rect(PCOL_17, 0.55, x + 1, y + math.floor(hash(i, y) * 8), w - 3, 1)
     end
   end
   -- Lava falls: glowing streaks pouring down the far walls, and embers rising
@@ -186,12 +229,12 @@ local function warrensStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
     local len = 100 + math.floor(hash(i, j + 6) * 160)
     local w = 3 + math.floor(hash(i + 3, j) * 3)
     local glow = 0.38 + 0.12 * math.sin(t * 1.5 + i * 3 + j)
-    rect({ 1, 0.3, 0.08 }, glow * 0.5, fx - 3, y, w + 6, len)
-    rect({ 1, 0.5, 0.12 }, glow, fx, y, w, len)
-    rect({ 1, 0.85, 0.4 }, glow * 0.7, fx + 1, y, 1, len)
+    rect(PCOL_18, glow * 0.5, fx - 3, y, w + 6, len)
+    rect(PCOL_19, glow, fx, y, w, len)
+    rect(PCOL_20, glow * 0.7, fx + 1, y, 1, len)
     for k = 0, 8 do
       local age = ((t * 0.25 + k / 9 + hash(i, j) * 7) % 1)
-      rect({ 1, 0.55, 0.15 }, 0.7 * (1 - age), fx + w / 2 + math.sin(age * 9 + k * 2) * 6, y + len - age * 150, 1, 1)
+      rect(PCOL_21, 0.7 * (1 - age), fx + w / 2 + math.sin(age * 9 + k * 2) * 6, y + len - age * 150, 1, 1)
     end
   end)
 end
@@ -206,18 +249,18 @@ local function drownedStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
     local x = math.floor(i * spacing + off)
     local broken = hash(i, 2) < 0.25
     local top = broken and (vy0 + 90 + math.floor(hash(i, 5) * 80)) or vy0
-    rect({ 0.05, 0.11, 0.14 }, 0.55, x, top, 14, vy1 - top)
-    rect({ 0.16, 0.30, 0.36 }, 0.4, x, top, 2, vy1 - top)
-    rect({ 0.03, 0.07, 0.10 }, 0.5, x + 12, top, 2, vy1 - top)
+    rect(PCOL_22, 0.55, x, top, 14, vy1 - top)
+    rect(PCOL_23, 0.4, x, top, 2, vy1 - top)
+    rect(PCOL_24, 0.5, x + 12, top, 2, vy1 - top)
     for y = math.floor(vy0 / 34) * 34, vy1, 34 do
-      rect({ 0.12, 0.24, 0.30 }, 0.5, x - 2, y, 18, 3) -- capitals and bands
+      rect(PCOL_25, 0.5, x - 2, y, 18, 3) -- capitals and bands
     end
     if not broken and hash(i + 1, 2) >= 0.25 then
       -- The arch to the next column
       local span = spacing - 14
       for k = 0, span do
         local ah = math.sqrt(math.max(0, 1 - ((k - span / 2) / (span / 2)) ^ 2)) * 26
-        rect({ 0.05, 0.11, 0.14 }, 0.45, x + 14 + k, vy0 + 60 - ah, 1, 5)
+        rect(PCOL_22, 0.45, x + 14 + k, vy0 + 60 - ah, 1, 5)
       end
     end
   end
@@ -230,13 +273,13 @@ local function drownedStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
     local sway = math.sin(t * 0.7 + i * 2.1) * 3
     for k = 0, len, 3 do
       local bend = sway * (k / len)
-      rect({ 0.22, 0.34, 0.38 }, 0.4, x + 20 + bend, y + k, 1, 2)
+      rect(PCOL_26, 0.4, x + 20 + bend, y + k, 1, 2)
     end
   end)
   for k = 0, 4 do
     local x = vx0 + ((k * 137 + camX * 0.1) % (vx1 - vx0 + 60)) - 30
     local a = 0.035 + 0.02 * math.sin(t * 0.6 + k * 2)
-    rect({ 0.6, 0.9, 1 }, a, x, vy0, 18 + math.sin(t * 0.4 + k) * 5, vy1 - vy0)
+    rect(PCOL_27, a, x, vy0, 18 + math.sin(t * 0.4 + k) * 5, vy1 - vy0)
   end
 end
 
@@ -269,10 +312,10 @@ local function quarryStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
         end
         rect(r.edge, r.a * 0.85, x, top, r.cw + 1, 2)
         -- (the step down to the next slab casts a dark notch)
-        rect({ 0.02, 0.02, 0.025 }, r.a * 0.5, x + r.cw - 2, top, 2, depth * 0.6)
+        rect(PCOL_28, r.a * 0.5, x + r.cw - 2, top, 2, depth * 0.6)
         for k = 0, 2 do
           local ly = top + 16 + k * 22 + math.floor(hash(i, j + 10 + k + r.seed) * 10)
-          rect({ 0.035, 0.03, 0.035 }, r.a * 0.6, x + math.floor(hash(i, 20 + k + j) * 40), ly, 30 + math.floor(hash(i, 30 + k + j) * 70), 1)
+          rect(PCOL_29, r.a * 0.6, x + math.floor(hash(i, 20 + k + j) * 40), ly, 30 + math.floor(hash(i, 30 + k + j) * 70), 1)
         end
       end
     end
@@ -291,8 +334,8 @@ local function quarryStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
       local k = r / h
       local rw = w * (1 - k * 0.8) + (hash(i + r, j) - 0.5) * 3
       local shift = lean * k
-      rect({ 0.11, 0.095, 0.10 }, 0.85, bx + (w - rw) / 2 + shift, base - r, rw, 3)
-      rect({ 0.26, 0.22, 0.19 }, 0.5, bx + (w - rw) / 2 + shift, base - r, 1, 3)
+      rect(PCOL_30, 0.85, bx + (w - rw) / 2 + shift, base - r, rw, 3)
+      rect(PCOL_31, 0.5, bx + (w - rw) / 2 + shift, base - r, 1, 3)
     end
   end)
   -- Rock spikes hanging from above
@@ -305,7 +348,7 @@ local function quarryStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
     local w = 8 + math.floor(hash(i + 2, j) * 12)
     for r = 0, len, 3 do
       local rw = w * (1 - r / len)
-      rect({ 0.09, 0.08, 0.09 }, 0.85, sx + (w - rw) / 2, y + r, rw, 3)
+      rect(PCOL_32, 0.85, sx + (w - rw) / 2, y + r, rw, 3)
     end
   end)
   -- Ore: clusters of flecks in the far walls that glint in turn
@@ -314,7 +357,7 @@ local function quarryStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
       return
     end
     local blue = hash(i, j + 92) < 0.35
-    local c = blue and { 0.6, 0.85, 1 } or { 1, 0.8, 0.3 }
+    local c = blue and TWO_1A or TWO_1B
     local ox, oy = x + math.floor(hash(i, j) * 70), y + math.floor(hash(i, j + 1) * 100)
     for k = 0, 5 do
       local fx = ox + math.floor((hash(i + k, j) - 0.5) * 18)
@@ -324,8 +367,8 @@ local function quarryStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
       rect({ c[1] * 0.5, c[2] * 0.5, c[3] * 0.5 }, 0.6, fx, fy, 2, 2)
       rect(c, a, fx, fy, 1, 1)
       if tw > 0.85 then
-        rect({ 1, 1, 1 }, 0.8, fx - 1, fy, 3, 1)
-        rect({ 1, 1, 1 }, 0.8, fx, fy - 1, 1, 3)
+        rect(PCOL_33, 0.8, fx - 1, fy, 3, 1)
+        rect(PCOL_33, 0.8, fx, fy - 1, 1, 3)
       end
     end
   end)
@@ -355,21 +398,21 @@ local function oceanStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
   local oy = camY * (1 - p)
   for band = 0, 6 do
     local base = vy0 + ((band * 71 - oy * 0.4) % (vy1 - vy0 + 140)) - 70
-    local tint = band % 2 == 0 and { 0.20, 0.52, 0.62 } or { 0.28, 0.38, 0.70 }
+    local tint = band % 2 == 0 and TWO_2A or TWO_2B
     for x = math.floor(vx0 / 3) * 3, vx1, 3 do
       local wx = x + camX * (1 - p)
       local w = swell(wx, t, band * 1.7)
       local a = 0.035 + 0.025 * (0.5 + 0.5 * math.sin(wx * 0.004 + t * 0.12 + band * 2))
       rect(tint, a * 0.5, x, base + w - 6, 3, 20)
       rect(tint, a, x, base + w, 3, 8)
-      rect({ 0.7, 0.95, 1 }, a * 0.9, x, base + w, 3, 1)
+      rect(PCOL_34, a * 0.9, x, base + w, 3, 1)
     end
   end
   -- Light falling from far above
   for k = 0, 5 do
     local x = vx0 + ((k * 151 + camX * 0.15 + math.sin(t * 0.15 + k) * 24) % (vx1 - vx0 + 80)) - 40
     local a = 0.035 + 0.02 * math.sin(t * 0.4 + k * 1.9)
-    rect({ 0.6, 0.9, 1 }, a, x, vy0, 22 + math.sin(t * 0.3 + k) * 6, vy1 - vy0)
+    rect(PCOL_27, a, x, vy0, 22 + math.sin(t * 0.3 + k) * 6, vy1 - vy0)
   end
   -- Seaweed: tall strands rising out of the dark, swaying with the swell
   cells(0.45, 90, 300, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
@@ -378,8 +421,12 @@ local function oceanStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
         local kx = x + 10 + math.floor(hash(i + s, j + 4) * 70)
         local root = y + 300
         local len = 80 + math.floor(hash(i, j + s) * 170)
-        local col = s == 1 and { 0.10, 0.30, 0.26 } or { 0.12, 0.34, 0.24 }
-        for q = 0, len, 2 do
+        local col = s == 1 and TWO_3A or TWO_3B
+        -- (only the part of the strand within the rows drawn: a segment sits at root - q, a frond a row higher)
+        local qa = math.max(0, math.floor(root - vy1 - 4))
+        qa = qa + qa % 2 -- (on the strand's own even steps)
+        local qb = math.min(len, root - vy0 + 4)
+        for q = qa, qb, 2 do
           local u = q / len
           local sway = (math.sin(t * 0.7 + q * 0.035 + kx * 0.05) * 7 + math.sin(t * 0.37 + q * 0.011 + s) * 4) * u
           rect(col, 0.72 - u * 0.2, kx + sway, root - q, 2, 2)
@@ -404,9 +451,9 @@ local function oceanStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
       local wob = math.sin(t * 2.2 + b * 1.7 + i) * 2.5
       local size = 1 + math.floor(hash(i + b, j + 3) * 2.5)
       local a = 0.45 * math.min(1, phase / 40) * math.min(1, (240 - phase) / 40)
-      rect({ 0.75, 0.95, 1 }, a, bx + wob, by, size, size)
+      rect(PCOL_35, a, bx + wob, by, size, size)
       if size > 1 then
-        rect({ 1, 1, 1 }, a * 0.9, bx + wob, by, 1, 1) -- the glint
+        rect(PCOL_33, a * 0.9, bx + wob, by, 1, 1) -- the glint
       end
     end
   end)
@@ -572,6 +619,7 @@ local function needleStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
     end
     local sp = holeSprite(i, j, hx, hy, rw, rh)
     love.graphics.setColor(1, 1, 1, 1)
+    flush()
     love.graphics.draw(sp.rim, math.floor(hx) + sp.ox, math.floor(hy) + sp.oy)
   end)
   -- Stalactites hanging from the near rock, drawn over the sky holes
@@ -581,30 +629,32 @@ local function needleStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
     end
     local sx = x + 10 + math.floor(hash(i, j + 171) * 60)
     local key = i * 4099 + j
+    -- (each a stack of 3-px bands, kept as a list and drawn into the rectangle batch: as a picture of
+    -- its own, every stalactite was a draw call of its own, hundreds a frame here)
     local st = stalSprites[key]
     if not st then
       local len = 50 + math.floor(hash(i, j + 172) * 150)
       local w = 10 + math.floor(hash(i, j + 173) * 16)
-      local data = love.image.newImageData(w, len + 3)
+      local bands = {}
       for r = 0, len, 3 do
         local rw = w * (1 - r / len) ^ 0.8
         local x0 = math.floor((w - rw) / 2)
-        for yy = r, math.min(r + 2, len + 2) do
-          for xx = x0, x0 + math.max(1, math.floor(rw)) - 1 do
-            if xx < w then
-              data:setPixel(xx, yy, colors[1][1], colors[1][2], colors[1][3], 0.9)
-            end
-          end
-          data:setPixel(x0, yy, colors[2][1], colors[2][2], colors[2][3], 0.35)
-        end
+        local x1 = math.min(w - 1, x0 + math.max(1, math.floor(rw)) - 1)
+        local h = math.min(r + 2, len + 2) - r + 1
+        bands[#bands + 1] = { r, h, x0, x1 }
       end
-      local img = love.graphics.newImage(data)
-      img:setFilter("nearest", "nearest")
-      st = { img = img }
+      st = { bands = bands, c1 = colors[1], c2 = colors[2] }
       stalSprites[key] = st
     end
-    love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.draw(st.img, sx, math.floor(y))
+    local fy = math.floor(y)
+    local c1, c2 = st.c1, st.c2
+    for _, b in ipairs(st.bands) do
+      -- the band's body, and its left pixel in the edge colour (which took that pixel's place)
+      if b[4] > b[3] then
+        qrect(c1[1], c1[2], c1[3], 0.9, sx + b[3] + 1, fy + b[1], b[4] - b[3], b[2])
+      end
+      qrect(c2[1], c2[2], c2[3], 0.35, sx + b[3], fy + b[1], 1, b[2])
+    end
   end)
   -- ...and the old timber frames of the mine, further in
   cells(0.78, 130, 210, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
@@ -615,9 +665,9 @@ local function needleStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
     local fy = y + math.floor(hash(i, j + 182) * 60)
     local gap = 24 + math.floor(hash(i, j + 183) * 10)
     local h = 70 + math.floor(hash(i, j + 184) * 40)
-    rect({ 0.17, 0.11, 0.08 }, 0.7, fx, fy, 3, h)
-    rect({ 0.17, 0.11, 0.08 }, 0.7, fx + gap, fy, 3, h)
-    rect({ 0.17, 0.11, 0.08 }, 0.7, fx - 4, fy, gap + 11, 3)
+    rect(PCOL_36, 0.7, fx, fy, 3, h)
+    rect(PCOL_36, 0.7, fx + gap, fy, 3, h)
+    rect(PCOL_36, 0.7, fx - 4, fy, gap + 11, 3)
   end)
 end
 
@@ -629,6 +679,7 @@ function parallax.draw(index, camX, camY, vx0, vy0, vx1, vy1, colors)
   -- (the boss arenas have named styles of their own: src.bossbg)
   local style = type(index) == "string" and require("src.bossbg").styles[index] or STYLES[index] or STYLES[#STYLES]
   style(camX, camY, vx0, vy0, vx1, vy1, colors, love.timer.getTime())
+  flush()
 end
 
 return parallax

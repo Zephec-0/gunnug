@@ -11,6 +11,7 @@ local CHUNK = config.physics.chunkSize
 
 local terrain -- src.world instance the outlines are traced from
 local bodies, cullTimer = {}, 0 -- (see physics.update)
+local live = {} -- the moving (dynamic) bodies near the hunter, from the last refresh of `bodies`
 local chunks = {} -- chunk key -> static body with that chunk's outlines, or false if traced and empty
 
 -- Marching squares. Corners: a = top-left, b = top-right, c = bottom-right,
@@ -116,18 +117,14 @@ local function traceChunk(cx, cy)
   for k in pairs(ptX) do
     ptX[k], ptY[k], linkA[k], linkB[k], visited[k] = nil, nil, nil, nil, nil
   end
-  local isSolid = terrain.isSolid
+  -- (rows read whole from the cells, 1 = solid, rather than a lookup per pixel)
   local top, bottom = rowTop, rowBottom
-  for x = x0, x1 + 1 do
-    top[x - x0] = isSolid(terrain, x, y0)
-  end
+  terrain:solidRow(x0, x1 + 1, y0, top, 0)
   for y = y0, y1 do
-    for x = x0, x1 + 1 do
-      bottom[x - x0] = isSolid(terrain, x, y + 1)
-    end
+    terrain:solidRow(x0, x1 + 1, y + 1, bottom, 0)
     for x = x0, x1 do
       local i = x - x0
-      local case = (top[i] and 8 or 0) + (top[i + 1] and 4 or 0) + (bottom[i + 1] and 2 or 0) + (bottom[i] and 1 or 0)
+      local case = top[i] * 8 + top[i + 1] * 4 + bottom[i + 1] * 2 + bottom[i]
       local segs = CASES[case]
       if segs then
         for _, seg in ipairs(segs) do
@@ -233,7 +230,7 @@ function physics.init(world)
   terrain = world
   chunks = {}
   pendingChunks, pendingWake = {}, {}
-  bodies, cullTimer = {}, 0
+  bodies, cullTimer, live = {}, 0, {}
 end
 
 -- Traces any not-yet-traced chunks overlapping the pixel rectangle
@@ -285,8 +282,8 @@ function physics.flush()
   -- (from the list physics.update keeps: one new from Box2D for every blast
   -- was a big table of every body each time; anything newer is awake anyway)
   local m = REACH
-  for _, body in ipairs(bodies) do
-    if not body:isDestroyed() and body:getType() == "dynamic" and not body:isAwake() then
+  for _, body in ipairs(live) do
+    if not body:isDestroyed() and not body:isAwake() then
       local x, y = body:getPosition()
       for _, r in ipairs(pendingWake) do
         if x > r[1] - m and x < r[3] + m and y > r[2] - m and y < r[4] + m then
@@ -314,20 +311,30 @@ function physics.update(dt, px, py)
   if cullTimer <= 0 or not px then
     cullTimer = 0.2
     bodies = physics.world:getBodies()
-    if px then
-      for _, body in ipairs(bodies) do
-        if body:getType() == "dynamic" then
+    -- (the dynamic bodies left active are kept in `live`: every frame only they are looked at, not the
+    -- hundreds of resting crates and terrain outlines all over the world)
+    for i = #live, 1, -1 do
+      live[i] = nil
+    end
+    for _, body in ipairs(bodies) do
+      if body:getType() == "dynamic" then
+        if px then
           local x, y = body:getPosition()
           local near = math.abs(x - px) < FAR_X and math.abs(y - py) < FAR_Y
           if near ~= body:isActive() then
             body:setActive(near)
           end
+          if near then
+            live[#live + 1] = body
+          end
+        elseif body:isActive() then
+          live[#live + 1] = body
         end
       end
     end
   end
-  for _, body in ipairs(bodies) do
-    if not body:isDestroyed() and body:getType() == "dynamic" and body:isActive() and body:isAwake() then
+  for _, body in ipairs(live) do
+    if not body:isDestroyed() and body:isAwake() then
       local x, y = body:getPosition()
       ensureChunks(x - REACH, y - REACH, x + REACH, y + REACH)
     end

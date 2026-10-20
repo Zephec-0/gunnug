@@ -619,7 +619,7 @@ local function artFrac(ax, ay, w, h)
   return (ax - bcx) / w, (ay - bcy) / h
 end
 
-local function drawAngler(cx, cy, ang, flash, teeth, phase, states)
+local function drawAnglerBoss(cx, cy, ang, flash, teeth, phase, states)
   love.graphics.push()
   love.graphics.translate(math.floor(cx + 0.5), math.floor(cy + 0.5))
   love.graphics.rotate(ang or 0)
@@ -688,7 +688,7 @@ end
 
 local function drawFishBody(e, stage, cx, cy, w, h, ang, flash, beat, openMouth)
   if stage == 4 then
-    return drawAngler(cx, cy, ang, flash, nil, e and e.phase)
+    return drawAnglerBoss(cx, cy, ang, flash, nil, e and e.phase)
   end
   if stage == 3 then
     return drawEelChain(e, cx, cy, w, h, ang, flash, openMouth)
@@ -936,7 +936,7 @@ end
 -- The Biggest Fish: the Angler Sharkwhale, with whichever tusks it still has
 local function drawBiggest(e)
   local cx, cy = center(e)
-  drawAngler(cx, cy, e.ang or 0, e.flash > 0, e.teeth or {}, e.phase, tuskStates(e))
+  drawAnglerBoss(cx, cy, e.ang or 0, e.flash > 0, e.teeth or {}, e.phase, tuskStates(e))
 end
 
 local function drawBigFish(e)

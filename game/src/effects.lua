@@ -350,22 +350,27 @@ function effects.update(dt, world)
   end
 end
 
+-- (particles and chunks go through one batch, src.quads: a gunfight keeps a thousand-odd of them about)
+local quads = require("src.quads")
+
 local function drawChunks()
+  local rect = quads.rect
   for _, c in ipairs(chunks) do
     local alpha = math.min(1, c.life / math.min(0.6, c.maxLife))
-    love.graphics.setColor(c.color[1], c.color[2], c.color[3], alpha)
-    love.graphics.rectangle("fill", math.floor(c.x), math.floor(c.y) - c.h + 1, c.w, c.h)
+    rect(c.color[1], c.color[2], c.color[3], alpha, math.floor(c.x), math.floor(c.y) - c.h + 1, c.w, c.h)
   end
+  quads.flush()
 end
 
 local function drawParticles(emissive)
+  local rect = quads.rect
   for _, p in ipairs(particles) do
     if p.emissive == emissive then
       local c = p.color
-      love.graphics.setColor(c[1], c[2], c[3], math.min(1, p.life / p.maxLife * 2))
-      love.graphics.rectangle("fill", math.floor(p.x), math.floor(p.y), 1, 1)
+      rect(c[1], c[2], c[3], math.min(1, p.life / p.maxLife * 2), math.floor(p.x), math.floor(p.y), 1, 1)
     end
   end
+  quads.flush()
 end
 
 -- Lit normally (dust, debris, smoke). Low-res canvas, world space.

@@ -63,9 +63,12 @@ local function arenaLayer(i, camX, camY, x0, y0, x1, y1, box)
   bossbg.box = nil
 end
 
--- Draws drawFn(x0, y0, x1, y1) for the part of the box ax0..ay1 (feathered by half the
--- feather outside it) that the view reaches, faded out toward the box's edges
-local function blendBox(drawFn, ax0, ay0, ax1, ay1, camX, camY, vx0, vy0, vx1, vy1, feather)
+-- Draws area i's layer (or, with arena set, its boss arena's) for the part of the box ax0..ay1
+-- (feathered by half the feather outside it) that the view reaches, faded out toward the box's edges.
+-- (The area and a flag are passed rather than a function made for each one: thirteen new closures and
+-- a few tables a frame otherwise.)
+local boxU, originU, sizeU, arenaBoxT = { 0, 0, 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0, 0, 0 }
+local function blendBox(i, arena, ax0, ay0, ax1, ay1, camX, camY, vx0, vy0, vx1, vy1, feather)
   feather = feather or FEATHER
   local half = feather / 2
   local x0, y0, x1, y1 = math.max(ax0 - half, vx0), math.max(ay0 - half, vy0), math.min(ax1 + half, vx1), math.min(ay1 + half, vy1)
@@ -78,14 +81,22 @@ local function blendBox(drawFn, ax0, ay0, ax1, ay1, camX, camY, vx0, vy0, vx1, v
   love.graphics.clear(0, 0, 0, 0)
   love.graphics.translate(-camX, -camY)
   love.graphics.setScissor(math.floor(x0 - camX), math.floor(y0 - camY), math.ceil(x1 - x0), math.ceil(y1 - y0))
-  drawFn(x0, y0, x1, y1)
+  if arena then
+    arenaBoxT[1], arenaBoxT[2], arenaBoxT[3], arenaBoxT[4] = ax0, ay0, ax1, ay1
+    arenaLayer(i, camX, camY, x0, y0, x1, y1, arenaBoxT)
+  else
+    layer(i, camX, camY, x0, y0, x1, y1)
+  end
   love.graphics.pop()
   love.graphics.push("all")
   love.graphics.setBlendMode("alpha", "premultiplied")
   love.graphics.setShader(shader)
-  shader:send("box", { ax0, ay0, ax1, ay1 })
-  shader:send("origin", { camX, camY })
-  shader:send("size", { canvas:getDimensions() })
+  boxU[1], boxU[2], boxU[3], boxU[4] = ax0, ay0, ax1, ay1
+  originU[1], originU[2] = camX, camY
+  sizeU[1], sizeU[2] = canvas:getDimensions()
+  shader:send("box", boxU)
+  shader:send("origin", originU)
+  shader:send("size", sizeU)
   shader:send("feather", feather)
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.draw(canvas, camX, camY)
@@ -105,18 +116,14 @@ function depthblend.draw(primary, camX, camY, vx0, vy0, vx1, vy1, top)
     local th = catacombs.theme(i)
     local ax0, ay0, ax1, ay1 = catacombs.bounds(i)
     if i ~= primary and ax0 and not th.profile and not th.open then
-      blendBox(function(x0, y0, x1, y1)
-        layer(i, camX, camY, x0, y0, x1, y1)
-      end, ax0, ay0, ax1, ay1, camX, camY, vx0, vy0, vx1, vy1)
+      blendBox(i, false, ax0, ay0, ax1, ay1, camX, camY, vx0, vy0, vx1, vy1)
     end
   end
   -- The boss arenas that have scenery of their own, over the area they sit in
   for i = 1, catacombs.count() do
     local bx0, by0, bx1, by1 = catacombs.arenaBox(i)
     if bx0 then
-      blendBox(function(x0, y0, x1, y1)
-        arenaLayer(i, camX, camY, x0, y0, x1, y1, { bx0, by0, bx1, by1 })
-      end, bx0, by0, bx1, by1, camX, camY, vx0, vy0, vx1, vy1, 24) -- (a tight edge: the scenery stays inside the arena)
+      blendBox(i, true, bx0, by0, bx1, by1, camX, camY, vx0, vy0, vx1, vy1, 24) -- (a tight edge: the scenery stays inside the arena)
     end
   end
 end

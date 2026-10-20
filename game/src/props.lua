@@ -9,6 +9,10 @@ local pickups = require("src.pickups")
 local props = {}
 
 local list = {}
+-- The props whose bodies are active (near the hunter: src.physics freezes the rest), refreshed a few
+-- times a second; only these are asked every frame whether they are moving. (Asking every crate in
+-- the world was hundreds of calls into the physics engine a frame.) A new prop joins straight away.
+local near, nearTimer = {}, 0
 
 local MAX_DEBRIS = 60 -- oldest terrain debris is removed beyond this
 
@@ -100,15 +104,26 @@ local function frame(x, y, w, h, t)
   love.graphics.rectangle("fill", x + w - t, y, t, h)
 end
 
+-- (the crates' colours, and the box their R draws in, live out here: made afresh for every crate drawn
+-- they were a good part of the frame's garbage)
+local rx0, ry0 = 0, 0
+local function R(c, rx, ry, rw, rh)
+  love.graphics.setColor(c)
+  love.graphics.rectangle("fill", rx0 + rx, ry0 + ry, rw, rh)
+end
+local WOOD, WOOD_L, WOOD_D, WOOD_DD = { 0.54, 0.38, 0.24 }, { 0.66, 0.49, 0.32 }, { 0.40, 0.28, 0.18 }, { 0.24, 0.16, 0.11 }
+local NAIL = { 0.30, 0.20, 0.14 }
+local CRATE_TOP, CRATE_LEFT, CRATE_RIGHT, CRATE_BOTTOM = { 0.46, 0.31, 0.19 }, { 0.28, 0.18, 0.11 }, { 0.24, 0.15, 0.10 }, { 0.20, 0.12, 0.08 }
+local IRON, IRON_L, IRON_D = { 0.30, 0.31, 0.36 }, { 0.43, 0.44, 0.50 }, { 0.19, 0.20, 0.24 }
+local BRASS, BRASS_L, BRASS_D = { 0.58, 0.45, 0.24 }, { 0.78, 0.64, 0.36 }, { 0.38, 0.28, 0.14 }
+local SCUFF, RUST, BOLT = { 0.50, 0.51, 0.57 }, { 0.46, 0.27, 0.18 }, { 0.18, 0.13, 0.08 }
+local RIM_TOP, RIM_BOTTOM, RIM_LEFT, RIM_RIGHT, RIM_LIT = { 0.22, 0.16, 0.13 }, { 0.17, 0.12, 0.10 }, { 0.20, 0.14, 0.11 }, { 0.16, 0.11, 0.09 }, { 0.40, 0.32, 0.27 }
+
 local function drawCrate(p)
   local w, h = p.width, p.height
   local x, y = -math.floor(w / 2), -math.floor(h / 2)
   local seed = math.floor((p.seed or 0) * 100)
-  local function R(c, rx, ry, rw, rh)
-    love.graphics.setColor(c)
-    love.graphics.rectangle("fill", x + rx, y + ry, rw, rh)
-  end
-  local WOOD, WOOD_L, WOOD_D, WOOD_DD = { 0.54, 0.38, 0.24 }, { 0.66, 0.49, 0.32 }, { 0.40, 0.28, 0.18 }, { 0.24, 0.16, 0.11 }
+  rx0, ry0 = x, y
   -- Three boards, each lit along its top edge and shaded under
   local bh = (h - 2) / 3
   for i = 0, 2 do
@@ -139,63 +154,163 @@ local function drawCrate(p)
     R(WOOD_L, i, by - 1 < 1 and 1 or by - 1, 1, 1)
   end
   -- Nails at the slats' ends: dull rust-brown heads, no bright dots
-  for _, c in ipairs({ { 1, 2 }, { w - 2, 2 }, { 1, h - 3 }, { w - 2, h - 3 } }) do
-    R({ 0.30, 0.20, 0.14 }, c[1], c[2], 1, 1)
-  end
+  R(NAIL, 1, 2, 1, 1)
+  R(NAIL, w - 2, 2, 1, 1)
+  R(NAIL, 1, h - 3, 1, 1)
+  R(NAIL, w - 2, h - 3, 1, 1)
   -- A warm umber edge instead of a near-black frame: lit along the top, deepest along the bottom, the
   -- corners left a shade lighter so it reads as rounded
-  R({ 0.46, 0.31, 0.19 }, 1, 0, w - 2, 1)
-  R({ 0.28, 0.18, 0.11 }, 0, 1, 1, h - 2)
-  R({ 0.24, 0.15, 0.10 }, w - 1, 1, 1, h - 2)
-  R({ 0.20, 0.12, 0.08 }, 1, h - 1, w - 2, 1)
+  R(CRATE_TOP, 1, 0, w - 2, 1)
+  R(CRATE_LEFT, 0, 1, 1, h - 2)
+  R(CRATE_RIGHT, w - 1, 1, 1, h - 2)
+  R(CRATE_BOTTOM, 1, h - 1, w - 2, 1)
 end
 
 local function drawIronCrate(p)
   local w, h = p.width, p.height
   local x, y = -math.floor(w / 2), -math.floor(h / 2)
   local seed = math.floor((p.seed or 0) * 100)
-  local function R(c, rx, ry, rw, rh)
-    love.graphics.setColor(c)
-    love.graphics.rectangle("fill", x + rx, y + ry, rw, rh)
-  end
-  local IRON, IRON_L, IRON_D = { 0.30, 0.31, 0.36 }, { 0.43, 0.44, 0.50 }, { 0.19, 0.20, 0.24 }
-  local BRASS, BRASS_L, BRASS_D = { 0.58, 0.45, 0.24 }, { 0.78, 0.64, 0.36 }, { 0.38, 0.28, 0.14 }
+  rx0, ry0 = x, y
   R(IRON, 0, 0, w, h)
   -- Four riveted panels, each with a lit top-left edge and a shaded bottom-right
   local half = math.floor(w / 2)
-  for _, q in ipairs({ { 1, 1 }, { half + 1, 1 }, { 1, math.floor(h / 2) + 1 }, { half + 1, math.floor(h / 2) + 1 } }) do
+  for k = 1, 4 do
+    local qx = (k == 2 or k == 4) and half + 1 or 1
+    local qy = k >= 3 and math.floor(h / 2) + 1 or 1
     local pw, ph = half - 2, math.floor(h / 2) - 2
-    R(IRON_L, q[1], q[2], pw, 1)
-    R(IRON_L, q[1], q[2], 1, ph)
-    R(IRON_D, q[1] + 1, q[2] + ph - 1, pw - 1, 1)
-    R(IRON_D, q[1] + pw - 1, q[2] + 1, 1, ph - 1)
+    R(IRON_L, qx, qy, pw, 1)
+    R(IRON_L, qx, qy, 1, ph)
+    R(IRON_D, qx + 1, qy + ph - 1, pw - 1, 1)
+    R(IRON_D, qx + pw - 1, qy + 1, 1, ph - 1)
   end
   -- Scuffs and a streak of rust
-  R({ 0.50, 0.51, 0.57 }, 3 + seed % (w - 8), 3 + (seed * 3) % (h - 8), 2, 1)
-  R({ 0.46, 0.27, 0.18 }, 2 + (seed * 5) % (w - 6), h - 4, 1, 3)
+  R(SCUFF, 3 + seed % (w - 8), 3 + (seed * 3) % (h - 8), 2, 1)
+  R(RUST, 2 + (seed * 5) % (w - 6), h - 4, 1, 3)
   -- Brass band across the middle with a bolt in it, and brackets on the corners
   R(BRASS, 0, math.floor(h / 2) - 1, w, 2)
   R(BRASS_L, 0, math.floor(h / 2) - 1, w, 1)
   R(BRASS_D, 0, math.floor(h / 2), w, 1)
   R(BRASS_D, half - 1, math.floor(h / 2) - 1, 2, 2)
   R(BRASS_L, half - 1, math.floor(h / 2) - 1, 1, 1)
-  for _, c in ipairs({ { 0, 0, 1, 1 }, { w - 3, 0, -1, 1 }, { 0, h - 3, 1, -1 }, { w - 3, h - 3, -1, -1 } }) do
-    R(BRASS, c[1], c[2], 3, 3)
-    R(BRASS_L, c[1], c[2], 3, 1)
-    R(BRASS_D, c[1] + 2, c[2], 1, 3)
-    R({ 0.18, 0.13, 0.08 }, c[1] + 1, c[2] + 1, 1, 1)
+  for k = 1, 4 do
+    local cx = (k == 2 or k == 4) and w - 3 or 0
+    local cy = k >= 3 and h - 3 or 0
+    R(BRASS, cx, cy, 3, 3)
+    R(BRASS_L, cx, cy, 3, 1)
+    R(BRASS_D, cx + 2, cy, 1, 3)
+    R(BOLT, cx + 1, cy + 1, 1, 1)
   end
   -- A warm rust-black rim (not a cold grey frame), the top lit
-  R({ 0.22, 0.16, 0.13 }, 0, 0, w, 1)
-  R({ 0.17, 0.12, 0.10 }, 0, h - 1, w, 1)
-  R({ 0.20, 0.14, 0.11 }, 0, 1, 1, h - 2)
-  R({ 0.16, 0.11, 0.09 }, w - 1, 1, 1, h - 2)
-  R({ 0.40, 0.32, 0.27 }, 3, 0, w - 6, 1)
+  R(RIM_TOP, 0, 0, w, 1)
+  R(RIM_BOTTOM, 0, h - 1, w, 1)
+  R(RIM_LEFT, 0, 1, 1, h - 2)
+  R(RIM_RIGHT, w - 1, 1, 1, h - 2)
+  R(RIM_LIT, 3, 0, w - 6, 1)
 end
 
 -- Breakable pots, pouches and lamps found about the areas. Each is drawn from
 -- the top-left of its box like the crates; the lamps' flames and crystals are
 -- drawn again after the lighting (see props.drawEmissive) so they glow.
+-- (the props' constant shapes and colours, made once: built inline they were new tables every frame)
+local PR_L1 = { { 2, 0, 5, 1 }, { 3, 1, 3, 2 }, { 1, 3, 7, 2 }, { 0, 5, 9, 4 }, { 1, 9, 7, 2 }, { 2, 11, 5, 1 } }
+local PR_C2 = { 0.62, 0.38, 0.26 }
+local PR_L3 = { { 2, 0, 5, 1 }, { 1, 4, 2, 4 }, { 3, 1, 1, 2 } }
+local PR_C4 = { 0.80, 0.56, 0.40 }
+local PR_L5 = { { 6, 4, 2, 6 }, { 5, 9, 2, 2 }, { 5, 1, 1, 2 } }
+local PR_C6 = { 0.42, 0.25, 0.18 }
+local PR_L7 = { { 0, 6, 9, 1 } }
+local PR_C8 = { 0.30, 0.17, 0.13 }
+local PR_L9 = { { 1, 7, 1, 1 }, { 3, 7, 1, 1 }, { 5, 7, 1, 1 }, { 7, 7, 1, 1 } }
+local PR_C10 = { 0.88, 0.76, 0.52 }
+local PR_L11 = { { 3, 0, 1, 2 }, { 5, 0, 1, 2 }, { 2, 3, 5, 1 }, { 1, 4, 7, 1 }, { 0, 5, 9, 2 }, { 1, 7, 7, 1 } }
+local PR_C12 = { 0.52, 0.38, 0.24 }
+local PR_L13 = { { 1, 5, 2, 2 }, { 2, 4, 2, 1 } }
+local PR_C14 = { 0.66, 0.50, 0.32 }
+local PR_L15 = { { 6, 5, 3, 3 }, { 5, 7, 2, 1 } }
+local PR_C16 = { 0.36, 0.25, 0.16 }
+local PR_L17 = { { 2, 2, 5, 1 } }
+local PR_C18 = { 0.22, 0.15, 0.10 }
+local PR_L19 = { { 4, 4, 1, 1 } }
+local PR_C20 = { 0.95, 0.76, 0.28 }
+local PR_L21 = { { 2, 0, 3, 1 }, { 1, 1, 1, 1 }, { 5, 1, 1, 1 }, { 1, 2, 5, 1 }, { 1, 3, 1, 6 }, { 5, 3, 1, 6 }, { 0, 9, 7, 1 }, { 1, 10, 5, 1 } }
+local PR_C22 = { 0.20, 0.19, 0.22 }
+local PR_L23 = { { 2, 3, 3, 6 } }
+local PR_C24 = { 0.50, 0.33, 0.14 }
+local PR_L25 = { { 2, 3, 1, 6 } }
+local PR_C26 = { 0.66, 0.46, 0.20 }
+local PR_L27 = { { 3, 2, 2, 2 } }
+local PR_C28 = { 0.86, 0.82, 0.68 }
+local PR_L29 = { { 2, 4, 4, 1 }, { 1, 5, 6, 3 }, { 2, 8, 4, 1 }, { 2, 9, 4, 1 } }
+local PR_C30 = { 0.80, 0.78, 0.70 }
+local PR_L31 = { { 5, 5, 2, 3 }, { 5, 8, 1, 2 } }
+local PR_C32 = { 0.58, 0.56, 0.52 }
+local PR_L33 = { { 2, 6, 1, 1 }, { 4, 6, 1, 1 }, { 3, 7, 1, 1 }, { 3, 9, 1, 1 } }
+local PR_C34 = { 0.10, 0.08, 0.10 }
+local PR_L35 = { { 4, 7, 2, 3 }, { 3, 9, 4, 1 } }
+local PR_C36 = { 0.28, 0.34, 0.26 }
+local PR_L37 = { { 1, 5, 9, 1 }, { 0, 6, 11, 2 }, { 1, 8, 9, 1 } }
+local PR_C38 = { 0.34, 0.31, 0.28 }
+local PR_L39 = { { 0, 6, 3, 2 }, { 1, 5, 3, 1 } }
+local PR_C40 = { 0.46, 0.42, 0.38 }
+local PR_L41 = { { 1, 3, 1, 5 }, { 4, 1, 1, 7 }, { 7, 4, 1, 4 } }
+local PR_C42 = { 0.98, 0.66, 0.70 }
+local PR_L43 = { { 1, 3, 2, 1 }, { 4, 1, 2, 1 }, { 7, 4, 2, 1 } }
+local PR_C44 = { 0.30, 0.10, 0.18 }
+local PR_L45 = { { 0, 7, 10, 1 } }
+local PR_C46 = { 0.50, 0.22, 0.30 }
+local PR_L47 = { { 1, 2, 7, 1 }, { 0, 3, 9, 4 }, { 1, 7, 7, 2 }, { 2, 9, 5, 1 } }
+local PR_C48 = { 0.24, 0.20, 0.20 }
+local PR_L49 = { { 1, 3, 2, 4 } }
+local PR_C50 = { 0.34, 0.28, 0.27 }
+local PR_L51 = { { 6, 4, 3, 4 } }
+local PR_C52 = { 0.15, 0.12, 0.13 }
+local PR_L53 = { { 1, 2, 7, 1 } }
+local PR_C54 = { 0.10, 0.08, 0.09 }
+local PR_L55 = { { 3, 6, 1, 2 } }
+local PR_C56 = { 1, 0.95, 0.7 }
+local PR_L57 = { { 3, 1, 1, 1 } }
+local PR_L58 = { { 2, 6, 1, 1 }, { 4, 6, 1, 1 } }
+local PR_C59 = { 1, 0.8, 0.3 }
+local PR_L60 = { { 4, 1, 1, 1 } }
+local PR_L61 = { { 2, 5, 1, 2 }, { 5, 6, 1, 1 } }
+local PR_C62 = { 1, 0.45, 0.12, 0.8 }
+local PR_L63 = { { 2, 0, 9, 1 }, { 1, 1, 11, 14 }, { 2, 15, 9, 1 } }
+local PR_C64 = { 0.50, 0.31, 0.17 }
+local PR_L65 = { { 1, 1, 2, 14 }, { 3, 0, 3, 1 } }
+local PR_C66 = { 0.66, 0.42, 0.22 }
+local PR_L67 = { { 10, 1, 2, 14 }, { 8, 15, 3, 1 } }
+local PR_C68 = { 0.34, 0.20, 0.11 }
+local PR_L69 = { { 0, 2, 13, 1 }, { 0, 13, 13, 1 } }
+local PR_C70 = { 0.24, 0.25, 0.29 }
+local PR_L71 = { { 0, 2, 13, 1 } }
+local PR_C72 = { 0.36, 0.37, 0.42 }
+local PR_L73 = { { 1, 4, 11, 7 } }
+local PR_C74 = { 0.86, 0.78, 0.60 }
+local PR_L75 = { { 1, 4, 11, 1 }, { 1, 10, 11, 1 } }
+local PR_C76 = { 0.70, 0.60, 0.44 }
+local PR_L77 = { { 6, -2, 1, 2 } }
+local PR_C78 = { 0.14, 0.10, 0.08 }
+local PR_L79 = { { 3, 0, 16, 2 }, { 5, -1, 6, 1 }, { 12, -1, 4, 1 } }
+local PR_C80 = { 0.36, 0.34, 0.33 }
+local PR_L81 = { { 4, 0, 3, 1 }, { 13, -1, 2, 1 } }
+local PR_C82 = { 0.50, 0.48, 0.46 }
+local PR_L83 = { { 8, 0, 1, 1 }, { 15, 0, 1, 1 }, { 6, 1, 1, 1 }, { 11, -1, 1, 1 } }
+local PR_C84 = { 0.95, 0.75, 0.25 }
+local PR_L85 = { { 0, 2, 22, 2 } }
+local PR_C86 = { 0.40, 0.41, 0.46 }
+local PR_L87 = { { 0, 2, 22, 1 } }
+local PR_C88 = { 0.58, 0.59, 0.64 }
+local PR_L89 = { { 1, 4, 20, 6 } }
+local PR_C90 = { 0.40, 0.29, 0.22 }
+local PR_L91 = { { 1, 4, 20, 1 } }
+local PR_C92 = { 0.50, 0.37, 0.28 }
+local PR_L93 = { { 1, 9, 20, 1 } }
+local PR_C94 = { 0.28, 0.20, 0.16 }
+local PR_L95 = { { 5, 4, 1, 6 }, { 11, 4, 1, 6 }, { 17, 4, 1, 6 } }
+local PR_C96 = { 0.30, 0.31, 0.35 }
+local PR_L97 = { { 3, 5, 1, 1 }, { 8, 5, 1, 1 }, { 14, 5, 1, 1 }, { 19, 5, 1, 1 } }
+local PR_C98 = { 0.62, 0.52, 0.40 }
+
 local function rects(x, y, list, color)
   love.graphics.setColor(color)
   for _, r in ipairs(list) do
@@ -209,36 +324,36 @@ end
 
 local function drawUrn(p)
   local x, y = topLeft(p)
-  rects(x, y, { { 2, 0, 5, 1 }, { 3, 1, 3, 2 }, { 1, 3, 7, 2 }, { 0, 5, 9, 4 }, { 1, 9, 7, 2 }, { 2, 11, 5, 1 } }, { 0.62, 0.38, 0.26 })
-  rects(x, y, { { 2, 0, 5, 1 }, { 1, 4, 2, 4 }, { 3, 1, 1, 2 } }, { 0.80, 0.56, 0.40 })
-  rects(x, y, { { 6, 4, 2, 6 }, { 5, 9, 2, 2 }, { 5, 1, 1, 2 } }, { 0.42, 0.25, 0.18 })
+  rects(x, y, PR_L1, PR_C2)
+  rects(x, y, PR_L3, PR_C4)
+  rects(x, y, PR_L5, PR_C6)
   -- A painted band with a zigzag
-  rects(x, y, { { 0, 6, 9, 1 } }, { 0.30, 0.17, 0.13 })
-  rects(x, y, { { 1, 7, 1, 1 }, { 3, 7, 1, 1 }, { 5, 7, 1, 1 }, { 7, 7, 1, 1 } }, { 0.88, 0.76, 0.52 })
+  rects(x, y, PR_L7, PR_C8)
+  rects(x, y, PR_L9, PR_C10)
 end
 
 local function drawPouch(p)
   local x, y = topLeft(p)
-  rects(x, y, { { 3, 0, 1, 2 }, { 5, 0, 1, 2 }, { 2, 3, 5, 1 }, { 1, 4, 7, 1 }, { 0, 5, 9, 2 }, { 1, 7, 7, 1 } }, { 0.52, 0.38, 0.24 })
-  rects(x, y, { { 1, 5, 2, 2 }, { 2, 4, 2, 1 } }, { 0.66, 0.50, 0.32 })
-  rects(x, y, { { 6, 5, 3, 3 }, { 5, 7, 2, 1 } }, { 0.36, 0.25, 0.16 })
-  rects(x, y, { { 2, 2, 5, 1 } }, { 0.22, 0.15, 0.10 }) -- the drawstring
-  rects(x, y, { { 4, 4, 1, 1 } }, { 0.95, 0.76, 0.28 }) -- a coin showing
+  rects(x, y, PR_L11, PR_C12)
+  rects(x, y, PR_L13, PR_C14)
+  rects(x, y, PR_L15, PR_C16)
+  rects(x, y, PR_L17, PR_C18) -- the drawstring
+  rects(x, y, PR_L19, PR_C20) -- a coin showing
 end
 
 local function drawLantern(p)
   local x, y = topLeft(p)
-  rects(x, y, { { 2, 0, 3, 1 }, { 1, 1, 1, 1 }, { 5, 1, 1, 1 }, { 1, 2, 5, 1 }, { 1, 3, 1, 6 }, { 5, 3, 1, 6 }, { 0, 9, 7, 1 }, { 1, 10, 5, 1 } }, { 0.20, 0.19, 0.22 })
-  rects(x, y, { { 2, 3, 3, 6 } }, { 0.50, 0.33, 0.14 })
-  rects(x, y, { { 2, 3, 1, 6 } }, { 0.66, 0.46, 0.20 })
+  rects(x, y, PR_L21, PR_C22)
+  rects(x, y, PR_L23, PR_C24)
+  rects(x, y, PR_L25, PR_C26)
 end
 
 local function drawSkullCandle(p)
   local x, y = topLeft(p)
-  rects(x, y, { { 3, 2, 2, 2 } }, { 0.86, 0.82, 0.68 }) -- the candle
-  rects(x, y, { { 2, 4, 4, 1 }, { 1, 5, 6, 3 }, { 2, 8, 4, 1 }, { 2, 9, 4, 1 } }, { 0.80, 0.78, 0.70 })
-  rects(x, y, { { 5, 5, 2, 3 }, { 5, 8, 1, 2 } }, { 0.58, 0.56, 0.52 })
-  rects(x, y, { { 2, 6, 1, 1 }, { 4, 6, 1, 1 }, { 3, 7, 1, 1 }, { 3, 9, 1, 1 } }, { 0.10, 0.08, 0.10 })
+  rects(x, y, PR_L27, PR_C28) -- the candle
+  rects(x, y, PR_L29, PR_C30)
+  rects(x, y, PR_L31, PR_C32)
+  rects(x, y, PR_L33, PR_C34)
 end
 
 -- A lamp's glow colour: its own, or the area's mushroom/crystal colour
@@ -249,7 +364,7 @@ end
 local function drawSporePod(p)
   local x, y = topLeft(p)
   local g = glowOf(p, { 0.35, 0.95, 0.85 })
-  rects(x, y, { { 4, 7, 2, 3 }, { 3, 9, 4, 1 } }, { 0.28, 0.34, 0.26 }) -- stem and foot
+  rects(x, y, PR_L35, PR_C36) -- stem and foot
   rects(x, y, { { 3, 0, 4, 1 }, { 2, 1, 6, 1 }, { 1, 2, 8, 1 }, { 0, 3, 10, 4 }, { 1, 7, 8, 1 } }, { g[1] * 0.42, g[2] * 0.42, g[3] * 0.42 })
   rects(x, y, { { 6, 3, 4, 4 } }, { g[1] * 0.25, g[2] * 0.25, g[3] * 0.25 })
 end
@@ -259,8 +374,8 @@ local GEODE_SPIKES = { { 2, 3 }, { 4, 1 }, { 6, 2 }, { 8, 3 } } -- x, top
 local function drawGeode(p)
   local x, y = topLeft(p)
   local g = glowOf(p, { 1.0, 0.92, 0.35 })
-  rects(x, y, { { 1, 5, 9, 1 }, { 0, 6, 11, 2 }, { 1, 8, 9, 1 } }, { 0.34, 0.31, 0.28 })
-  rects(x, y, { { 0, 6, 3, 2 }, { 1, 5, 3, 1 } }, { 0.46, 0.42, 0.38 })
+  rects(x, y, PR_L37, PR_C38)
+  rects(x, y, PR_L39, PR_C40)
   -- Crystal spikes of the area's colour
   for _, s in ipairs(GEODE_SPIKES) do
     rects(x, y, { { s[1], s[2], 2, 6 - s[2] } }, { g[1] * 0.62, g[2] * 0.62, g[3] * 0.62 })
@@ -285,18 +400,18 @@ local function drawSeaSponge(p)
   local x, y = topLeft(p)
   local c1, c2 = { 0.86, 0.44, 0.52 }, { 0.62, 0.26, 0.38 }
   rects(x, y, { { 1, 3, 3, 5 }, { 4, 1, 3, 7 }, { 7, 4, 3, 4 } }, c1)
-  rects(x, y, { { 1, 3, 1, 5 }, { 4, 1, 1, 7 }, { 7, 4, 1, 4 } }, { 0.98, 0.66, 0.70 })
+  rects(x, y, PR_L41, PR_C42)
   rects(x, y, { { 3, 3, 1, 5 }, { 6, 1, 1, 7 }, { 9, 4, 1, 4 } }, c2)
-  rects(x, y, { { 1, 3, 2, 1 }, { 4, 1, 2, 1 }, { 7, 4, 2, 1 } }, { 0.30, 0.10, 0.18 }) -- the open tops
-  rects(x, y, { { 0, 7, 10, 1 } }, { 0.50, 0.22, 0.30 })
+  rects(x, y, PR_L43, PR_C44) -- the open tops
+  rects(x, y, PR_L45, PR_C46)
 end
 
 local function drawEmberPot(p)
   local x, y = topLeft(p)
-  rects(x, y, { { 1, 2, 7, 1 }, { 0, 3, 9, 4 }, { 1, 7, 7, 2 }, { 2, 9, 5, 1 } }, { 0.24, 0.20, 0.20 })
-  rects(x, y, { { 1, 3, 2, 4 } }, { 0.34, 0.28, 0.27 })
-  rects(x, y, { { 6, 4, 3, 4 } }, { 0.15, 0.12, 0.13 })
-  rects(x, y, { { 1, 2, 7, 1 } }, { 0.10, 0.08, 0.09 }) -- the dark mouth
+  rects(x, y, PR_L47, PR_C48)
+  rects(x, y, PR_L49, PR_C50)
+  rects(x, y, PR_L51, PR_C52)
+  rects(x, y, PR_L53, PR_C54) -- the dark mouth
 end
 
 -- Flames, ember cracks and crystal tips, drawn after the lighting
@@ -304,15 +419,15 @@ local function emitLantern(p, t)
   local x, y = topLeft(p)
   local f = math.sin(t * 9 + p.seed) > 0.3 and 1 or 0
   rects(x, y, { { 2, 5 - f, 3, 3 + f } }, { 1, 0.72, 0.28 })
-  rects(x, y, { { 3, 6, 1, 2 } }, { 1, 0.95, 0.7 })
+  rects(x, y, PR_L55, PR_C56)
 end
 
 local function emitSkullCandle(p, t)
   local x, y = topLeft(p)
   local f = math.sin(t * 11 + p.seed) > 0.2 and 1 or 0
   rects(x, y, { { 3, -f, 2, 2 + f } }, { 1, 0.72, 0.28 })
-  rects(x, y, { { 3, 1, 1, 1 } }, { 1, 0.95, 0.7 })
-  rects(x, y, { { 2, 6, 1, 1 }, { 4, 6, 1, 1 } }, { 1, 0.8, 0.3 }) -- the eyes glow
+  rects(x, y, PR_L57, PR_C56)
+  rects(x, y, PR_L58, PR_C59) -- the eyes glow
 end
 
 local function emitSporePod(p, t)
@@ -336,8 +451,8 @@ local function emitEmberPot(p, t)
   local x, y = topLeft(p)
   local f = math.sin(t * 8 + p.seed) > 0 and 1 or 0
   rects(x, y, { { 2, 1, 5, 1 }, { 3 + f, 0, 2, 1 } }, { 1, 0.5, 0.15 })
-  rects(x, y, { { 4, 1, 1, 1 } }, { 1, 0.8, 0.3 })
-  rects(x, y, { { 2, 5, 1, 2 }, { 5, 6, 1, 1 } }, { 1, 0.45, 0.12, 0.8 })
+  rects(x, y, PR_L60, PR_C59)
+  rects(x, y, PR_L61, PR_C62)
 end
 
 
@@ -350,15 +465,15 @@ local TNT_GLYPHS = {
 
 local function drawTntBarrel(p)
   local x, y = topLeft(p)
-  rects(x, y, { { 2, 0, 9, 1 }, { 1, 1, 11, 14 }, { 2, 15, 9, 1 } }, { 0.50, 0.31, 0.17 })
-  rects(x, y, { { 1, 1, 2, 14 }, { 3, 0, 3, 1 } }, { 0.66, 0.42, 0.22 })
-  rects(x, y, { { 10, 1, 2, 14 }, { 8, 15, 3, 1 } }, { 0.34, 0.20, 0.11 })
+  rects(x, y, PR_L63, PR_C64)
+  rects(x, y, PR_L65, PR_C66)
+  rects(x, y, PR_L67, PR_C68)
   -- Iron hoops
-  rects(x, y, { { 0, 2, 13, 1 }, { 0, 13, 13, 1 } }, { 0.24, 0.25, 0.29 })
-  rects(x, y, { { 0, 2, 13, 1 } }, { 0.36, 0.37, 0.42 })
+  rects(x, y, PR_L69, PR_C70)
+  rects(x, y, PR_L71, PR_C72)
   -- The label: red capitals on a faded cream plate
-  rects(x, y, { { 1, 4, 11, 7 } }, { 0.86, 0.78, 0.60 })
-  rects(x, y, { { 1, 4, 11, 1 }, { 1, 10, 11, 1 } }, { 0.70, 0.60, 0.44 })
+  rects(x, y, PR_L73, PR_C74)
+  rects(x, y, PR_L75, PR_C76)
   for i, ch in ipairs({ "T", "N", "T" }) do
     for gy, row in ipairs(TNT_GLYPHS[ch]) do
       for gx = 1, 3 do
@@ -369,7 +484,7 @@ local function drawTntBarrel(p)
     end
   end
   if p.lit then
-    rects(x, y, { { 6, -2, 1, 2 } }, { 0.14, 0.10, 0.08 }) -- the fuse
+    rects(x, y, PR_L77, PR_C78) -- the fuse
   end
 end
 
@@ -386,17 +501,17 @@ end
 local function drawMinecart(p)
   local x, y = topLeft(p)
   -- Heap of ore over the rim
-  rects(x, y, { { 3, 0, 16, 2 }, { 5, -1, 6, 1 }, { 12, -1, 4, 1 } }, { 0.36, 0.34, 0.33 })
-  rects(x, y, { { 4, 0, 3, 1 }, { 13, -1, 2, 1 } }, { 0.50, 0.48, 0.46 })
-  rects(x, y, { { 8, 0, 1, 1 }, { 15, 0, 1, 1 }, { 6, 1, 1, 1 }, { 11, -1, 1, 1 } }, { 0.95, 0.75, 0.25 })
+  rects(x, y, PR_L79, PR_C80)
+  rects(x, y, PR_L81, PR_C82)
+  rects(x, y, PR_L83, PR_C84)
   -- The box: a rolled rim, rust-brown plating, bands and rivets
-  rects(x, y, { { 0, 2, 22, 2 } }, { 0.40, 0.41, 0.46 })
-  rects(x, y, { { 0, 2, 22, 1 } }, { 0.58, 0.59, 0.64 })
-  rects(x, y, { { 1, 4, 20, 6 } }, { 0.40, 0.29, 0.22 })
-  rects(x, y, { { 1, 4, 20, 1 } }, { 0.50, 0.37, 0.28 })
-  rects(x, y, { { 1, 9, 20, 1 } }, { 0.28, 0.20, 0.16 })
-  rects(x, y, { { 5, 4, 1, 6 }, { 11, 4, 1, 6 }, { 17, 4, 1, 6 } }, { 0.30, 0.31, 0.35 })
-  rects(x, y, { { 3, 5, 1, 1 }, { 8, 5, 1, 1 }, { 14, 5, 1, 1 }, { 19, 5, 1, 1 } }, { 0.62, 0.52, 0.40 })
+  rects(x, y, PR_L85, PR_C86)
+  rects(x, y, PR_L87, PR_C88)
+  rects(x, y, PR_L89, PR_C90)
+  rects(x, y, PR_L91, PR_C92)
+  rects(x, y, PR_L93, PR_C94)
+  rects(x, y, PR_L95, PR_C96)
+  rects(x, y, PR_L97, PR_C98)
   -- Wheels
   for _, wx in ipairs({ 3, 15 }) do
     rects(x, y, { { wx, 10, 4, 3 }, { wx + 1, 9, 2, 1 } }, { 0.20, 0.20, 0.24 })
@@ -531,6 +646,7 @@ props.defs = {
 
 function props.clear()
   list = {} -- bodies are destroyed along with the physics world
+  near, nearTimer = {}, 0
   rebuildIndex()
 end
 
@@ -550,10 +666,15 @@ local function addFixture(def, body, shape, density)
   return fixture
 end
 
+local made = 0 -- (every prop's place in the order they were made: see gather)
 local function register(prop)
+  made = made + 1
+  prop.order = made
   prop.flash = 0
   prop.total = 0
   list[#list + 1] = prop
+  near[#near + 1] = prop
+  prop.near = true
   indexProp(prop) -- (findable straight away, before the next rebuild)
   return prop
 end
@@ -633,14 +754,28 @@ function props.spawnDebris(image, x, y, rects, density, pixels, color)
 end
 
 -- Point test against the prop's actual (rotated) shapes
+-- (called for every pixel of every bullet's flight: the buckets are walked here
+-- directly, with no closure made per call as nearby would need)
 function props.hitTest(x, y)
-  return nearby(x, y, 0, 0, function(p)
-    for _, f in ipairs(p.fixtures) do
-      if f:testPoint(x, y) then
-        return p
+  local cx0, cy0 = math.floor((x - reach) / CELL), math.floor((y - reach) / CELL)
+  local cx1, cy1 = math.floor((x + reach) / CELL), math.floor((y + reach) / CELL)
+  for cy = cy0, cy1 do
+    for cx = cx0, cx1 do
+      local bucket = grid[cellKey(cx, cy)]
+      if bucket then
+        for _, p in ipairs(bucket) do
+          if not p.removed then
+            for _, f in ipairs(p.fixtures) do
+              if f:testPoint(x, y) then
+                return p
+              end
+            end
+          end
+        end
       end
     end
-  end)
+  end
+  return nil
 end
 
 -- Breaks a crate: wood splinters and any gold inside spills out. The prop
@@ -862,13 +997,41 @@ function props.all()
   return list
 end
 
+-- The props that might be within r of (x, y), from the index (a blast asks for what it reaches: going
+-- through every prop in the world for each one added up). The list is reused by the next call.
+local aroundList = {}
+function props.around(x, y, r)
+  local out = aroundList
+  for i = #out, 1, -1 do
+    out[i] = nil
+  end
+  local cx0, cy0 = math.floor((x - r - reach) / CELL), math.floor((y - r - reach) / CELL)
+  local cx1, cy1 = math.floor((x + r + reach) / CELL), math.floor((y + r + reach) / CELL)
+  for cy = cy0, cy1 do
+    for cx = cx0, cx1 do
+      local bucket = grid[cellKey(cx, cy)]
+      if bucket then
+        for _, p in ipairs(bucket) do
+          if not p.removed then
+            out[#out + 1] = p
+          end
+        end
+      end
+    end
+  end
+  return out
+end
+
 -- Remembers every object's velocity from just before the physics step. A
 -- collision happens inside the step and changes the velocity, so impacts
 -- have to be judged by the speed the object arrived with.
 function props.snapshotVelocities()
-  for _, p in ipairs(list) do
+  -- (only the props near the hunter can be moving: the others were set to rest when they left that list)
+  for _, p in ipairs(near) do
     local b = p.body
-    if b:isAwake() and b:isActive() then
+    if p.removed then
+      -- (gone since the list was made)
+    elseif b:isAwake() and b:isActive() then
       p.prevVx, p.prevVy = b:getLinearVelocity()
     else
       p.prevVx, p.prevVy = 0, 0 -- (at rest, or frozen far away)
@@ -925,12 +1088,27 @@ function props.update(dt)
       remove(p)
     end
   end
+  nearTimer = nearTimer - dt
+  if nearTimer <= 0 then
+    nearTimer = 0.2
+    for i = #near, 1, -1 do
+      near[i] = nil
+    end
+    for _, p in ipairs(list) do
+      p.near = p.body:isActive()
+      if p.near then
+        near[#near + 1] = p
+      else
+        p.prevVx, p.prevVy = 0, 0 -- (at rest, or frozen far away)
+      end
+    end
+  end
   -- Only what moves needs its place in the index updated (a resting or
   -- frozen body can't have moved), plus a few others in turn, in case
   -- something put one somewhere
-  for _, p in ipairs(list) do
+  for _, p in ipairs(near) do
     local b = p.body
-    if b:isAwake() and b:isActive() then
+    if not p.removed and b:isAwake() and b:isActive() then
       indexProp(p)
     end
   end
@@ -947,10 +1125,41 @@ local function inView(p, view, margin)
   return x > view.x - margin and x < view.x + view.w + margin and y > view.y - margin and y < view.y + view.h + margin
 end
 
+-- The props that may be in the view (plus a margin), from the index rather than the whole list (there
+-- are a couple of thousand in a run), in the list's own order so they draw as they always have. The
+-- list is reused by the next call.
+local gathered = {}
+local function byOrder(a, b)
+  return a.order < b.order
+end
+local function gather(view, margin)
+  local out = gathered
+  for i = #out, 1, -1 do
+    out[i] = nil
+  end
+  local m = margin + reach
+  local cx0, cy0 = math.floor((view.x - m) / CELL), math.floor((view.y - m) / CELL)
+  local cx1, cy1 = math.floor((view.x + view.w + m) / CELL), math.floor((view.y + view.h + m) / CELL)
+  for cy = cy0, cy1 do
+    for cx = cx0, cx1 do
+      local bucket = grid[cellKey(cx, cy)]
+      if bucket then
+        for _, p in ipairs(bucket) do
+          if not p.removed then
+            out[#out + 1] = p
+          end
+        end
+      end
+    end
+  end
+  table.sort(out, byOrder)
+  return out
+end
+
 -- Lamps give light for as long as they stand
 function props.addLights(lighting, view)
   local t = love.timer.getTime()
-  for _, p in ipairs(list) do
+  for _, p in ipairs(gather(view, 100)) do
     local l = p.def.light
     if l and not p.broken then
       if inView(p, view, 100) then
@@ -966,7 +1175,7 @@ end
 -- Flames, embers and crystal tips, after the lighting
 function props.drawEmissive(view)
   local t = love.timer.getTime()
-  for _, p in ipairs(list) do
+  for _, p in ipairs(gather(view, 30)) do
     local emit = p.def.emit
     if emit and not p.broken then
       if inView(p, view, 30) then
@@ -998,7 +1207,8 @@ end
 
 -- view: { x, y, w, h } in world pixels; props well off it are skipped
 function props.draw(view)
-  for _, p in ipairs(list) do
+  -- ((w + h) + 24 is always within 2 x reach + 24: see indexProp)
+  for _, p in ipairs(view and gather(view, reach * 2 + 24) or list) do
     if not view or inView(p, view, (p.width + p.height) + 24) then
       drawOne(p)
     end

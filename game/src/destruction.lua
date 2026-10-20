@@ -136,13 +136,23 @@ end
 -- fall). Anchored searches stop early, so everything they reached is
 -- recorded in `settled`.
 local islandX, islandY, floodStack = {}, {}, {}
-local function floodIsland(world, sx, sy, settled)
+-- Which pixels a search has visited, and which a dig has found anchored, are marked in two tables kept
+-- from call to call, each mark the number of its search or dig (so nothing needs clearing between them:
+-- new tables for every search were most of a crater's garbage). They start over now and then, between digs.
+local visitedMark, settledMark = {}, {}
+local floodId, digId, marks = 0, 0, 0
+local visitedKeys = {}
+local function floodIsland(world, sx, sy)
   local width = world.width
   local count = 0
   local stack = floodStack
   stack[1], stack[2] = sx, sy
   local top = 2
-  local visited = { [sy * width + sx] = true }
+  floodId = floodId + 1
+  local fid, did = floodId, digId
+  visitedMark[sy * width + sx] = fid
+  visitedKeys[1] = sy * width + sx
+  local nv = 1
   local isAnchored = false
   while top > 0 do
     local y = stack[top]
@@ -162,11 +172,13 @@ local function floodIsland(world, sx, sy, settled)
       else
         local id = world:get(nx, ny)
         local key = ny * width + nx
-        if solid[id] and not visited[key] then
-          if anchored[id] or settled[key] then
+        if solid[id] and visitedMark[key] ~= fid then
+          if anchored[id] or settledMark[key] == did then
             isAnchored = true
           end
-          visited[key] = true
+          visitedMark[key] = fid
+          nv = nv + 1
+          visitedKeys[nv] = key
           stack[top + 1] = nx
           stack[top + 2] = ny
           top = top + 2
@@ -178,10 +190,11 @@ local function floodIsland(world, sx, sy, settled)
     end
   end
   if isAnchored then
-    for key in pairs(visited) do
-      settled[key] = true
+    for i = 1, nv do
+      settledMark[visitedKeys[i]] = did
     end
   end
+  marks = marks + nv
   return count, isAnchored
 end
 
@@ -190,22 +203,26 @@ end
 -- start from those pixels' neighbours (not from every pixel round the hole).
 local NX, NY = { 1, -1, 0, 0 }, { 0, 0, 1, -1 }
 local function dropLooseTerrain(world, xs, ys, n)
-  local settled = {}
+  if marks > 200000 then
+    visitedMark, settledMark, marks = {}, {}, 0 -- (so the marks don't pile up over a whole run)
+  end
+  digId = digId + 1
+  local did = digId
   local width = world.width
   for i = 1, n do
     for d = 1, 4 do
       local x, y = xs[i] + NX[d], ys[i] + NY[d]
       if world:inBounds(x, y) then
         local id = world:get(x, y)
-        if solid[id] and not anchored[id] and not settled[y * width + x] then
-          local count, isAnchored = floodIsland(world, x, y, settled)
+        if solid[id] and not anchored[id] and settledMark[y * width + x] ~= did then
+          local count, isAnchored = floodIsland(world, x, y)
           if not isAnchored then
             -- (copied out: making the debris can't reuse the flood's arrays
             -- while it reads them; and its pixels count as settled now)
             local px, py = {}, {}
             for k = 1, count do
               px[k], py[k] = islandX[k], islandY[k]
-              settled[islandY[k] * width + islandX[k]] = true
+              settledMark[islandY[k] * width + islandX[k]] = did
             end
             makeDebris(world, px, py, count)
           end

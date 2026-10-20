@@ -830,7 +830,7 @@ function catacombs.step(budget, px, py, spare)
   local i
   if py then
     i = needed(py, px, 3500)
-    local least = 0
+    local least = 0.00075 -- (always a little, so a frame that is busy on its own still gets the areas built)
     if not i then
       i = nextUnfinished()
     elseif needed(py, px, 700) then

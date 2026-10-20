@@ -520,13 +520,34 @@ end
 
 -- How long the last frame's own work took (update and draw, without the
 -- background generation), so generation can have what is left of the frame
-local FRAME_TARGET = 0.011 -- (of 16.7 ms: the rest is headroom for the GC, the driver and presenting)
+-- The frame the game aims for: about 80% of one refresh of the display with vsync on, or of 1/120 s
+-- with it off (the rest is headroom for the GC, the driver and presenting), kept between 5.5 and 11 ms.
+-- A fixed 11 ms let the generation fill every frame to 11 ms, which held a fast display to ~80 fps.
+local FRAME_TARGET = 0.011
+local targetCheck = 0
+local function frameTarget(dt)
+  targetCheck = targetCheck - dt
+  if targetCheck > 0 then
+    return FRAME_TARGET
+  end
+  targetCheck = 1 -- (the display or the vsync setting may change: looked at again every second)
+  local refresh = 120
+  if love.window.getVSync() ~= 0 then
+    local _, _, mode = love.window.getMode()
+    if mode and mode.refreshrate and mode.refreshrate > 0 then
+      refresh = mode.refreshrate
+    end
+  end
+  FRAME_TARGET = math.max(0.0055, math.min(0.011, 0.8 / refresh))
+  return FRAME_TARGET
+end
 local frameT0, genSpent, lastWork = 0, 0, 0.008
 
 function game.update(dt)
   audio.setHearing(meta.limbOn("ear") and 0.45 or 1)
   frameT0 = love.timer.getTime()
   genSpent = 0
+  local target = frameTarget(dt)
   dt = math.min(dt, 1 / 30) -- avoid huge steps after hitches
 
   if pending then
@@ -577,7 +598,7 @@ function game.update(dt)
       px, py = player:center()
     end
     local g0 = love.timer.getTime()
-    scene.background(menu.isOpen() or itembar.isOpen() or compare.isOpen(), px, py, FRAME_TARGET - lastWork)
+    scene.background(menu.isOpen() or itembar.isOpen() or compare.isOpen(), px, py, target - lastWork)
     genSpent = love.timer.getTime() - g0
   end
   if playing then

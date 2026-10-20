@@ -2672,6 +2672,22 @@ function audio.setTension(v)
   tensionTarget = math.max(0, math.min(1, v or 0))
 end
 
+-- The music's volumes are kept here as well as in the sources: every call into a source goes through
+-- the audio library's lock, and the fades below asked thirty-odd sources for their volume and set it
+-- again every frame. A volume is only sent when it has really changed.
+local vols = setmetatable({}, { __mode = "k" })
+local function vol(src)
+  return vols[src] or src:getVolume()
+end
+local function setVol(src, v)
+  local cur = vols[src]
+  if cur == nil or math.abs(cur - v) > 1e-5 or (v == 0 and cur ~= 0) then
+    src:setVolume(v)
+    vols[src] = v
+  end
+end
+local playCheck = 0 -- (looping music never stops by itself: whether it is playing is checked a few times a second)
+
 local eventTimers = {}
 local lastArea
 local AREA_TRACK = {} -- areas that borrow another area's music (none now: every area has its own theme)
@@ -2725,7 +2741,7 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
   tension = tension + (tensionTarget - tension) * math.min(1, dt * (tensionTarget > tension and 1.2 or 0.3))
   -- The title screens play the void and the menu theme over silence
   local function toward(src, target, k)
-    src:setVolume(src:getVolume() + (target - src:getVolume()) * k)
+    setVol(src, vol(src) + (target - vol(src)) * k)
   end
   if not menuMusic:isPlaying() then
     menuMusic:play()
@@ -2743,38 +2759,42 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
   if paused or menuMode then
     for name, src in pairs(ambient) do
       if name ~= "void" then
-        src:setVolume(0)
+        setVol(src, 0)
       end
     end
     for _, src in ipairs(areaMusic) do
-      src:setVolume(0)
+      setVol(src, 0)
     end
     for _, src in pairs(tensionMusic) do
-      src:setVolume(0)
+      setVol(src, 0)
     end
     for _, src in pairs(bossMusic) do
-      src:setVolume(0)
+      setVol(src, 0)
     end
-    music:setVolume(0)
+    setVol(music, 0)
     return
   end
-  for name, src in pairs(ambient) do
-    if name ~= "void" and not src:isPlaying() then
-      src:play()
+  playCheck = playCheck - dt
+  if playCheck <= 0 then
+    playCheck = 0.25
+    for name, src in pairs(ambient) do
+      if name ~= "void" and not src:isPlaying() then
+        src:play()
+      end
     end
-  end
-  for _, src in ipairs(areaMusic) do
-    if not src:isPlaying() then
-      src:play()
+    for _, src in ipairs(areaMusic) do
+      if not src:isPlaying() then
+        src:play()
+      end
     end
-  end
-  for _, src in pairs(tensionMusic) do
-    if not src:isPlaying() then
-      src:play()
+    for _, src in pairs(tensionMusic) do
+      if not src:isPlaying() then
+        src:play()
+      end
     end
-  end
-  if not music:isPlaying() then
-    music:play()
+    if not music:isPlaying() then
+      music:play()
+    end
   end
   local fade = math.min(1, dt * 1.2)
   -- A boss fight's theme takes over from the area's, and its tension layer
@@ -2789,20 +2809,20 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
     elseif f <= 0.01 and not want and src:isPlaying() then
       src:stop() -- (so the next fight's theme starts from its beginning)
     end
-    src:setVolume(f * 0.16 * MASTER * 2 * volMaster * volMusic)
+    setVol(src, f * 0.16 * MASTER * 2 * volMaster * volMusic)
     bossMix = math.max(bossMix, f)
   end
   local wind = ambient.wind
-  wind:setVolume(wind:getVolume() + (0.10 * windGain * (1 - underground) * MASTER * 2 * volMaster * volSfx - wind:getVolume()) * math.min(1, dt * 1.5))
+  setVol(wind, vol(wind) + (0.10 * windGain * (1 - underground) * MASTER * 2 * volMaster * volSfx - vol(wind)) * math.min(1, dt * 1.5))
   for i, src in ipairs(areaMusic) do
     local target = ((i == area and not inShop) and 0.10 * underground * (1 - bossMix) or 0) * (AREA_GAIN[i] or 1)
-    src:setVolume(src:getVolume() + (target * MASTER * 2 * volMaster * volMusic - src:getVolume()) * fade)
+    setVol(src, vol(src) + (target * MASTER * 2 * volMaster * volMusic - vol(src)) * fade)
   end
   for i, src in pairs(tensionMusic) do
     local target = ((i == area and not inShop) and 0.09 * underground * tension * (1 - bossMix) or 0) * (AREA_GAIN[i] or 1)
-    src:setVolume(src:getVolume() + (target * MASTER * 2 * volMaster * volMusic - src:getVolume()) * math.min(1, dt * 2))
+    setVol(src, vol(src) + (target * MASTER * 2 * volMaster * volMusic - vol(src)) * math.min(1, dt * 2))
   end
-  music:setVolume(music:getVolume() + ((inShop and 0.13 * shopGain or 0) * MASTER * 2 * volMaster * volMusic - music:getVolume()) * fade)
+  setVol(music, vol(music) + ((inShop and 0.13 * shopGain or 0) * MASTER * 2 * volMaster * volMusic - vol(music)) * fade)
 
   -- Little events over the music
   if area ~= lastArea then
@@ -2847,7 +2867,7 @@ function audio.setRecap(on)
   recapMode = on and true or false
   if recapMode and recapMusic then
     recapMusic:stop()
-    recapMusic:setVolume(0)
+    setVol(recapMusic, 0)
   end
 end
 

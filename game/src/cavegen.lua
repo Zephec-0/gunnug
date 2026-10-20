@@ -189,12 +189,14 @@ function cavegen.generate(world, area, seed, tick)
     return x >= X0 + BORDER and x <= X1 - BORDER and y >= Y0 and y <= Y1 - BORDER and inFunnel(x, y)
   end
 
+  -- (tunnels are runs of overlapping circles: a pixel already open is skipped before the dearer test
+  -- of whether it may be carved, which gives the same result)
   local function carveCircle(cx, cy, r)
     local r2 = r * r
     for y = math.floor(cy - r), math.ceil(cy + r) do
       for x = math.floor(cx - r), math.ceil(cx + r) do
         local dx, dy = x + 0.5 - cx, y + 0.5 - cy
-        if dx * dx + dy * dy <= r2 and carvable(x, y) then
+        if dx * dx + dy * dy <= r2 and world:get(x, y) ~= AIR and carvable(x, y) then
           world:setRaw(x, y, AIR)
         end
       end
@@ -207,11 +209,16 @@ function cavegen.generate(world, area, seed, tick)
     if open then
       -- Only the thick floor; the rest is sky
       local floorTop = Y1 - 200
+      local bumpsAt = {} -- (they depend on the column alone: worked out once per column)
       for y = floorTop - 30, Y1 do
         for x = X0, X1 do
-          local bumps = math.floor(love.math.noise(x * 0.015, noiseSeed + 21) * 12)
-          if materials.defs[DIRTID] and materials.defs[DIRTID].cloud then
-            bumps = math.floor(love.math.noise(x * 0.012, noiseSeed + 21) * 26 - math.abs(math.sin(x * 0.021 + love.math.noise(x * 0.004, noiseSeed) * 6)) * 14)
+          local bumps = bumpsAt[x]
+          if not bumps then
+            bumps = math.floor(love.math.noise(x * 0.015, noiseSeed + 21) * 12)
+            if materials.defs[DIRTID] and materials.defs[DIRTID].cloud then
+              bumps = math.floor(love.math.noise(x * 0.012, noiseSeed + 21) * 26 - math.abs(math.sin(x * 0.021 + love.math.noise(x * 0.004, noiseSeed) * 6)) * 14)
+            end
+            bumpsAt[x] = bumps
           end
           if y >= floorTop + bumps then
             local n = love.math.noise(x * 0.011, y * 0.011, noiseSeed)
@@ -222,6 +229,7 @@ function cavegen.generate(world, area, seed, tick)
       end
       return
     end
+    local tops = {} -- (the wavering top edge depends on the column alone: worked out once per column)
     for y = (climb and Y0 or Y0 - BLEND), Y1 do
       local depth = math.max(0, (y - Y0) / H)
       local xa, xb = X0, X1
@@ -230,7 +238,11 @@ function cavegen.generate(world, area, seed, tick)
       end
       if xa then
         for x = xa, xb do
-          local top = climb and Y0 or Y0 - BLEND + math.floor(love.math.noise(x * 0.02, noiseSeed + 21) * BLEND)
+          local top = tops[x]
+          if not top then
+            top = climb and Y0 or Y0 - BLEND + math.floor(love.math.noise(x * 0.02, noiseSeed + 21) * BLEND)
+            tops[x] = top
+          end
           if y >= top then
             local n = love.math.noise(x * 0.011, y * 0.011, noiseSeed)
             world:setRaw(x, y, n > 0.38 + depth * 0.35 and DIRTID or ROCKID)

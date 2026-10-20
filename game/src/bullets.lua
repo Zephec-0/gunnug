@@ -104,7 +104,7 @@ local function explode(b, w, x, y)
     end
   end
   enemies.damageArea(x, y, radius, math.max(1, math.floor(damage + 0.5)), 260 * scale)
-  for _, p in ipairs(props.all()) do
+  for _, p in ipairs(props.around(x, y, radius + 6)) do
     local px, py = p.body:getPosition()
     local dx, dy = px - x, py - y
     local dist = math.sqrt(dx * dx + dy * dy)

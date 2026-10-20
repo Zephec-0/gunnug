@@ -74,6 +74,18 @@ local function unlockEverything()
   return "Everything unlocked"
 end
 
+-- 100 gold at the hunter's feet and 12 ether streaming in (it only charges a locked fuser)
+local function dropStash()
+  local player = require("src.game").player()
+  if not player then
+    return "No hunter"
+  end
+  local x, y = player:center()
+  require("src.pickups").dropGold(x, y - 12, 100)
+  require("src.fuser").dropEther(x, y - 8, 12)
+  return "Dropped 100 gold and 12 ether"
+end
+
 local function rows()
   local out = {
     { kind = "head", label = "Toggles" },
@@ -82,6 +94,7 @@ local function rows()
     { kind = "toggle", label = "Fly / no clip (Shift fast)", get = function() return dev.noclip end, set = function(v) dev.noclip = v end },
     { kind = "head", label = "Save file" },
     { kind = "action", label = "Unlock everything", fn = unlockEverything },
+    { kind = "action", label = "Drop 100 gold + 12 ether", fn = dropStash },
     { kind = "head", label = "Go to" },
     { kind = "button", label = "Camp", spec = { kind = "camp" } },
     { kind = "button", label = "Test room", spec = { kind = "test" } },

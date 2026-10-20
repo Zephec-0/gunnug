@@ -24,6 +24,7 @@ local guns = require("src.guns")
 local gunInfo = require("src.gunInfo")
 local items = require("src.items")
 local playeranim = require("src.playeranim")
+local crowfig = require("src.crowfig")
 
 local H = enemies.helpers
 local center, collider, removePhysics = H.center, H.collider, H.removePhysics
@@ -32,6 +33,8 @@ local pcfg = config.player
 local function hypot(x, y)
   return math.sqrt(x * x + y * y)
 end
+
+local abs = math.abs
 
 local function sign(v)
   return v < 0 and -1 or 1
@@ -80,14 +83,9 @@ local PAL_RED = variant(1, { 1, 0.12, 0.10 }) -- the one about to fire: its eye 
 local PAL_SHADOW = variant(0.6) -- his shadows
 local PAL_SHADOW_RED = variant(0.6, { 1, 0.12, 0.10 })
 
-local CROW_SCALE = 1.7 -- (a great crow: big enough to carry him)
-local CROW = {
-  body = { 0.05, 0.035, 0.07 },
-  dark = { 0.025, 0.02, 0.035 },
-  sheen = { 0.30, 0.18, 0.46 },
-  beak = { 0.22, 0.20, 0.24 },
-  eye = { 0.95, 0.35, 1.0 },
-}
+-- (a great crow, big enough to carry him: src.crowfig draws it on the pixel grid)
+local CROW_W, CROW_H = 54, 27 -- the body box that hurts the hunter
+local CROW_SEAT = 5 -- how much higher than its middle he sits, on top of its feathers
 
 -- Tuning
 local T = {
@@ -313,12 +311,12 @@ end
 
 -- The crow's body box at (x, y) (its middle): what hurts the hunter
 local function crowBox(x, y)
-  return x - 16 * CROW_SCALE, y - 8 * CROW_SCALE, 32 * CROW_SCALE, 16 * CROW_SCALE
+  return x - CROW_W / 2, y - CROW_H / 2, CROW_W, CROW_H
 end
 
 -- Where the crow's eye is, drawn at (x, y) facing f
 local function crowEye(x, y, f)
-  return x + f * 14 * CROW_SCALE, y - 6 * CROW_SCALE
+  return crowfig.eye(x, y, f)
 end
 
 local function crowHits(e, x, y, player, dmg, key)
@@ -712,7 +710,7 @@ local function seatRider(e)
   local b, fig = e.body, e.fig
   local cx, cy = center(e)
   fig.body.x = math.floor(cx - 4 - e.facing * 2)
-  fig.body.y = math.floor(cy - 19 + 2)
+  fig.body.y = math.floor(cy - 19 + 2 - CROW_SEAT)
   fig.body.vx, fig.body.vy = b.vx, b.vy
   fig.grounded, fig.crouched = true, true
 end
@@ -803,7 +801,7 @@ local function updateDarkHunter(e, dt, world, player, px, py)
     local k = 1 - math.max(0, e.modeT) / T.crowIn
     local c = e.crow
     local nx, ny = bezier(c.p0, c.p1, c.p2, k * k * (3 - 2 * k))
-    c.vx = (nx - c.x) / math.max(dt, 1e-3)
+    c.vx, c.vy = (nx - c.x) / math.max(dt, 1e-3), (ny - c.y) / math.max(dt, 1e-3)
     c.x, c.y = nx, ny
     crowHits(e, nx, ny, player, T.swoopDamage, "arrive")
     if e.modeT <= 0 then
@@ -869,69 +867,29 @@ end
 
 -- Drawing ---------------------------------------------------------------------------------------------
 
-local function drawCrow(x, y, f, flap, alpha, dive)
-  love.graphics.push()
-  love.graphics.translate(x, y)
-  love.graphics.scale(CROW_SCALE)
-  love.graphics.translate(-x, -y)
-  alpha = alpha or 1
-  local function col(c, k)
-    k = k or 1
-    love.graphics.setColor(c[1] * k, c[2] * k, c[3] * k, alpha)
+-- pose: nil, "wind" (rearing up to shriek) or "dive"; vx, vy: where it is going (it tilts into it)
+local function drawCrow(x, y, f, flap, alpha, pose, vx, vy)
+  local pitch = math.atan2(vy or 0, math.max(abs(vx or 0), 60))
+  if pose == "dive" then
+    pitch = math.atan2(vy or 0, math.max(abs(vx or 0), 1))
+  elseif pose == "wind" then
+    pitch = -0.4
+  else
+    pitch = math.max(-0.4, math.min(0.4, pitch * 0.8))
   end
-  local beat = dive and -0.6 or math.sin(flap)
-  local function wing(far)
-    local k = far and 0.6 or 1
-    local sx, sy = x + f * 2, y - 3
-    local span = far and 24 or 30
-    local ang = -0.25 - beat * 0.95
-    local tipX, tipY = sx - f * math.cos(ang) * span * 0.55, sy + math.sin(ang) * span
-    local midX, midY = sx - f * span * 0.5, sy + math.sin(ang) * span * 0.45
-    col(CROW.body, k)
-    love.graphics.polygon("fill", sx, sy, sx - f * 8, sy + 3, midX, midY + 2, tipX, tipY, midX + f * 4, midY - 2)
-    -- feather tips
-    for q = 0, 3 do
-      local t = q / 3
-      local fx, fy = midX + (tipX - midX) * t, midY + (tipY - midY) * t
-      col(CROW.dark, k)
-      love.graphics.polygon("fill", fx, fy, fx - f * 3, fy + 4 - beat * 2, fx + f * 1, fy + 3)
-    end
-    col(CROW.sheen, k * 0.8)
-    love.graphics.line(sx, sy, midX + f * 2, midY)
-  end
-  wing(true)
-  -- tail fan
-  col(CROW.dark)
-  love.graphics.polygon("fill", x - f * 10, y - 1, x - f * 22, y - 4, x - f * 23, y + 2, x - f * 20, y + 5, x - f * 10, y + 3)
-  -- body
-  col(CROW.body)
-  love.graphics.ellipse("fill", x, y, 13, 6)
-  col(CROW.sheen, 0.9)
-  love.graphics.ellipse("fill", x + f * 2, y - 3, 8, 1.5)
-  -- head and beak
-  col(CROW.body)
-  love.graphics.circle("fill", x + f * 13, y - 4, 4.5)
-  col(CROW.beak)
-  love.graphics.polygon("fill", x + f * 16, y - 6, x + f * 23, y - 3, x + f * 16, y - 2)
-  love.graphics.setColor(CROW.eye[1], CROW.eye[2], CROW.eye[3], alpha)
-  love.graphics.rectangle("fill", math.floor(x + f * 14), math.floor(y - 6), 1, 1)
-  -- talons
-  col(CROW.beak)
-  love.graphics.line(x - f * 2, y + 5, x - f * 3, y + 9)
-  love.graphics.line(x + f * 3, y + 5, x + f * 2, y + 9)
-  wing(false)
-  love.graphics.pop()
+  crowfig.draw(x, y, f, flap, alpha, pose, pitch)
 end
 
 -- The crow's eye and a violet sheen along its back, glowing in the dark
 local function drawCrowGlow(x, y, f, alpha)
   local ex, ey = crowEye(x, y, f)
-  love.graphics.setColor(CROW.eye[1], CROW.eye[2], CROW.eye[3], 0.4 * alpha)
-  love.graphics.circle("fill", ex, ey, 2.5)
+  local eye = crowfig.colors.eye
+  love.graphics.setColor(eye[1], eye[2], eye[3], 0.4 * alpha)
+  love.graphics.circle("fill", ex, ey, 3)
   love.graphics.setColor(1, 0.8, 1, alpha)
   love.graphics.rectangle("fill", math.floor(ex), math.floor(ey), 1, 1)
   love.graphics.setColor(0.55, 0.3, 0.9, 0.25 * alpha)
-  love.graphics.ellipse("fill", x, y - 4 * CROW_SCALE, 9 * CROW_SCALE, 1.5)
+  love.graphics.ellipse("fill", x, y - 10, 15, 1.5)
 end
 
 local function eachFigure(e, fn)
@@ -950,14 +908,15 @@ local function drawDarkHunter(e)
   local fig = e.fig
   if e.mode == "crow" or e.mode == "mount" then
     local c = e.crow
-    drawCrow(c.x, c.y, sign(c.vx or 1), (e.flap or 0) * 1.4, 1, false)
+    drawCrow(c.x, c.y, sign(c.vx or 1), (e.flap or 0) * 1.4, 1, nil, c.vx, c.vy)
   end
   eachFigure(e, function(f, k, sp)
     local red = sp and sp.stage == "hold" and sp.shooters and sp.shooters[k] and sp.t > 0.1
     local shadow = k > 1
     if e.ph == 2 then
       local fx, fy = f.body.x + 4 + e.facing * 2, f.body.y + 17
-      drawCrow(fx, fy + 4, e.facing, e.flap or 0, shadow and 0.6 or 1, e.swoop and e.swoop.stage == "dive")
+      local pose = e.swoop and (e.swoop.stage == "dive" and "dive" or "wind") or nil
+      drawCrow(fx, fy + 4 + CROW_SEAT, e.facing, e.flap or 0, shadow and 0.6 or 1, pose, shadow and 0 or e.body.vx * e.facing, shadow and 0 or e.body.vy)
     end
     local pal = shadow and (red and PAL_SHADOW_RED or PAL_SHADOW) or (red and PAL_RED or PAL)
     playeranim.drawStyled(f, pal)
@@ -975,7 +934,7 @@ local function drawDarkHunterGlow(e)
   end
   eachFigure(e, function(f, k, sp)
     if e.ph == 2 then
-      drawCrowGlow(f.body.x + 4 + e.facing * 2, f.body.y + 21, e.facing, k > 1 and 0.6 or 1)
+      drawCrowGlow(f.body.x + 4 + e.facing * 2, f.body.y + 21 + CROW_SEAT, e.facing, k > 1 and 0.6 or 1)
     end
     local red = sp and sp.stage == "hold" and sp.shooters and sp.shooters[k] and sp.t > 0.1
     playeranim.drawStyled(f, red and PAL_RED or PAL, true)
@@ -989,6 +948,25 @@ local function drawDarkHunterGlow(e)
       love.graphics.rectangle("fill", math.floor(ex), math.floor(ey), 1, 1)
     end
   end)
+end
+
+-- For the compendium: the Crow Rider posed on his crow, in the box RIDER_BOUNDS (x, y, w, h) round (0, 0)
+enemies.RIDER_BOUNDS = { -56, -56, 112, 100 }
+function enemies.riderSpecimen()
+  local e = enemies.specimen("darkhunter")
+  ensure(e, nil)
+  e.ph, e.facing = 2, 1
+  e.fig.facing = 1
+  e.fig.body.x, e.fig.body.y = -6, -17 - CROW_SEAT
+  e.fig.grounded, e.fig.crouched = true, true
+  e.flap = 0
+  return e
+end
+-- (its idle: the wingbeat, and the rider's own breathing; t is the clock, dt the step)
+function enemies.riderTick(e, dt, t)
+  e.flap = t * 9
+  e.fig.aimAngle = 0.2
+  playeranim.update(e.fig, dt)
 end
 
 enemies.UPDATE.darkhunter = updateDarkHunter

@@ -594,8 +594,7 @@ function fig.heartOffset(p)
   return 14.5 + (p.lean or 0), -116 + (p.drop or 0) - (p.bob or 0) + 14.5 - floor((p.stretch or 0) * 0.65)
 end
 
--- Outline shader, for the figure's canvas: every empty pixel beside a solid one becomes the dark ink
--- colour, flash whitens the body, and half-transparent glow passes through untouched (premultiplied).
+-- Shader for the figure's canvas (no outline: the figure stands on its own colours): flash whitens the body, and half-transparent glow passes through untouched (premultiplied).
 fig.outlineShaderCode = [[
 extern vec2 texel;
 extern float flash;
@@ -603,9 +602,6 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
   vec4 c = Texel(tex, uv);
   if (c.a > 0.99) { return vec4(mix(c.rgb, vec3(1.0), flash), 1.0) * color; }
   if (c.a > 0.01) { return c * color; }
-  float a = step(0.99, Texel(tex, uv + vec2(texel.x, 0.0)).a) + step(0.99, Texel(tex, uv - vec2(texel.x, 0.0)).a)
-          + step(0.99, Texel(tex, uv + vec2(0.0, texel.y)).a) + step(0.99, Texel(tex, uv - vec2(0.0, texel.y)).a);
-  if (a > 0.0) { return vec4(0.13, 0.08, 0.08, 1.0) * color; }
   return vec4(0.0);
 }
 ]]

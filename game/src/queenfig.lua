@@ -675,8 +675,6 @@ local function emit(e, white, shimmer)
       local i = by * BWID + bx
       if stamp[i] == gen then
         col = cbuf[i]
-      elseif stamp[i - 1] == gen or stamp[i + 1] == gen or stamp[i - BWID] == gen or stamp[i + BWID] == gen then
-        col = C.ink
       end
       if col and bx >= 0 and by >= 0 and bx < BWID and by < BHGT then
         local t = bytes(col, white, shimmer)

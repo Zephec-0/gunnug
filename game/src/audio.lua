@@ -1031,6 +1031,169 @@ local DEFS = {
   },
 }
 
+-- Random events: the slot machine, the card table, the tinker's shaking, the gallery's count ---------
+
+-- the lever: a clunk, then the ratchet of the reels catching
+DEFS.slot_lever = {
+  gen = function()
+    return synth(0.45, function(t, p)
+      local clunk = math.sin(t * (110 - 50 * p) * TAU) * math.exp(-t * 18) * 0.9
+      local ratchet = (t > 0.12 and (math.floor(t * 60) % 2 == 0) and noise() * 0.25 or 0) * (1 - p)
+      return clunk + ratchet
+    end)
+  end,
+  volume = 0.6,
+}
+-- a coin dropped in the slot: a ting and a clack
+DEFS.slot_coin = {
+  gen = function()
+    return synth(0.28, function(t, p)
+      local ting = (math.sin(t * 2093 * TAU) + 0.3 * math.sin(t * 3136 * TAU)) * math.exp(-t * 14) * 0.4
+      local clack = t > 0.11 and (noise() * 0.5 + math.sin(t * 240 * TAU) * 0.5) * math.exp(-(t - 0.11) * 40) or 0
+      return ting + clack
+    end)
+  end,
+  volume = 0.5,
+}
+-- a reel ticking past a symbol
+DEFS.slot_tick = {
+  gen = function()
+    return synth(0.035, function(t, p)
+      return (noise() * 0.5 + math.sin(t * 1500 * TAU) * 0.5) * math.exp(-p * 7) * 0.7
+    end)
+  end,
+  volume = 0.3,
+  cooldown = 0.03,
+}
+-- a reel locking: a dull thunk
+DEFS.slot_stop = {
+  gen = function()
+    return synth(0.16, function(t, p)
+      return (math.sin(t * (170 - 80 * p) * TAU) * 0.8 + noise() * 0.25 * (1 - p)) * math.exp(-p * 6)
+    end)
+  end,
+  volume = 0.6,
+  cooldown = 0.05,
+}
+-- a payout: coins pouring into the tray, more of them for a bigger win
+local function payout(n)
+  return function()
+    return synth(0.25 + n * 0.07, function(t, p)
+      local v = 0
+      for k = 0, n - 1 do
+        local st = k * 0.07
+        if t >= st then
+          local f = 1318 + (k % 3) * 330
+          v = v + (math.sin((t - st) * f * TAU) + 0.35 * math.sin((t - st) * f * 2.7 * TAU)) * math.exp(-(t - st) * 16) * 0.3
+        end
+      end
+      return v
+    end)
+  end
+end
+DEFS.slot_win = { gen = payout(5), volume = 0.5 }
+DEFS.slot_jackpot = { gen = payout(16), volume = 0.6 }
+-- a loss: a sagging two-note
+DEFS.slot_lose = {
+  gen = function()
+    return synth(0.4, function(t, p)
+      local f = p < 0.45 and 196 or 147
+      return (math.sin(t * f * TAU) * 0.5 + (((t * f) % 1) * 2 - 1) * 0.15) * math.exp(-p * 3.5)
+    end)
+  end,
+  volume = 0.4,
+}
+-- a card dealt: a quick flick through the air
+DEFS.card_deal = {
+  gen = function()
+    local band = hp(0.35)
+    return synth(0.2, function(t, p)
+      return band(noise()) * math.sin(p * math.pi) ^ 1.5 * 0.6
+    end)
+  end,
+  volume = 0.5,
+}
+-- a card landing on the felt
+DEFS.card_slap = {
+  gen = function()
+    local low = lp(0.3)
+    return synth(0.12, function(t, p)
+      return (low(noise()) * 0.9 + math.sin(t * 150 * TAU) * 0.5) * math.exp(-p * 9)
+    end)
+  end,
+  volume = 0.55,
+}
+-- a card turned over
+DEFS.card_flip = {
+  gen = function()
+    local band = hp(0.5)
+    return synth(0.1, function(t, p)
+      return band(noise()) * math.sin(p * math.pi) * 0.5 + math.sin(t * 700 * TAU) * math.exp(-p * 12) * 0.15
+    end)
+  end,
+  volume = 0.4,
+}
+-- the tinker's rattle as a weapon is shaken: tools and bolts clattering
+DEFS.tinker_shake = {
+  gen = function()
+    return synth(0.7, function(t, p)
+      local v = 0
+      for k = 0, 11 do
+        local st = k * 0.045 + (k % 3) * 0.01
+        if t >= st then
+          local f = 500 + (k * 337) % 1400
+          v = v + (noise() * 0.5 + math.sin((t - st) * f * TAU)) * math.exp(-(t - st) * 45) * 0.35
+        end
+      end
+      return v * (1 - p * 0.6)
+    end)
+  end,
+  volume = 0.55,
+}
+-- the shrine's flame: a soft chord of glass
+DEFS.shrine_chime = {
+  gen = function()
+    return synth(1.0, function(t, p)
+      local v = 0
+      for k, f in ipairs({ 523, 659, 784, 1047 }) do
+        local st = (k - 1) * 0.08
+        if t >= st then
+          v = v + math.sin((t - st) * f * TAU) * math.exp(-(t - st) * 4) * 0.22
+        end
+      end
+      return v
+    end)
+  end,
+  volume = 0.5,
+}
+-- the gallery's count: a beep, and a higher one for "go"
+DEFS.count_beep = {
+  gen = function()
+    return synth(0.18, function(t, p)
+      return math.sin(t * 660 * TAU) * math.exp(-p * 3) * 0.6
+    end)
+  end,
+  volume = 0.5,
+}
+DEFS.count_go = {
+  gen = function()
+    return synth(0.4, function(t, p)
+      return (math.sin(t * 990 * TAU) + 0.4 * math.sin(t * 1485 * TAU)) * math.exp(-p * 3.5) * 0.5
+    end)
+  end,
+  volume = 0.55,
+}
+-- a gallery target struck: a tin clang
+DEFS.target_hit = {
+  gen = function()
+    return synth(0.25, function(t, p)
+      return (math.sin(t * 1180 * TAU) + 0.6 * math.sin(t * 1830 * TAU) + noise() * 0.2) * math.exp(-p * 10) * 0.5
+    end)
+  end,
+  volume = 0.5,
+  cooldown = 0.04,
+}
+
 -- Menu sounds ------------------------------------------------------------------------
 -- A softer step back, a page turn, a chime for a new compendium entry, and the
 -- sigh of something falling into the void on the title screen.

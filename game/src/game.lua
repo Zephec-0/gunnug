@@ -318,6 +318,7 @@ function game.load()
     game.menuAction(action, arg)
   end
   love.mouse.setVisible(false)
+  require("src.cursors").apply()
   inv = inventory.new()
   -- A replaced weapon drops at the hunter's feet
   compare.onChoose = function(index, newGun, pickup)
@@ -392,6 +393,9 @@ function game.load()
     -- Into the bestiary (a split Queen counts once, when the last of her falls)
     if not (e.group and e.group.alive > 1) then
       save.record("enemy", e.kind)
+      if e.kind == "darkhunter" then
+        save.record("enemy", "crowrider") -- (his second form falls with him)
+      end
       save.stat("kills")
       if e.def.boss then
         save.stat("bosses")
@@ -583,6 +587,7 @@ function game.update(dt)
   audio.update(dt, underground, menu.isOpen(), area, inShop, itembar.isOpen() or (playing and player.submerged))
   -- The weapon panel and the menus pause the game, like Noita's inventory
   love.mouse.setVisible(itembar.isOpen() or menu.isOpen() or compare.isOpen() or visuals.isOpen() or require("src.devpanel").isOpen())
+  require("src.cursors").update() -- (tilts while the button is held)
   visuals.update()
   menu.update(dt)
   if menu.isFrontEnd() then

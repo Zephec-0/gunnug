@@ -62,6 +62,7 @@ local RARITY = {
 
 -- Layout: a 400 x 225 unit space (the game's 640x360 area) centred in the window
 local u, ox, oy = 1, 0, 0
+local uBase = 1 -- the scale the whole menu is drawn at (a page can shrink itself inside it)
 local F = {}
 
 local function X(x)
@@ -71,8 +72,9 @@ local function Y(y)
   return math.floor(oy + y * u)
 end
 
-local function layout(scale)
-  u = scale
+local function layout(scale, factor)
+  uBase = scale
+  u = scale * (factor or 1)
   local ww, wh = love.graphics.getDimensions()
   ox = (ww - 400 * u) / 2
   oy = (wh - 225 * u) / 2
@@ -290,20 +292,111 @@ local function fitText(font, text, maxw)
   return text .. ".."
 end
 
+-- The item bar's slot look for anything you can pick: stepped corners, the dark
+-- slot fill and a bevel. state: "selected" (the chosen one: blue rim and wash),
+-- "focus" (under the cursor or the keys: a pulsing bright rim), or nothing.
+-- border/fill override the resting colours (a rarity's rim, say).
+local SLOT_REST = { 0.55, 0.48, 0.42, 0.9 }
+local SLOT_FILL = { 0.08, 0.06, 0.10, 0.82 }
+local SLOT_SELECTED = { 0.55, 0.75, 1, 1 }
+local SLOT_SELECTED_WASH = { 0.45, 0.65, 1, 0.14 }
+local SLOT_GOLD = { 0.80, 0.64, 0.30, 0.95 }
+local SLOT_GOLD_WASH = { 0.80, 0.64, 0.30, 0.14 }
+local focusBorder = { 0.8, 0.9, 1, 1 }
+-- Rounded boxes with every corner the same: each corner is one quarter-disc image
+-- (smooth edge, made once per radius) drawn mirrored into all four, so they cannot differ
+local cornerImages = {}
+local function cornerImage(r, bw)
+  local key = r .. ":" .. bw
+  local c = cornerImages[key]
+  if not c then
+    local fillData, ringData = love.image.newImageData(r, r), love.image.newImageData(r, r)
+    for j = 0, r - 1 do
+      for i = 0, r - 1 do
+        local d = math.sqrt((r - i - 0.5) ^ 2 + (r - j - 0.5) ^ 2)
+        local outer = math.max(0, math.min(1, r - d + 0.5))
+        local inner = math.max(0, math.min(1, r - bw - d + 0.5))
+        fillData:setPixel(i, j, 1, 1, 1, outer)
+        ringData:setPixel(i, j, 1, 1, 1, outer - inner)
+      end
+    end
+    c = { fill = love.graphics.newImage(fillData), ring = love.graphics.newImage(ringData) }
+    c.fill:setFilter("nearest", "nearest")
+    c.ring:setFilter("nearest", "nearest")
+    cornerImages[key] = c
+  end
+  return c
+end
+
+local function fourCorners(img, x, y, w, h, r)
+  love.graphics.draw(img, x, y)
+  love.graphics.draw(img, x + w, y, 0, -1, 1)
+  love.graphics.draw(img, x, y + h, 0, 1, -1)
+  love.graphics.draw(img, x + w, y + h, 0, -1, -1)
+end
+
+local function roundBox(x, y, w, h, r, color)
+  r = math.min(r, math.floor(math.min(w, h) / 2))
+  love.graphics.setColor(color[1], color[2], color[3], color[4] or 1)
+  love.graphics.rectangle("fill", x + r, y, w - 2 * r, h)
+  love.graphics.rectangle("fill", x, y + r, r, h - 2 * r)
+  love.graphics.rectangle("fill", x + w - r, y + r, r, h - 2 * r)
+  fourCorners(cornerImage(r, 1).fill, x, y, w, h, r)
+end
+
+local function roundRim(x, y, w, h, r, bw, color)
+  r = math.min(r, math.floor(math.min(w, h) / 2))
+  love.graphics.setColor(color[1], color[2], color[3], color[4] or 1)
+  love.graphics.rectangle("fill", x + r, y, w - 2 * r, bw)
+  love.graphics.rectangle("fill", x + r, y + h - bw, w - 2 * r, bw)
+  love.graphics.rectangle("fill", x, y + r, bw, h - 2 * r)
+  love.graphics.rectangle("fill", x + w - bw, y + r, bw, h - 2 * r)
+  fourCorners(cornerImage(r, bw).ring, x, y, w, h, r)
+end
+
+local function slotBox(x, y, w, h, state, border, fill, wash)
+  x, y, w, h = math.floor(x), math.floor(y), math.floor(w), math.floor(h)
+  cast(x, y, w, h)
+  if state == "selected" then
+    border = SLOT_SELECTED
+    wash = wash or SLOT_SELECTED_WASH
+  elseif state == "gold" then
+    border = SLOT_GOLD
+    wash = wash or SLOT_GOLD_WASH
+  elseif state == "focus" then
+    local pulse = 0.75 + 0.25 * math.sin(clock * 5)
+    focusBorder[4] = pulse
+    border = focusBorder
+  end
+  local r = math.max(2, math.floor(u * 1.7))
+  local bw = math.max(1, math.floor(u * 0.45))
+  local b = border or SLOT_REST
+  local f = fill or SLOT_FILL
+  roundBox(x, y, w, h, r, f)
+  if wash then
+    roundBox(x + 1, y + 1, w - 2, h - 2, math.max(1, r - 1), wash)
+  end
+  -- A bevel just inside: a light line along the top, a dark one along the bottom
+  if h >= 8 * u then
+    local bw = math.max(1, math.floor(u * 0.35))
+    love.graphics.setColor(1, 1, 1, 0.07)
+    love.graphics.rectangle("fill", x + r, y + bw + 1, w - 2 * r, bw)
+    love.graphics.setColor(0, 0, 0, 0.3)
+    love.graphics.rectangle("fill", x + r, y + h - 2 * bw - 1, w - 2 * r, bw)
+  end
+  roundRim(x, y, w, h, r, bw, b)
+end
+
 -- A button. opts: align ("left"/"center"), sub (a second, dimmer line),
 -- danger (red when focused), disabled
 local function button(id, label, x, y, w, h, onActivate, opts)
   opts = opts or {}
   cast(x, y, w, h)
   local focused = widget({ id = id, x = x, y = y, w = w, h = h, activate = not opts.disabled and onActivate or nil })
-  love.graphics.setColor(0.05, 0.04, 0.075, focused and 0.95 or 0.78)
-  love.graphics.rectangle("fill", x, y, w, h, u, u)
-  if focused then
-    focusFrame(x, y, w, h, opts.danger and DANGER or ACCENT)
+  if focused and opts.danger then
+    slotBox(x, y, w, h, nil, { DANGER[1], DANGER[2], DANGER[3], 1 }, { 0.12, 0.05, 0.07, 0.95 })
   else
-    love.graphics.setLineWidth(math.max(1, u * 0.4))
-    love.graphics.setColor(BORDER[1], BORDER[2], BORDER[3], 0.6)
-    love.graphics.rectangle("line", x, y, w, h, u, u)
+    slotBox(x, y, w, h, focused and "focus" or nil, nil, focused and { 0.1, 0.09, 0.14, 0.95 } or nil)
   end
   local color = opts.disabled and FAINT or (focused and (opts.danger and DANGER or TEXT) or DIM)
   local f = opts.font or F.body
@@ -384,12 +477,8 @@ local function toggle(id, x, y, w, h, value, onChange)
   local half = w / 2
   for i = 0, 1 do
     local on = (i == 1) == value
-    love.graphics.setColor(on and (value and { 0.35, 0.55, 0.85 } or { 0.32, 0.27, 0.3 }) or { 0.1, 0.09, 0.13 })
-    love.graphics.rectangle("fill", x + i * half, y + h * 0.15, half - u, h * 0.7, u * 0.6, u * 0.6)
+    slotBox(x + i * half, y + h * 0.1, half - u, h * 0.8, on and "selected" or (focused and "focus" or nil))
     printCentered(i == 0 and "Off" or "On", x + i * half + half / 2 - u / 2, y + (h - F.body:getHeight()) / 2, F.body, on and TEXT or FAINT)
-  end
-  if focused then
-    focusFrame(x - u, y + h * 0.15 - u, w + u, h * 0.7 + 2 * u)
   end
 end
 
@@ -416,16 +505,7 @@ local function tabs(idPrefix, names, current, x, y, w, h, onSelect)
     local focused = widget({ id = idPrefix .. i, x = tx, y = y, w = tw - u, h = h, activate = function()
       onSelect(i)
     end })
-    love.graphics.setColor(sel and { 0.12, 0.09, 0.15, 0.95 } or { 0.05, 0.04, 0.07, 0.8 })
-    love.graphics.rectangle("fill", tx, y, tw - u, h, u, u)
-    cast(tx, y, tw - u, h)
-    if sel then
-      love.graphics.setColor(WARM)
-      love.graphics.rectangle("fill", tx + u, y + h - math.max(1, u * 0.6), tw - 3 * u, math.max(1, u * 0.6))
-    end
-    if focused then
-      focusFrame(tx, y, tw - u, h)
-    end
+    slotBox(tx, y, tw - u, h, sel and "selected" or (focused and "focus" or nil))
     printCentered(name, tx + (tw - u) / 2, y + (h - F.body:getHeight()) / 2, F.body, sel and TEXT or (focused and TEXT or DIM))
   end
 end
@@ -862,8 +942,10 @@ local function drawTierBars(entry, got, x, y, w, h)
   local gap = math.max(1, math.floor(u * 0.6))
   local bh = math.max(1, math.floor((h - gap * (n - 1)) / n))
   local c = RARITY.fused
-  local f = F.small
-  local sc = math.min(1, (bh - 1) / f:getHeight(), (w - 2) / f:getWidth("III")) * 0.72
+  -- (drawn in a real font of its own, a point up from the small one, never scaled: scaled
+  -- bitmap lettering comes out ragged)
+  local f = fonts.get(math.max(9, math.floor(u * 3.4)) + 1)
+  local sc = 1
   love.graphics.setFont(f)
   for level = 1, n do
     local by = y + (n - level) * (bh + gap)
@@ -881,6 +963,61 @@ local function drawTierBars(entry, got, x, y, w, h)
   end
 end
 
+-- A soft radial gradient (white, fading out smoothly), tinted when drawn
+local lightImage
+local function getLightImage()
+  if not lightImage then
+    local n = 128
+    local data = love.image.newImageData(n, n)
+    for y = 0, n - 1 do
+      for x = 0, n - 1 do
+        local d = math.sqrt((x + 0.5 - n / 2) ^ 2 + (y + 0.5 - n / 2) ^ 2) / (n / 2)
+        local a = d < 1 and math.exp(-d * d * 3.2) * (1 - d * d) or 0
+        data:setPixel(x, y, 1, 1, 1, a)
+      end
+    end
+    lightImage = love.graphics.newImage(data)
+    lightImage:setFilter("linear", "linear")
+  end
+  return lightImage
+end
+
+-- The item as a light source on its plate: a wide pool of its colour that breathes,
+-- a hot white-tinted core, a pool of light spread along the floor of the plate, and
+-- a few motes of it drifting up. Added over the plate, kept inside it.
+local function itemLight(x, y, w, h, c)
+  local img = getLightImage()
+  local iwid = img:getWidth()
+  local t = clock
+  local breathe = 1 + 0.06 * math.sin(t * 2.1) + 0.03 * math.sin(t * 5.3 + 1)
+  local cx, cy = x + w / 2, y + h * 0.48
+  local prevShader = love.graphics.getShader()
+  love.graphics.setShader()
+  love.graphics.setScissor(x, y, w, h)
+  love.graphics.setBlendMode("add")
+  local function pool(px, py, rx, ry, r, g, b, a)
+    love.graphics.setColor(r, g, b, a)
+    love.graphics.draw(img, px - rx, py - ry, 0, 2 * rx / iwid, 2 * ry / iwid)
+  end
+  local hot = { c[1] + (1 - c[1]) * 0.55, c[2] + (1 - c[2]) * 0.55, c[3] + (1 - c[3]) * 0.55 }
+  pool(cx, cy, w * 0.62 * breathe, h * 0.95 * breathe, c[1], c[2], c[3], 0.5)
+  pool(x + w / 2, y + h * 0.97, w * 0.5 * breathe, h * 0.2, c[1], c[2], c[3], 0.32)
+  pool(cx, cy, h * 0.42 * breathe, h * 0.42 * breathe, hot[1], hot[2], hot[3], 0.55)
+  -- Motes
+  local m = math.max(1, math.floor(u * 0.5))
+  for i = 1, 7 do
+    local k = (t * (0.07 + i * 0.011) + i * 0.37) % 1
+    local mx = cx + math.sin(i * 12.9 + t * 0.6) * w * 0.3 + math.sin(i * 3.1) * w * 0.08
+    local my = y + h * (0.95 - k * 0.9)
+    local a = math.sin(k * math.pi) * 0.7
+    love.graphics.setColor(hot[1], hot[2], hot[3], a)
+    love.graphics.rectangle("fill", math.floor(mx), math.floor(my), m, m)
+  end
+  love.graphics.setBlendMode("alpha")
+  love.graphics.setScissor()
+  love.graphics.setShader(prevShader)
+end
+
 local function drawDetail(entry, profile, cat, x, y, w, h)
   panel(x, y, w, h, 0.92)
   if not entry then
@@ -895,11 +1032,7 @@ local function drawDetail(entry, profile, cat, x, y, w, h)
   love.graphics.setColor(0.02, 0.015, 0.03, 0.9)
   love.graphics.rectangle("fill", ix, iy, iw, ih, u, u)
   if known then
-    local c = entry.color or WARM
-    for k = 4, 1, -1 do
-      love.graphics.setColor(c[1], c[2], c[3], 0.035 * (5 - k))
-      love.graphics.circle("fill", ix + iw / 2, iy + ih / 2, ih * 0.14 * k)
-    end
+    itemLight(ix, iy, iw, ih, entry.boss and DANGER or entry.color or (entry.rarity and RARITY[entry.rarity]) or WARM)
     if cat.id == "enemy" then
       compendium.drawLive(entry, ix + 4 * u, iy + 4 * u, iw - 8 * u, ih - 8 * u)
     else
@@ -976,26 +1109,29 @@ local function drawDetail(entry, profile, cat, x, y, w, h)
     ty = ty + wrapped(text, tx, ty, tw, F.small, RARITY.fused) + 2 * u
   end
   if known then
-    ty = ty + wrapped(entry.desc, tx, ty, tw, F.small, DIM) + 2 * u
+    ty = ty + wrapped(entry.desc, tx, ty, tw, F.body, DIM) + 2 * u
     if entry.stats then
       local colW = tw / 2
       for i, st in ipairs(entry.stats) do
         local cx = tx + ((i - 1) % 2) * colW
-        local cy = ty + math.floor((i - 1) / 2) * F.small:getHeight() * 1.35
-        shadowPrint(st[1], cx, cy, F.small, FAINT)
-        shadowPrint(st[2], cx + colW - 3 * u - F.small:getWidth(st[2]), cy, F.small, TEXT)
+        local cy = ty + math.floor((i - 1) / 2) * F.body:getHeight() * 1.35
+        shadowPrint(st[1], cx, cy, F.body, FAINT)
+        shadowPrint(st[2], cx + colW - 3 * u - F.body:getWidth(st[2]), cy, F.body, TEXT)
       end
     end
   else
     local hintText = cat.id == "enemy" and "Slay one to learn more." or "Find one to learn more."
-    wrapped(hintText, tx, ty, tw, F.small, FAINT)
+    wrapped(hintText, tx, ty, tw, F.body, FAINT)
   end
 end
+
+local COMP_WINDOW = 0.84 -- the compendium's window, as a share of the full menu space
 
 PAGES.compendium = function()
   local ww, wh = love.graphics.getDimensions()
   love.graphics.setColor(0.015, 0.01, 0.025, root == "pause" and 0.93 or 0.6)
   love.graphics.rectangle("fill", 0, 0, ww, wh)
+  layout(uBase, COMP_WINDOW)
   litBackdrop()
   local profile = compProfile()
 
@@ -1079,17 +1215,16 @@ PAGES.compendium = function()
     local known = (got[e.id] or 0) > 0
     local locked, seen = lockState(profile, cat.id, e)
     local focused = widget({ id = "comp:cell:" .. e.id, x = cx, y = cy, w = cellW, h = cellH, clip = clip, activate = function() end })
-    love.graphics.setColor(known and { 0.09, 0.07, 0.11, 0.95 } or { 0.035, 0.03, 0.05, 0.95 })
-    love.graphics.rectangle("fill", cx, cy, cellW, cellH, u * 0.6, u * 0.6)
-    local edge = known and (e.boss and DANGER or (e.level and RARITY.fused) or (e.rarity and RARITY[e.rarity]) or BORDER) or { 0.2, 0.18, 0.24 }
-    love.graphics.setLineWidth(math.max(1, u * 0.4))
-    love.graphics.setColor(edge[1], edge[2], edge[3], known and 0.8 or 0.6)
-    love.graphics.rectangle("line", cx, cy, cellW, cellH, u * 0.6, u * 0.6)
+    local edge = known and (e.boss and DANGER or (e.level and RARITY.fused) or (e.rarity and e.rarity ~= "common" and RARITY[e.rarity]) or SLOT_REST) or { 0.22, 0.2, 0.27 }
+    local rim = { edge[1], edge[2], edge[3], known and 0.9 or 0.6 }
+    local wash = known and e.rarity and e.rarity ~= "common" and { edge[1], edge[2], edge[3], 0.07 } or nil
+    local isSel = comp.entry == e
+    slotBox(cx, cy, cellW, cellH, focused and "focus" or (isSel and "selected" or nil), rim, known and nil or { 0.035, 0.03, 0.05, 0.9 }, wash)
     compendium.drawIcon(e, cx + 2 * u, cy + 2 * u, cellW - (e.tiers and 12 or 4) * u, cellH - 4 * u, not known, (seen and not known) and 1 or nil)
     if seen and not known then
       -- Seen but not collected: the silhouette has a faint rim
-      love.graphics.setColor(0.55, 0.5, 0.65, 0.5)
-      love.graphics.rectangle("line", cx + u, cy + u, cellW - 2 * u, cellH - 2 * u, u * 0.6, u * 0.6)
+      love.graphics.setColor(0.55, 0.5, 0.65, 0.35)
+      love.graphics.rectangle("line", cx + 2 * u, cy + 2 * u, cellW - 4 * u, cellH - 4 * u, u * 0.6, u * 0.6)
     end
     if e.tiers then
       drawTierBars(e, got, cx + cellW - 9 * u, cy + 2 * u, 7 * u, cellH - 4 * u)
@@ -1097,9 +1232,6 @@ PAGES.compendium = function()
     if locked then
       local s = math.max(1, math.floor(u * 0.5))
       padlock(cx + cellW - 6 * s - u - (e.tiers and 8 * u or 0), cy + u + s, s, known and 1 or 0.7)
-    end
-    if focused then
-      focusFrame(cx, cy, cellW, cellH)
     end
   end
   love.graphics.setScissor()
@@ -1116,6 +1248,7 @@ PAGES.compendium = function()
     comp.entry = nil
   end
   drawDetail(comp.entry or entries[1], profile, cat, X(252), Y(44), math.floor(134 * u), math.floor(166 * u))
+  layout(uBase)
 end
 
 -- The camp ------------------------------------------------------------------------------
@@ -1448,16 +1581,9 @@ PAGES.camp = function()
     if focused then
       focusedEntry = e
     end
-    love.graphics.setColor(seen and { 0.09, 0.07, 0.11, 0.95 } or { 0.035, 0.03, 0.05, 0.95 })
-    love.graphics.rectangle("fill", cx, cy, cell, cell, u * 0.6, u * 0.6)
-    local edge = seen and ((e.rarity and RARITY[e.rarity]) or BORDER) or { 0.2, 0.18, 0.24 }
-    love.graphics.setLineWidth(math.max(1, u * 0.4))
-    love.graphics.setColor(edge[1], edge[2], edge[3], seen and 0.8 or 0.6)
-    love.graphics.rectangle("line", cx, cy, cell, cell, u * 0.6, u * 0.6)
+    local edge = seen and ((e.rarity and e.rarity ~= "common" and RARITY[e.rarity]) or SLOT_REST) or { 0.22, 0.2, 0.27 }
+    slotBox(cx, cy, cell, cell, focused and "focus" or nil, { edge[1], edge[2], edge[3], seen and 0.9 or 0.6 }, not seen and { 0.035, 0.03, 0.05, 0.9 } or nil)
     compendium.drawIcon(e, cx + 2 * u, cy + 2 * u, cell - 4 * u, cell - 4 * u, not seen)
-    if focused then
-      focusFrame(cx, cy, cell, cell)
-    end
   end
 
   -- The focused one: what it is and what teaching it costs
@@ -1543,15 +1669,10 @@ PAGES.settings = function()
         settings.set("crosshairColor", i)
         audio.play("select")
       end })
-      love.graphics.setColor(0.05, 0.04, 0.07, 0.9)
-      love.graphics.rectangle("fill", sx, y, sw - u, ch, u, u)
+      slotBox(sx, y, sw - u, ch, sel and "selected" or (focused and "focus" or nil))
+      local pad = math.max(3, math.floor(3 * u))
       love.graphics.setColor(col[1], col[2], col[3])
-      love.graphics.rectangle("fill", sx + 2 * u, y + 2 * u, sw - u - 4 * u, ch - 4 * u)
-      if sel then
-        focusFrame(sx, y, sw - u, ch, WARM)
-      elseif focused then
-        focusFrame(sx, y, sw - u, ch)
-      end
+      love.graphics.rectangle("fill", math.floor(sx + pad), math.floor(y + pad), math.floor(sw - u - 2 * pad), math.floor(ch - 2 * pad))
     end
     y = y + rh
     -- {label, setting, lowest, highest, whole numbers?}
@@ -1620,13 +1741,9 @@ PAGES.settings = function()
           settings.save()
           audio.play("back")
         end })
-        love.graphics.setColor(isListening and { 0.2, 0.14, 0.08, 0.95 } or { 0.07, 0.06, 0.09, 0.95 })
-        love.graphics.rectangle("fill", kx, y, kw, kh - u, u * 0.6, u * 0.6)
+        slotBox(kx, y, kw, kh - u, isListening and "gold" or (focused and "focus" or nil))
         local label = isListening and (math.floor(clock * 3) % 2 == 0 and "Press a key" or "") or input.keyName(keys[slot])
         printCentered(label, kx + kw / 2, y + (kh - u - F.small:getHeight()) / 2, F.small, isListening and WARM or (keys[slot] and TEXT or FAINT))
-        if focused then
-          focusFrame(kx, y, kw, kh - u)
-        end
       end
       y = y + kh
     end
@@ -1863,11 +1980,10 @@ PAGES.ghost = function()
     if focused then
       focusFrame(x, y, w, h, { 0.5, 0.8, 1 })
     end
-    local img = icons.get(o.item)
+    local img = icons.getHD(o.item) or icons.get(o.item)
     if img then
-      local s = math.max(1, math.floor(h / img:getHeight() * 0.7))
-      love.graphics.setColor(1, 1, 1, o.sold and 0.25 or 1)
-      love.graphics.draw(img, x + 4 * u, y + (h - img:getHeight() * s) / 2, 0, s, s)
+      local s = math.max(1, math.floor(h * 0.7 / icons.HD_SIZE))
+      icons.drawHDAt(img, x + 4 * u + icons.HD_SIZE * s / 2, y + h / 2, s, o.sold and 0.25 or 1)
     end
     local tx = x + 26 * u
     shadowPrint(o.item.name, tx, y + 4 * u, F.body, o.sold and FAINT or TEXT)
@@ -1913,6 +2029,27 @@ PAGES.dialog = function()
   end
   if dialog.refresh then
     dialog.refresh()
+  end
+  if dialog.custom then
+    -- (the whole page is the event's own: a card table, the tinker's bench...)
+    dialog.custom({
+      shadowPrint = shadowPrint, printCentered = printCentered, pageTitle = pageTitle, wrapped = wrapped,
+      panel = panel, F = F, u = u, X = X, Y = Y,
+      close = function()
+        act("resume")
+      end,
+      gp = ww / require("src.config").VIRTUAL_W, -- one game pixel, so art drawn here is the size it is in the world
+      button = function(id, label, bx, by, bw, bh, fn, opts)
+        return button(id, label, bx, by, bw, bh, function()
+          audio.play("select")
+          local keep = fn and fn(dialog)
+          if not keep then
+            act("resume")
+          end
+        end, opts)
+      end,
+    }, dialog)
+    return
   end
   pageTitle(dialog.title or "", X(14), Y(9))
   if dialog.subtitle then

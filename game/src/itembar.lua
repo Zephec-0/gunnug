@@ -305,16 +305,18 @@ local function drawThing(thing, x, y, size, u, alpha)
     drawWeaponIcon(thing, x + (size - icon:getWidth() * s) / 2, y + (size - icon:getHeight() * s) / 2, s, alpha)
   elseif itemIcons.get(thing) then
     -- A pixel icon in the item's colours, with the rarity rim around it
-    local img = itemIcons.get(thing)
-    local s = math.max(1, math.floor(size * 0.78 / 8))
-    local box = 8 * s
+    local img = itemIcons.getHD(thing) or itemIcons.get(thing)
+    -- (the HD image has room for a drop shadow round the art)
+    local pad = img:getWidth() == itemIcons.HD_SIZE + 2 * itemIcons.HD_PAD and itemIcons.HD_PAD or 0
+    local iw = img:getWidth() - 2 * pad
+    local s = math.max(1, math.floor(size * 0.7 / iw)) -- (well inside the slot, not up against its rim)
+    local box = iw * s
     local ix, iy = x + (size - box) / 2, y + (size - box) / 2
     local rarity = thing.rarity and thing.rarity ~= "common" and items.rarities[thing.rarity]
     if rarity then
       drawGlow(x, y, size, ix, iy, box, rarity.border, alpha * (0.85 + 0.15 * math.sin(love.timer.getTime() * 2.5)), u)
     end
-    love.graphics.setColor(1, 1, 1, alpha)
-    love.graphics.draw(img, ix, iy, 0, s, s)
+    itemIcons.drawHDAt(img, x + size / 2, y + size / 2, s, alpha)
     if (thing.level or 0) > 0 then
       itemIcons.drawLevel(thing.level, x, y, size, alpha)
     end

@@ -9,6 +9,7 @@ local items = require("src.items")
 local pickups = require("src.pickups")
 local materials = require("src.materials")
 local props = require("src.props")
+local randevents = require("src.randevents")
 local targets = require("src.targets")
 local World = require("src.world")
 
@@ -23,12 +24,20 @@ local testroom = {
 -- The original room sits OX px in from the left; the item hall fills the space
 -- to its left (see itemHall)
 local OX = 700
-local WIDTH, HEIGHT = 1024 + OX, 576
+-- Past the room's far wall runs the events row: one stand of every random event
+-- (see populate), on a flat floor
+local EV_X0 = OX + 1024
+local EV_STEP = 200
+local EV_KINDS = { "carnival", "gambler", "tinker", "shrine", "cavein", "hunt" }
+local WIDTH, HEIGHT = EV_X0 + 60 + #EV_KINDS * EV_STEP + 60, 576
 local BORDER = 10
 local FLOOR_Y = 499
 
 local function floorTop(x)
   if x < OX then
+    return FLOOR_Y
+  end
+  if x >= EV_X0 then
     return FLOOR_Y
   end
   x = x - OX
@@ -83,8 +92,8 @@ function testroom.build()
   world:fillRect(OX + 632, 419, OX + 651, FLOOR_Y + 16, ROCK)
 
   -- High ledge on the right
-  world:fillRect(OX + 800, 371, WIDTH - BORDER - 1, 390, ROCK)
-  world:fillRect(OX + 800, 365, WIDTH - BORDER - 1, 370, DIRT)
+  world:fillRect(OX + 800, 371, EV_X0 - 1, 390, ROCK)
+  world:fillRect(OX + 800, 365, EV_X0 - 1, 370, DIRT)
 
   -- Stalactites
   for _, s in ipairs({ { 192, 64 }, { 416, 96 }, { 528, 48 }, { 720, 128 }, { 896, 72 } }) do
@@ -178,6 +187,13 @@ function testroom.populate(world)
   enemies.spawn("miner", OX + 560, world:findGround(OX + 560, BORDER + 160))
   enemies.spawn("roller", OX + 672, world:findGround(OX + 640, BORDER + 160))
   enemies.spawn("worm", OX + 880, 510)
+  -- The events row: the random events, all standing at once (each comes back
+  -- a moment after it is spent)
+  for i, kind in ipairs(EV_KINDS) do
+    local x = EV_X0 + 60 + (i - 0.5) * EV_STEP
+    randevents.addStand(kind, x, world:findGround(x, BORDER + 160), world)
+  end
+
   -- A DPS dummy, like the one in every shop
   enemies.spawn("dummy", OX + 290, world:findGround(OX + 290, BORDER + 160))
 end

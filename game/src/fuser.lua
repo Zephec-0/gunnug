@@ -134,7 +134,11 @@ function fuser.onKill(inv, x, y, boss)
   if not inv.fuse.locked then
     return
   end
-  local ether = boss and BOSS_ETHER or KILL_ETHER
+  fuser.dropEther(x, y, boss and BOSS_ETHER or KILL_ETHER)
+end
+
+-- Sparks of ether bursting out at (x, y) and streaming to the hunter (they charge a locked fuser)
+function fuser.dropEther(x, y, ether)
   local count = ether * SPARKS_PER_ETHER
   for _ = 1, count do
     local a = love.math.random() * math.pi * 2

@@ -173,3 +173,41 @@ Check items off as they land; append new ones at the bottom.
 - [x] Area dressing: src/decor.lua bakes per-area decoration and rock tints at generation (cinder, drowned, quarry, needle, sky, flooded sets; see design 7b). Headless-tested in all of areas 4-13, not played
 - [ ] Decor leftovers: the first three areas could take moss/roots/drips too (tint only so far: none); decor is not yet knocked off when a prop or minecart sits on it; the Needle's outer flank (outside the cave) has none; frost could also whiten the Needle's one-way ledges; a gust of dust or falling grains was left out on purpose (no animation)
 
+
+## Batch 2026-10-20 compendium visual pass (headless-tested screenshots; not played)
+- [x] Item/ammo/perk icons doubled to 16x16 (EPX smoothing, rim light, outline; icons.getHD) in compendium, item bar; world keeps the 8x8
+- [x] Compendium window scaled to 84% and centred
+- [x] Compendium detail plate: real additive light (breathing pool, hot core, floor glow, motes) in the item colour instead of circles
+- [x] Settings tabs/switches/swatches/key boxes and compendium tiles use the item bar slot look (itembar.slotBox)
+
+## Batch 2026-10-20 (headless-tested: screenshots of crow frames, bestiary sheet, events row; not played)
+- [x] Crow Rider: crow redrawn as 1:1 pixel art (src/crowfig.lua): feathered wings that flex through 16 frames, dive and shriek poses, talons, tilt; rider sits higher on its back
+- [x] Compendium bestiary: swarm bat is now a flock, every entry idles (wingbeats, pulses, pacing, hopper leaps), tight portrait boxes; added Crow Rider and the Big Fish's four sizes (Big / Bigger / Even Bigger / The Biggest); Colossus portrait no longer errors
+- [x] Random events: half as often (first 90-230s, then 240-480s apart)
+- [x] Test room: events row past the far wall with one stand of every random event (each returns after it is spent)
+- [x] Fixed a crash drawing the Colossus (colossus.lua sent a shader uniform the outline-less shader no longer has)
+
+## Batch 2026-10-20 random events overhaul (headless-tested with screenshots; not played)
+- [x] Crow: black outline removed
+- [x] Event art redone on the game's pixel grid: people (carny, dealer, tinker) use the camp figure style, pixel targets, a pixel wheel, new slot machine, src/eventart.lua
+- [x] Shooting gallery: carny stands off to the side in his own booth and everything goes through him; 3 second count; speech and prompt no longer overlap; prizes drop apart. Medium: targets bounce diagonally; Hard: targets blink in for 0.25s
+- [x] Slot machine is its own interactable: 10g per pull taken straight from you, reels spin in the world, lights/lever animate, pays out as coins, "not enough gold" shown on it. New sounds
+- [x] High-Low: green felt table page (lamp lighting, shadows), pixel cards with worn paper, card back, J = golemling, Q = Sulfur Queen, K = Biggest Fish, A = Crow Rider; choices to the right with arrows; new card flies in from the top and stacks; fixed bet, higher multipliers; "Leave table"
+- [x] Tinker: weapon cards on screen (scaled), one Re-roll button under them, card shakes on a re-roll; undo removed
+- [x] Shrine: three offering cards instead of a button list
+- [x] Test room events row spaced out (200px) so every stand fits
+
+## Batch 2026-10-20 events round 2 (headless-tested; not played)
+- [x] Dev panel: "Drop 100 gold + 12 ether" (ether only charges a locked fuser)
+- [x] Tinker: a re-roll button under each card (icon + price), no instruction text; the card flips into the new gun, which may have more or fewer slots (items that no longer fit pop out onto the ground)
+- [x] Slot machine smaller, dark reel backs (icons keep their colour), dimmer glow, prompt beside it: "Play!"
+- [x] High-Low is a pop-out table panel, cards land tilted and offset
+- [x] Gallery: count painted on the stall, 17s rounds, just difficulty + cost in the menu, goal-based rewards (Easy item, Medium gun, Hard perk; under 60% of the goal pays nothing)
+- [x] Hard targets stay 1s
+- [x] Shrine: click the card (or press 1-3), cost is a block on the card, no buttons
+
+## Batch 2026-10-20 events round 3 (released as 0.2.6)
+- [x] Gallery: Easy gives one item (not two), prize guns never above S, goals 30 / 25 / 20, a Hard perk drops as loot in front of the carny, difficulty picker is three colour-coded cards with what they may pay
+- [x] High-Low: text and cards more central, the dealt card is face up all the way down
+- [x] Shrine cards centred, rounded; tinker flip faster
+

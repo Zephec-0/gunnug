@@ -246,6 +246,152 @@ function icons.get(thing)
   return cache[key] or nil
 end
 
+-- The same icon for the interface (the compendium, the item bar, the shop and camp
+-- pages), in a flatter 16-bit style: the 8x8 art resampled to 12x12 (each pixel takes
+-- whichever colour covers most of it: flat colours, hard edges, no blending), one flat
+-- step lighter along the top and one darker along the bottom of any part two pixels
+-- thick, and a very soft drop shadow baked in around it. The image is the 12x12 art
+-- with HD_PAD pixels of room on every side for the shadow, nearest filtered. (The
+-- world still uses the plain 8x8 from icons.get: it is drawn at the game's own scale.)
+icons.HD_SIZE = 12
+icons.HD_PAD = 2
+local hdCache = {}
+local hdShadow = setmetatable({}, { __mode = "k" }) -- art image -> its soft shadow image
+local hdBox = setmetatable({}, { __mode = "k" }) -- art image -> { x0, y0, x1, y1 }: where the art is drawn within it
+
+local function mix(c, to, k)
+  return { c[1] + (to[1] - c[1]) * k, c[2] + (to[2] - c[2]) * k, c[3] + (to[3] - c[3]) * k }
+end
+
+local WHITE, SHADOW = { 1, 1, 1 }, { 0.04, 0.03, 0.08 }
+local DROP = { 0.02, 0.01, 0.04 }
+local DROP_ALPHA = 0.4
+
+function icons.getHD(thing)
+  local key = (thing.isPerk and "p:" or "i:") .. tostring(thing.id)
+  local hit = hdCache[key]
+  if hit ~= nil then
+    return hit or nil
+  end
+  local rows = icons.rows(thing)
+  if not rows then
+    hdCache[key] = false
+    return nil
+  end
+  local base = thing.color or { 0.7, 0.7, 0.7 }
+  local palette = { c = base, d = shade(base, 0.55), l = light(base) }
+  local N, PAD = icons.HD_SIZE, icons.HD_PAD
+  local function src(x, y) -- the source pixel's palette letter ("." for clear)
+    local ch = rows[y]:sub(x, x)
+    return (palette[ch] or FIXED[ch]) and ch or "."
+  end
+  -- Resample 8 -> N: per destination pixel, the letter with the most area under it
+  -- (any solid colour wins over clear once it covers a third of the pixel)
+  local big = {}
+  for dy = 1, N do
+    big[dy] = {}
+    for dx = 1, N do
+      local x0, x1 = (dx - 1) * 8 / N, dx * 8 / N
+      local y0, y1 = (dy - 1) * 8 / N, dy * 8 / N
+      local weight = {}
+      for sy = math.floor(y0) + 1, math.min(8, math.ceil(y1)) do
+        local oy = math.min(y1, sy) - math.max(y0, sy - 1)
+        for sx = math.floor(x0) + 1, math.min(8, math.ceil(x1)) do
+          local ox = math.min(x1, sx) - math.max(x0, sx - 1)
+          local ch = src(sx, sy)
+          weight[ch] = (weight[ch] or 0) + ox * oy
+        end
+      end
+      local best, bw, solid = ".", 0, 0
+      for ch, w in pairs(weight) do
+        if ch ~= "." then
+          solid = solid + w
+          if w > bw or (w == bw and ch < best) then
+            best, bw = ch, w
+          end
+        end
+      end
+      local area = (x1 - x0) * (y1 - y0)
+      big[dy][dx] = solid >= area / 3 and (palette[best] or FIXED[best]) or false
+    end
+  end
+  local function at(x, y)
+    return big[y] and big[y][x] or false
+  end
+  local size = N + 2 * PAD
+  -- The shadow: the shape one pixel down and right, blurred over 3 x 3, faint
+  local shadow = love.image.newImageData(size, size)
+  local data = love.image.newImageData(size, size)
+  for y = 0, size - 1 do
+    for x = 0, size - 1 do
+      local sum = 0
+      for oy = -1, 1 do
+        for ox = -1, 1 do
+          if at(x - PAD + ox, y - PAD + oy) then
+            sum = sum + 1
+          end
+        end
+      end
+      if sum > 0 then
+        shadow:setPixel(x, y, DROP[1], DROP[2], DROP[3], DROP_ALPHA * sum / 9)
+      end
+    end
+  end
+  local bx0, by0, bx1, by1 = N, N, 1, 1
+  for y = 1, N do
+    for x = 1, N do
+      local c = big[y][x]
+      if c then
+        bx0, by0, bx1, by1 = math.min(bx0, x), math.min(by0, y), math.max(bx1, x), math.max(by1, y)
+        if not at(x, y - 1) and at(x, y + 1) then c = mix(c, WHITE, 0.22) end
+        if not at(x, y + 1) and at(x, y - 1) then c = mix(c, SHADOW, 0.28) end
+        data:setPixel(x - 1 + PAD, y - 1 + PAD, c[1], c[2], c[3], 1)
+      end
+    end
+  end
+  local img = love.graphics.newImage(data)
+  img:setFilter("nearest", "nearest")
+  -- (the shadow is scaled smoothly, so it falls off softly however large the icon is drawn)
+  local sh = love.graphics.newImage(shadow)
+  sh:setFilter("linear", "linear")
+  hdShadow[img] = sh
+  -- (in image pixels: the art's left, top, right and bottom edges)
+  hdBox[img] = { PAD + bx0 - 1, PAD + by0 - 1, PAD + bx1, PAD + by1 }
+  hdCache[key] = img
+  return img
+end
+
+-- Draws an image from getHD (art and shadow) with its top left at (x, y), scaled s;
+-- other images are drawn plain
+function icons.drawHD(img, x, y, s, alpha)
+  local sh = hdShadow[img]
+  if sh then
+    love.graphics.setColor(1, 1, 1, alpha or 1)
+    love.graphics.draw(sh, x, y, 0, s, s)
+  end
+  love.graphics.setColor(1, 1, 1, alpha or 1)
+  love.graphics.draw(img, x, y, 0, s, s)
+end
+
+-- The same, with the middle of what is drawn (not of the 12 x 12 square it is drawn in)
+-- on (cx, cy), at whole pixels; tint (optional) = { r, g, b } multiplies the art
+function icons.drawHDAt(img, cx, cy, s, alpha, tint)
+  local box = hdBox[img]
+  local ax, ay = (img:getWidth()) / 2, (img:getHeight()) / 2
+  if box then
+    ax, ay = (box[1] + box[3]) / 2, (box[2] + box[4]) / 2
+  end
+  local x, y = math.floor(cx - ax * s + 0.5), math.floor(cy - ay * s + 0.5)
+  local sh = hdShadow[img]
+  if sh then
+    love.graphics.setColor(1, 1, 1, alpha or 1)
+    love.graphics.draw(sh, x, y, 0, s, s)
+  end
+  local t = tint or { 1, 1, 1 }
+  love.graphics.setColor(t[1], t[2], t[3], alpha or 1)
+  love.graphics.draw(img, x, y, 0, s, s)
+end
+
 -- A levelled item's "+N" (src.items): N light teal plus signs in a row along
 -- the bottom of a box of `size` at (x, y), one per level. (The small square pip
 -- in the top corner is something else: it means the item could be fused.)

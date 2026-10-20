@@ -48,6 +48,28 @@ local LOOKS = {
     hat = "bowler", hatCol = { 0.20, 0.17, 0.17 },
     face = { 0.22, 0.14, 0.10 }, faceStyle = "moustache", prop = "mug",
   },
+  -- the random events' people (src.randevents)
+  carny = {
+    skin = { 0.84, 0.64, 0.52 },
+    shirt = { 0.90, 0.88, 0.80 }, shirtD = { 0.72, 0.70, 0.62 },
+    vest = { 0.78, 0.14, 0.16 }, trouser = { 0.22, 0.18, 0.30 },
+    hat = "bowler", hatCol = { 0.80, 0.16, 0.18 },
+    face = { 0.18, 0.12, 0.10 }, faceStyle = "moustache",
+  },
+  dealer = {
+    skin = { 0.80, 0.66, 0.54 },
+    shirt = { 0.86, 0.86, 0.82 }, shirtD = { 0.66, 0.66, 0.62 },
+    vest = { 0.12, 0.32, 0.20 }, trouser = { 0.14, 0.14, 0.18 },
+    hat = "cap", hatCol = { 0.10, 0.36, 0.22 },
+    face = nil,
+  },
+  tinker = {
+    skin = { 0.82, 0.62, 0.48 },
+    shirt = { 0.52, 0.38, 0.24 }, shirtD = { 0.36, 0.26, 0.16 },
+    vest = { 0.58, 0.46, 0.28 }, trouser = { 0.30, 0.26, 0.22 },
+    hat = "hood", hatCol = { 0.42, 0.30, 0.16 },
+    face = { 0.50, 0.40, 0.30 }, faceStyle = "stubble", goggles = true, coat = true,
+  },
 }
 
 function people.has(id)

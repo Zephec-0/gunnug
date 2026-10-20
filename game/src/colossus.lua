@@ -1018,7 +1018,6 @@ local function drawGolem(e)
     figCanvas = love.graphics.newCanvas(fig.W, fig.H)
     figCanvas:setFilter("nearest", "nearest")
     figShader = love.graphics.newShader(fig.outlineShaderCode)
-    figShader:send("texel", { 1 / fig.W, 1 / fig.H })
   end
   local p = e.fpose or (e.altarLocked and DORMANT_POSE) or IDLE_POSE
   local b = e.body

@@ -147,6 +147,7 @@ end
 function events.update(dt, player, areaIndex)
   runTime = runTime + dt
   if not world then
+    randevents.update(dt, player) -- (the test room's stands)
     return
   end
   randevents.update(dt, player, areaIndex, world)
@@ -279,7 +280,10 @@ end
 
 -- E: returns true if it handled the key
 function events.interact(player)
-  if not world or player.dead then
+  if not world then
+    return randevents.interact(player)
+  end
+  if player.dead then
     return false
   end
   if randevents.interact(player) then
@@ -493,6 +497,7 @@ end
 
 function events.draw(view)
   if not world then
+    randevents.draw(view)
     return
   end
   for _, a in ipairs(altars) do
@@ -560,6 +565,7 @@ end
 
 function events.addLights(lighting, view)
   if not world then
+    randevents.addLights(lighting, view)
     return
   end
   randevents.addLights(lighting, view)
@@ -596,7 +602,11 @@ local function prompt(font, toScreen, wx, wy, text)
 end
 
 function events.drawScreen(toScreen, font, player)
-  if not world or require("src.menu").isOpen() then
+  if not world then
+    randevents.drawScreen(toScreen, font, player)
+    return
+  end
+  if require("src.menu").isOpen() then
     return
   end
   randevents.drawScreen(toScreen, font, player)

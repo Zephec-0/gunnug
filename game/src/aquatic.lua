@@ -1071,6 +1071,7 @@ local function finishEat(e, er, cx, cy)
     nx, ny = er.x, er.y -- (the last one stays where it stopped, well clear of the hunter)
   end
   stageInit(e, er.stage, nx, ny)
+  require("src.save").record("enemy", "bigfish_" .. (er.stage - 1)) -- (the smaller fish is in the bestiary now)
   e.facing = facing
   if er.big then
     e.ang = er.ang
@@ -1755,6 +1756,14 @@ function enemies.afterDraw()
       end
     end
   end
+end
+
+-- For the compendium: a fish of stage n (1..4) posed facing right, its body's top-left at (0, 0)
+function aquatic.specimen(n)
+  local e = enemies.specimen("bigfish")
+  stageInit(e, n, STAGES[n].w / 2, STAGES[n].h / 2)
+  e.ang, e.facing = 0, 1
+  return e
 end
 
 aquatic.STAGES = STAGES

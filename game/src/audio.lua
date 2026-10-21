@@ -243,6 +243,18 @@ local DEFS = {
     end,
     volume = 0.45,
   },
+  -- Leathery wing beats: a few soft flaps, each a short puff of low-passed noise (the swarm bats' flutter)
+  bat_flutter = {
+    gen = function()
+      local band = lp(0.18)
+      return synth(0.22, function(t, p)
+        local flap = math.max(0, math.sin(t * 38)) ^ 2
+        return band(noise()) * flap * (1 - p) * 1.4
+      end)
+    end,
+    volume = 0.35,
+    cooldown = 0.05,
+  },
   -- The Needle's creatures ------------------------------------------------
   -- A crow's hoarse caw: a buzzy, falling note with a rasp
   crow_caw = {

@@ -174,21 +174,20 @@ function hud.drawBottle(player, u, cx, cy)
   if stage >= 1 then
     -- Dings: small bites out of the glass's edge; and scratches
     chips = { { hl, -2, 0.9 }, { 4, ht, 0.8 } }
-    scratches = { { -8, -2, -3, -4 }, { 2, 5, 8, 3 }, { -1, 1, 3, 0.5 } }
+    scratches = { { 2, 5, 8, 3 } } -- (one faint scratch: the dings do the rest)
   end
   if stage >= 2 then
     -- Broken: a corner gone, the lip chipped, cracks spreading from a bullet hole clean through
     chips = { { hl, -2, 1.1 }, { 4, ht, 1.0 }, { -6, -ht, 0.9 }, { hl - 3, ht - 0.5, 0.9 } } -- (small dents, not bites)
-    scratches = { { -8, -2, -3, -4 }, { 2, 5, 8, 3 }, { -1, 1, 3, 0.5 }, { 6, -6, 10, -3 }, { -12, 3, -9, 5 } }
+    scratches = { { 2, 5, 8, 3 }, { 6, -6, 10, -3 } }
     hole = { -2, -3, 1.3 } -- (in the upper half, toward the neck)
     local hx, hy = hole[1], hole[2]
     local function crack(...)
       local p = { ... }
       cracks[#cracks + 1] = { hx + p[1], hy + p[2], hx + p[3], hy + p[4] }
     end
-    crack(0, 0, -4, -3) crack(-4, -3, -7, -6) crack(0, 0, -3, 3) crack(-3, 3, -6, 4.5)
-    crack(0, 0, 1, -4) crack(1, -4, 2, -7) crack(0, 0, 4, 3) crack(4, 3, 8, 4) crack(4, 3, 6, 6.5)
-    crack(0, 0, 5, -1) crack(5, -1, 9, -3) crack(-4, -3, -6, -2.5) crack(1, -4, -1.5, -6) crack(8, 4, 10, 6) crack(-6, 4.5, -9, 5.5)
+    crack(0, 0, -4, -3) crack(-4, -3, -6, -5) crack(0, 0, -3, 3)
+    crack(0, 0, 4, 3) crack(4, 3, 7, 4) crack(0, 0, 5, -1)
   end
   local holeR = hole and hole[3] or -1
   local function distSeg(a, b, s)
@@ -365,10 +364,10 @@ function hud.drawBottle(player, u, cx, cy)
       end
     end
     for _, sg in ipairs(scratches) do
-      line(sg, { 1, 1, 1, 0.38 }, false, false)
+      line(sg, { 1, 1, 1, 0.16 }, false, false)
     end
     for _, sg in ipairs(cracks) do
-      line(sg, { 0.97, 0.95, 1, 0.75 }, false, true)
+      line(sg, { 0.97, 0.95, 1, 0.38 }, false, true)
     end
     if hole then
       -- the web: arcs round the hole

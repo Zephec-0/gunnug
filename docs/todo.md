@@ -287,3 +287,8 @@ Check items off as they land; append new ones at the bottom.
 - [x] No breakables in the camp except the crates by the tent; freed prisoners' cages are gone for good
 - [x] The sun's light casts no shadows (the blown-out shadow down the shaft); sprite shadows unchanged. Low-health pulse fainter, shorter, dies out before the next
 - [x] Test room: perk gallery at the far end (every perk)
+
+## 0.3.1 (headless-loaded; not played)
+- [x] Swarm bats: a shriek when the colony wakes, wing flutter and the odd chirp while they fly
+- [x] Boss pointers only appear once the boss has been on screen (split bosses share it)
+- [x] Bottle scratches and cracks subtler (the bullet hole and its web unchanged); still drawn once per damage stage

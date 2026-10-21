@@ -449,7 +449,10 @@ local clock = 0 -- game time (stops while paused), for the DPS meter
 -- effects of the bullet that last hit it (nil for kicks and explosions)
 enemies.onKill = nil
 
+enemies.seenGroups = {} -- split bosses (by group) that have been on screen
+
 function enemies.clear()
+  enemies.seenGroups = {}
   list, globs, sticks, near, dorm.list = {}, {}, {}, {}, {}
   golemStones, golemWaves = {}, {}
 end
@@ -2373,6 +2376,9 @@ local function updateSwarmBat(e, dt, world, player, px, py)
     if (e.seesPlayer and dist < def.sight) or (swarm and swarm.awake) then
       e.state = "chase"
       if swarm then
+        if not swarm.awake then
+          sfx("bat_screech", 1, 0.8) -- (the colony wakes together: one shriek, and the wings begin)
+        end
         swarm.awake = true
       end
     else
@@ -2434,6 +2440,15 @@ local function updateSwarmBat(e, dt, world, player, px, py)
   elseif swarm then
     local sx, sy, kx, ky = flock(e, cx, cy)
     tx, ty = tx + sx + kx, ty + sy + ky
+  end
+  -- Wings and the odd chirp, each bat on its own beat (the swarm adds up to a flutter)
+  e.flapT = (e.flapT or love.math.random() * 0.4) - dt
+  if e.flapT <= 0 then
+    e.flapT = 0.22 + love.math.random() * 0.3
+    sfx("bat_flutter", 0.6 + love.math.random() * 0.4, 0.85 + love.math.random() * 0.4)
+    if love.math.random() < 0.08 then
+      sfx("bat_screech", 0.3, 0.9 + love.math.random() * 0.5)
+    end
   end
   local t = e.phase
   tx, ty = tx + math.sin(t * 0.13) * 34, ty + math.cos(t * 0.17) * 34
@@ -6314,13 +6329,18 @@ function enemies.drawScreen(toScreen, font)
       local x0, y0 = toScreen(b.x, b.y)
       local x1, y1 = toScreen(b.x + b.w, b.y + b.h)
       if x1 < 0 or x0 > sw or y1 < 0 or y0 > sh then
-        if not (e.group and pointed[e.group]) then
+        -- (no arrow to a boss the hunter has not yet seen: it shows once it has been on screen)
+        if (e.seenOnScreen or (e.group and enemies.seenGroups[e.group])) and not (e.group and pointed[e.group]) then
           drawBossPointer(mx, my, sw, sh, unit)
           if e.group then
             pointed[e.group] = true
           end
         end
       else
+        e.seenOnScreen = true
+        if e.group then
+          enemies.seenGroups[e.group] = true
+        end
         -- The health bar floats above the head: a red gradient, nothing else
         local sx, sy = toScreen(b.x + b.w / 2, b.y - 8 - (e.def.barLift or 0))
         sy = math.max(sy, 44 + unit * 2.4) -- (kept on screen when her head is above it)

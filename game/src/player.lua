@@ -583,6 +583,9 @@ function Player:checkGround()
 end
 
 function Player:update(dt, aimX, aimY)
+  if self.limp then
+    return -- (passed out from drink: out cold, in pieces on the ground)
+  end
   local b = self.body
   b.x, b.y = math.floor(b.x + 0.5), math.floor(b.y + 0.5) -- (bodies live on whole pixels: a fractional y once made one-way platforms miss)
   self.ignoreProps = props.overlapping(b.x, b.y, b.w, b.h, self.ignoreProps)
@@ -896,7 +899,7 @@ end
 
 -- Blinks while invulnerable after a hit; gone once dead (he bursts apart)
 local function visible(self)
-  return not self.dead and (self.invuln <= 0 or math.floor(self.invuln * 14) % 2 == 0)
+  return not self.dead and not self.ragdoll and (self.invuln <= 0 or math.floor(self.invuln * 14) % 2 == 0)
 end
 
 function Player:drawEmissive()
@@ -925,7 +928,9 @@ function Player:drawEmissive()
 end
 
 function Player:draw()
-  if self.dead then
+  if self.ragdoll then
+    require("src.ragdoll").draw(self.ragdoll) -- (dead or passed out: he is in pieces on the ground)
+  elseif self.dead then
     if not self.anim.gone then
       playeranim.draw(self) -- the collapse
     end

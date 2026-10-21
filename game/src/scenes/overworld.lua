@@ -544,6 +544,8 @@ function overworld.populate(world)
       npcs.setCamp(lot.id, lot.x, lot.top)
     end
   end
+  -- The Bartender, once the hunter has fallen three times: drinking at the oasis pond's west bank
+  npcs.setPond(POND_X0 - 6, ground(POND_X0 - 6))
   props.spawn("crate", 1700, ground(1700) - 7)
   props.spawn("ironCrate", 2335, ground(2335) - 8.5)
   -- Pots, pouches and lamps along the plain, by the camp and the ruins
@@ -554,8 +556,11 @@ function overworld.populate(world)
     { "skullCandle", 420 }, { "skullCandle", 2150 },
     { "emberPot", 1024 }, { "emberPot", 1880 }, { "emberPot", 2600 },
   }) do
-    local def = props.defs[o[1]]
-    props.spawn(o[1], o[2], ground(o[2]) - def.height / 2 - 0.5)
+    -- (nothing breakable stands in the camp itself: only the crates by the tent)
+    if o[2] < 380 or o[2] > 1420 then
+      local def = props.defs[o[1]]
+      props.spawn(o[1], o[2], ground(o[2]) - def.height / 2 - 0.5)
+    end
   end
   -- Something for whoever explores: a chest on top of the west mesa and one
   -- under the ruins' gateway
@@ -780,7 +785,7 @@ function overworld.addLights(lighting, camX, camY)
   -- Low warm light from the setting sun's place in the sky, fading underground
   local sunlight = 1 - underground(camX + config.VIRTUAL_W / 2, camY + config.VIRTUAL_H / 2)
   if sunlight > 0 then
-    lighting.add(camX + SUN_X, camY + SUN_Y, 420, 1, 0.62, 0.38, 0.3 * sunlight)
+    lighting.add(camX + SUN_X, camY + SUN_Y, 420, 1, 0.62, 0.38, 0.3 * sunlight, true) -- (the sun shines down the shaft without casting shadows)
   end
   catacombs.addLights(lighting, view(camX, camY))
   town.addLights(lighting, view(camX, camY))

@@ -61,7 +61,7 @@ local function unlockEverything()
     p.camp[id] = true
   end
   p.board = true
-  p.stats.bosses = math.max(1, p.stats.bosses or 0) -- (the Bartender moves in with the first boss)
+  p.stats.bosses = math.max(1, p.stats.bosses or 0)
   for _, c in ipairs(compendium.CATEGORIES) do
     p.found[c.id] = p.found[c.id] or {}
     for _, e in ipairs(compendium.entries(c.id)) do
@@ -94,6 +94,7 @@ local function rows()
     { kind = "toggle", label = "No damage", get = function() return dev.noDamage end, set = function(v) dev.noDamage = v end },
     { kind = "toggle", label = "One-hit kills", get = function() return dev.oneHit end, set = function(v) dev.oneHit = v end },
     { kind = "toggle", label = "Fly / no clip (Shift fast)", get = function() return dev.noclip end, set = function(v) dev.noclip = v end },
+    { kind = "toggle", label = "Sprites cast shadows (test)", get = function() return lighting.spriteShadows end, set = function(v) lighting.spriteShadows = v end },
     { kind = "toggle", label = "Objects cast shadows", get = function() return lighting.objectShadows end, set = function(v) lighting.objectShadows = v end },
     { kind = "toggle", label = "Lit sprites (test)", get = function() return lighting.litSprites end, set = function(v) lighting.litSprites = v end },
     { kind = "head", label = "Cached drawing (off = the plain way)" },

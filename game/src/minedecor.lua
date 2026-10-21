@@ -26,7 +26,7 @@ end
 local function trackRange(t, xa, xb)
   for x = xa, xb do
     local y = t.ys[x]
-    if y then
+    if y and not (t.cut and t.cut[x]) then
       if (x - t.x0) % 7 == 3 then
         R(WOOD_D, x - 1, y - 1, 3, 2) -- a sleeper
         R(WOOD, x - 1, y - 1, 3, 1)
@@ -63,7 +63,7 @@ local function drawTrack(t, view)
       end
       if box then
         -- (two pixels of room each side: a sleeper is three wide)
-        bake.piece(t, k, 1, ca - 2, box[1], cb - ca + 5, box[2], function()
+        bake.piece(t, k, t.ver or 1, ca - 2, box[1], cb - ca + 5, box[2], function()
           trackRange(t, ca, cb)
         end)
       end
@@ -73,9 +73,11 @@ local function drawTrack(t, view)
   end
   -- A buffer stop at the far end
   local y = t.ys[t.x1]
-  R(WOOD_D, t.x1, y - 7, 2, 7)
-  R(WOOD, t.x1 - 2, y - 7, 5, 2)
-  R(WOOD_L, t.x1 - 2, y - 7, 5, 1)
+  if not (t.cut and t.cut[t.x1]) then
+    R(WOOD_D, t.x1, y - 7, 2, 7)
+    R(WOOD, t.x1 - 2, y - 7, 5, 2)
+    R(WOOD_L, t.x1 - 2, y - 7, 5, 1)
+  end
 end
 
 -- Timber ----------------------------------------------------------------------
@@ -284,7 +286,7 @@ function minedecor.explosion(x, y, radius)
   local reach = math.ceil(radius / LCELL) + 1
   for dy = -reach, reach do
     for dx = -reach, reach do
-      for _, l in ipairs(lampGrid[(cx + dx) .. ":" .. (cy + dy)] or {}) do
+      for _, l in ipairs(lampGrid[cellKey(cx + dx, cy + dy)] or {}) do
         if not l.broken and (l.x - x) ^ 2 + (l.y - y) ^ 2 < (radius + 4) ^ 2 then
           breakLamp(l)
         end
@@ -401,7 +403,7 @@ function minedecor.draw(mine, view, noSupports)
     end
   end
   for _, s in ipairs(mine.supports) do
-    if not noSupports and inView(view, s.x - 6, s.x + s.gap + 6, s.c, math.max(s.g1, s.g2), 8) then
+    if not noSupports and not s.gone and inView(view, s.x - 6, s.x + s.gap + 6, s.c, math.max(s.g1, s.g2), 8) then
       if bake.enabled.minedecor then
         -- (it changes only when it breaks or falls: its state is the version)
         local y0 = s.c - 8
@@ -414,7 +416,7 @@ function minedecor.draw(mine, view, noSupports)
     end
   end
   for _, s in ipairs(mine.skeletons) do
-    if inView(view, s.x - 20, s.x + 22, s.y - 16, s.y, 4) then
+    if not s.gone and inView(view, s.x - 20, s.x + 22, s.y - 16, s.y, 4) then
       if bake.enabled.minedecor then
         bake.piece(s, 0, 1, s.x - 26, s.y - 20, 54, 26, function()
           drawSkeleton(s)
@@ -425,7 +427,7 @@ function minedecor.draw(mine, view, noSupports)
     end
   end
   for _, p in ipairs(mine.picks) do
-    if inView(view, p.x - 6, p.x + 6, p.y - 14, p.y, 4) then
+    if not p.gone and inView(view, p.x - 6, p.x + 6, p.y - 14, p.y, 4) then
       if bake.enabled.minedecor then
         bake.piece(p, 0, 1, p.x - 14, p.y - 16, 29, 18, function()
           drawPick(p.x, p.y, p.flip, p.tilt)
@@ -436,8 +438,103 @@ function minedecor.draw(mine, view, noSupports)
     end
   end
   for _, l in ipairs(mine.lamps) do
-    if not noSupports and inView(view, l.x - 8, l.x + 8, l.y - 8, l.post or l.y + 8, 4) then
+    if not noSupports and not l.gone and inView(view, l.x - 8, l.x + 8, l.y - 8, l.post or l.y + 8, 4) then
       drawLamp(l)
+    end
+  end
+end
+
+-- Held up by the ground ------------------------------------------------------------
+
+-- Everything the mine stands on the floor (or hangs from the rock) is scenery, not terrain: when the
+-- digging takes what it rests on away it is gone too, in a puff of splinters. (Run a few times a second
+-- for what is near the hunter.)
+local function held(world, x, y, dy)
+  x, y = math.floor(x), math.floor(y)
+  for o = 0, 2 do
+    if world:isSolid(x, y + o * dy) then
+      return true
+    end
+  end
+  return false
+end
+
+local function splinterPuff(x, y, color, n)
+  local effects = require("src.effects")
+  for _ = 1, n or 6 do
+    effects.particle(x + (love.math.random() - 0.5) * 8, y - love.math.random() * 4, (love.math.random() - 0.5) * 50, -10 - love.math.random() * 30, 0.5 + love.math.random() * 0.4, color, 320)
+  end
+end
+
+local NEAR = 420 -- (only what is this close to the hunter is looked at)
+local function near(px, py, x, y)
+  return math.abs(x - px) < NEAR and math.abs(y - py) < NEAR
+end
+
+function minedecor.checkSupport(world, mine, px, py)
+  for _, t in ipairs(mine.tracks) do
+    if px > t.x0 - NEAR and px < t.x1 + NEAR and near(px, py, px, t.ys[t.x0]) then
+      t.cut = t.cut or {}
+      local changed
+      for x = t.x0, t.x1 do
+        local y = t.ys[x]
+        if y and not t.cut[x] and not held(world, x, y, 1) then
+          t.cut[x] = true
+          changed = true
+          if x % 3 == 0 then
+            splinterPuff(x, y, WOOD, 2)
+          end
+        end
+      end
+      if changed then
+        t.ver = (t.ver or 1) + 1
+      end
+    end
+  end
+  for _, s in ipairs(mine.supports) do
+    if not s.gone and near(px, py, s.x, s.c) then
+      local ok
+      if s.state == "fallen" then
+        ok = held(world, s.x + s.gap / 2, math.max(s.g1, s.g2), 1)
+      else
+        ok = held(world, s.x, s.g1, 1) and held(world, s.x + s.gap, s.g2, 1)
+      end
+      if not ok then
+        s.gone = true
+        splinterPuff(s.x + s.gap / 2, s.c + 6, WOOD, 10)
+        splinterPuff(s.x, s.g1, WOOD_L, 4)
+        splinterPuff(s.x + s.gap, s.g2, WOOD_L, 4)
+      end
+    end
+  end
+  for _, s in ipairs(mine.skeletons) do
+    if not s.gone and near(px, py, s.x, s.y) and not held(world, s.x, s.y, 1) then
+      s.gone = true
+      splinterPuff(s.x, s.y, BONE, 8)
+    end
+  end
+  for _, p in ipairs(mine.picks) do
+    if not p.gone and near(px, py, p.x, p.y) and not held(world, p.x, p.y, 1) then
+      p.gone = true
+      splinterPuff(p.x, p.y - 4, WOOD, 3)
+    end
+  end
+  for _, l in ipairs(mine.lamps) do
+    if not l.gone and near(px, py, l.x, l.y) then
+      local ok
+      if l.support then
+        ok = not l.support.gone
+      elseif l.hung then
+        ok = held(world, l.x, l.y - 11, -1) -- (the chain's top, in the rock)
+      else
+        ok = held(world, l.x, l.post, 1)
+      end
+      if not ok then
+        if not l.broken then
+          breakLamp(l)
+        end
+        l.gone = true
+      end
     end
   end
 end
@@ -445,7 +542,7 @@ end
 -- The flames, after the lighting
 function minedecor.drawEmissive(mine, view)
   for _, l in ipairs(mine.lamps) do
-    if inView(view, l.x - 8, l.x + 8, l.y - 4, l.y + 8, 4) then
+    if not l.gone and inView(view, l.x - 8, l.x + 8, l.y - 4, l.y + 8, 4) then
       lampFlame(l)
     end
   end

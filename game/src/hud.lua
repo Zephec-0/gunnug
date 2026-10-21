@@ -64,6 +64,7 @@ local GLASS_LIT, GLASS, GLASS_DARK = { 0.86, 0.84, 0.94 }, { 0.66, 0.62, 0.76 },
 local slosh, bob = { a = 0, v = 0 }, { a = 0, v = 0 } -- the surface's tilt, and its bob (springs)
 local lastPvx, lastPvy
 local glassCache -- the glass drawn once into canvases (see hud.drawBottle)
+local pulseCache -- the low-health pulse's frames, drawn once for the current glass
 local hpFade = 0 -- how visible the health number is (it fades in while the mouse is over the bottle)
 local K = math.sqrt(0.5)
 
@@ -149,24 +150,26 @@ function hud.drawBottle(player, u, cx, cy)
 
   -- Below about 18% it shakes a little and pulses red (alarm: 0 = fine, rising quickly to a gentle 0.6)
   local alarm = frac < 0.18 and math.min(1, (0.18 - frac) / 0.08) * (0.45 + 0.15 * (1 - frac / 0.18)) or 0
+  -- (the shake is a whole-cell offset on the drawing, not on the bottle, so the cached glass stays valid)
+  local c = hud.cell(u) -- one pixel of HUD art
+  love.graphics.push()
   if alarm > 0 then
-    cx = cx + (love.math.random() - 0.5) * alarm * 0.8 * u
-    cy = cy + (love.math.random() - 0.5) * alarm * 0.8 * u
+    local shx = math.floor((love.math.random() - 0.5) * alarm * 0.8 * u / c + 0.5) * c
+    local shy = math.floor((love.math.random() - 0.5) * alarm * 0.8 * u / c + 0.5) * c
+    love.graphics.translate(shx, shy)
   end
   -- The damage the bottle has taken: 0 whole, 1 dinged and scratched (under 2/3 health), 2 cracked, broken
   -- and shot through (under 1/3)
   local stage = frac > 2 / 3 and 0 or (frac > 1 / 3 and 1 or 2)
-  local c = hud.cell(u) -- one pixel of HUD art
   local hl, ht = v.L / 2, v.T / 2
   local xL, yTop, xR, yBot = hud.bottleExtent(u)
   xL, yTop, xR, yBot = cx + xL, cy + yTop, cx + xR, cy + yBot
   -- The body's own vertical span (for the level), without the neck
   local bTop, bBot = cy - (hl + ht) * K * u, cy + (hl + ht) * K * u
 
-  local PULSE_R = 9 -- how far (units) a pulse spreads from the glass before it fades
+  local PULSE_R, PULSE_FRAMES = 5, 24 -- how far (units) a pulse spreads from the glass before it fades, and its frames
   local pulsePhase = (now * (0.9 + alarm)) % 1
-  local pulseR = pulsePhase * PULSE_R
-  local margin = alarm > 0 and (PULSE_R + 2) * u or 0
+  local margin = 0
   local chips, scratches, cracks, hole = {}, {}, {}, nil
   if stage >= 1 then
     -- Dings: small bites out of the glass's edge; and scratches
@@ -256,16 +259,6 @@ function hud.drawBottle(player, u, cx, cy)
       local px, py = gx * c + c / 2, gy * c + c / 2
       local state, a, b = probe(px, py)
       local dHole = hole and math.sqrt((a - hole[1]) ^ 2 + (b - hole[2]) ^ 2) or 99
-      if state == 0 and alarm > 0 and under then
-        -- The pulse: a red ring spreading out from the glass, thinning as it goes
-        local aa = math.max(-hl - v.NL, math.min(hl, a))
-        local w = halfWidth(v, aa) or 0
-        local d = math.sqrt(math.max(0, math.abs(b) - w) ^ 2 + (a - aa) ^ 2)
-        if d > 0 and d > pulseR - 1.1 and d <= pulseR + 0.4 then
-          love.graphics.setColor(1, 0.12, 0.12, (1 - pulsePhase) ^ 1.5 * 0.5 * alarm / 0.6)
-          love.graphics.rectangle("fill", gx * c, gy * c, c, c)
-        end
-      end
       if state == 1 and dHole < holeR then
         -- (shot clean through: nothing here at all)
       elseif state == 1 then
@@ -390,13 +383,9 @@ function hud.drawBottle(player, u, cx, cy)
   end
   end
 
-  if alarm > 0 then
-    -- (shaking and pulsing: drawn cell by cell every frame, as it moves)
-    glassCells(true, true, true)
-    scratchLayer()
-  else
+  do
     -- The glass, its scorch and its cracks only change with the damage, the size and the place: they are
-    -- drawn once into two canvases, and each frame just the blood is drawn between them, a run of cells
+    -- drawn once into canvases, and each frame just the blood is drawn between them, a run of cells
     -- per row
     local gx0, gy0 = math.floor((xL - margin) / c), math.floor((yTop - margin) / c)
     local gx1, gy1 = math.ceil((xR + margin) / c), math.ceil((yBot + margin) / c)
@@ -444,6 +433,67 @@ function hud.drawBottle(player, u, cx, cy)
     local cache = glassCache
     local setColor = love.graphics.setColor
     local rect = love.graphics.rectangle
+    if alarm > 0 then
+      -- The pulse: a red copy of the bottle's own outline spreading out from the glass and thinning as it
+      -- goes. Its frames are drawn once (same shape, grown) and just picked from each frame.
+      local pc = pulseCache
+      if not pc or pc.key ~= cache then
+        pc = { key = cache, frames = {} }
+        local pm = (PULSE_R + 2) * u
+        local px0, py0 = math.floor((xL - pm) / c), math.floor((yTop - pm) / c)
+        local px1, py1 = math.ceil((xR + pm) / c), math.ceil((yBot + pm) / c)
+        pc.x, pc.y = px0 * c, py0 * c
+        local function insideGrown(a, b, r)
+          local ap = a > 0 and math.max(0, a - r) or math.min(0, a + r)
+          local w = halfWidth(v, ap)
+          return w ~= nil and math.abs(b) <= w + r
+        end
+        -- How far out each cell lies from the glass (the least growth of the outline that covers it), once
+        local dist = {}
+        for gx = px0, px1 do
+          for gy = py0, py1 do
+            local state, a, b = probe(gx * c + c / 2, gy * c + c / 2)
+            if state == 0 then
+              for r = 0, PULSE_R + 3, 0.25 do
+                if insideGrown(a, b, r) then
+                  dist[#dist + 1] = { gx, gy, r }
+                  break
+                end
+              end
+            end
+          end
+        end
+        love.graphics.push("all")
+        love.graphics.origin()
+        love.graphics.translate(-pc.x, -pc.y)
+        for f = 1, PULSE_FRAMES do
+          local r = (f - 0.5) / PULSE_FRAMES * PULSE_R
+          local canvas = love.graphics.newCanvas((px1 - px0 + 1) * c, (py1 - py0 + 1) * c)
+          love.graphics.setCanvas(canvas)
+          love.graphics.clear(0, 0, 0, 0)
+          -- a soft ring: each cell's strength falls off smoothly with its distance from the ring's radius
+          for _, cell in ipairs(dist) do
+            local k = (cell[3] - r) / 1.5
+            local al = math.exp(-k * k)
+            if al > 0.04 then
+              hud.rawSetColor(1, 1, 1, al)
+              love.graphics.rectangle("fill", cell[1] * c, cell[2] * c, c, c)
+            end
+          end
+          pc.frames[f] = canvas
+        end
+        love.graphics.pop()
+        pulseCache = pc
+      end
+      -- (the pulse is spent by 70% of its cycle and the rest is dark, before the next begins)
+      local life = math.min(1, pulsePhase / 0.7)
+      local eased = 1 - (1 - life) ^ 3 -- (fast out of the glass, slowing as it fades)
+      local f = math.min(PULSE_FRAMES, math.floor(eased * PULSE_FRAMES) + 1)
+      if life < 1 then
+        setColor(1, 0.12, 0.12, (1 - life) ^ 1.5 * 0.3 * alarm / 0.6)
+        love.graphics.draw(pc.frames[f], pc.x, pc.y)
+      end
+    end
     love.graphics.push("all")
     love.graphics.setBlendMode("alpha", "premultiplied")
     hud.rawSetColor(1, 1, 1, 1)
@@ -592,6 +642,7 @@ function hud.drawBottle(player, u, cx, cy)
       love.graphics.rectangle("fill", math.floor(d.x / c) * c, math.floor(d.y / c) * c, c, c)
     end
   end
+  love.graphics.pop()
   return xL, yTop, xR, yBot
 end
 

@@ -52,6 +52,7 @@ local MIST = 0.017 -- peak strength of the mist hanging in open cave air
 local LIGHT_SOURCE = [[
 varying vec3 vLight; // the light's x, y and radius, in canvas pixels
 varying vec3 vTint;
+varying float vFlat; // 1: this light casts no shadows at all (see lighting.add)
 varying vec2 vPos;
 
 #ifdef VERTEX
@@ -60,6 +61,7 @@ attribute vec4 LightB;
 vec4 position(mat4 transform_projection, vec4 vertex_position) {
   vLight = LightA.xyz;
   vTint = LightB.rgb;
+  vFlat = LightB.a;
   vPos = vertex_position.xy;
   return transform_projection * vertex_position;
 }
@@ -96,7 +98,7 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
       objectGate = 1.0;
     }
   }
-  if (dist > 6.0) {
+  if (dist > 6.0 && vFlat < 0.5) {
     float occ = 0.0;
     // Each pixel starts its ray at a different offset, so the shadow edges
     // come out as fine grain instead of wide bands
@@ -327,6 +329,7 @@ end
 -- from the lights too, like the creatures: it is drawn into the occluder pass (see game.draw), a little
 -- softer than rock. lighting.occluderScale sets how solid the shapes drawn next are (1 = as solid as drawn).
 lighting.objectShadows = true
+lighting.spriteShadows = true
 lighting.OBJECT_SHADOW = 0.7
 -- (what is drawn while it is set goes into the objects' channel of the mask: see the light shader)
 function lighting.occluderScale(v)
@@ -452,7 +455,8 @@ function lighting.begin(ambientColor)
 end
 
 -- Adds a light in world coordinates. intensity scales the colour.
-function lighting.add(x, y, radius, r, g, b, intensity)
+-- noShadow: the light casts no shadows at all (the sun, shining down a shaft from the background)
+function lighting.add(x, y, radius, r, g, b, intensity, noShadow)
   intensity = intensity or 1
   local n = #lights + 1
   local l = lightPool[n]
@@ -462,6 +466,7 @@ function lighting.add(x, y, radius, r, g, b, intensity)
   end
   l.x, l.y, l.radius = x, y, radius
   l.r, l.g, l.b = r * intensity, g * intensity, b * intensity
+  l.flat = noShadow and 1 or 0
   lights[n] = l
 end
 
@@ -476,7 +481,7 @@ local function lightVert(verts, k, x, y, lx, ly, radius, l)
     verts[k] = v
   end
   v[1], v[2], v[3], v[4], v[5] = x, y, lx, ly, radius
-  v[7], v[8], v[9] = l.r, l.g, l.b
+  v[7], v[8], v[9], v[10] = l.r, l.g, l.b, l.flat or 0
 end
 
 -- Draws a pass of lights (the shader set, its power, leak and gain sent) onto
@@ -528,7 +533,7 @@ function lighting.render(camX, camY, drawTerrain, drawOccluders)
     love.graphics.translate(-camX, -camY)
     love.graphics.setShader(maskShader)
     drawTerrain()
-    if drawOccluders then
+    if drawOccluders and lighting.spriteShadows then
       -- Creatures cast soft shadows too: partial blockers, never darker than rock
       love.graphics.setBlendMode("lighten", "premultiplied")
       if creatureMaskShader then

@@ -210,6 +210,8 @@ local COLORS = {
 }
 
 
+anim.COLORS = COLORS
+
 function anim.new()
   return {
     phase = 0, -- walk cycle, advanced by distance walked
@@ -382,8 +384,8 @@ function anim.onDeath(player, dir)
   a.deathDir = dir
   a.gone = false
   local _, _, _, _, neckX, neckY = torso(player)
-  local hx, hy = neckX, neckY - 4
-  effects.casing(hx, hy, dir * (40 + love.math.random() * 40), -(120 + love.math.random() * 50), 5, COLORS.hat)
+  -- He drops into a ragdoll (src.ragdoll) that tumbles over the ground; the gun still falls away from his hand
+  require("src.ragdoll").start(player, dir, 1)
   if player.gun then
     effects.casing(neckX + dir * 4, neckY + 3, dir * (20 + love.math.random() * 30), -50, 4, COLORS.gunMid)
   end
@@ -392,8 +394,8 @@ end
 -- The fallen hunter: a thud when he lands, then (after a beat) he bursts apart
 function anim.updateDeath(player, dt)
   local a = player.anim
-  if not a.deathT then
-    return
+  if not a.deathT or player.ragdoll then
+    return -- (the ragdoll does the falling: nothing topples or bursts)
   end
   local before = a.deathT
   a.deathT = a.deathT + dt

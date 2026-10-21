@@ -29,7 +29,11 @@ local OX = 700
 local EV_X0 = OX + 1024
 local EV_STEP = 200
 local EV_KINDS = { "carnival", "gambler", "tinker", "shrine", "cavein", "hunt" }
-local WIDTH, HEIGHT = EV_X0 + 60 + #EV_KINDS * EV_STEP + 60, 576
+-- Past the events row: the perk gallery, every perk lying in two rows (floor and a platform above it)
+local PERK_X0 = EV_X0 + 60 + #EV_KINDS * EV_STEP + 40
+local PERK_STEP = 18
+local PERK_COUNT = 31 -- (perks.order)
+local WIDTH, HEIGHT = PERK_X0 + math.ceil(PERK_COUNT / 2) * PERK_STEP + 80, 576
 local BORDER = 10
 local FLOOR_Y = 499
 
@@ -109,6 +113,10 @@ function testroom.build()
     world:fillRect(t.x0, t.y, t.x1, t.y + 5, ROCK)
     world:fillRect(t.x0, t.y - 2, t.x1, t.y - 1, DIRT)
   end
+
+  -- The perk gallery's platform
+  world:fillRect(PERK_X0 - 10, FLOOR_Y - 46, WIDTH - BORDER - 40, FLOOR_Y - 41, ROCK)
+  world:fillRect(PERK_X0 - 10, FLOOR_Y - 48, WIDTH - BORDER - 40, FLOOR_Y - 47, DIRT)
 
   world:repaintAll()
 
@@ -192,6 +200,14 @@ function testroom.populate(world)
   for i, kind in ipairs(EV_KINDS) do
     local x = EV_X0 + 60 + (i - 0.5) * EV_STEP
     randevents.addStand(kind, x, world:findGround(x, BORDER + 160), world)
+  end
+
+  -- The perk gallery: every perk, lying in two rows at the far end
+  for i, id in ipairs(require("src.perks").order) do
+    local col = math.ceil(i / 2)
+    local x = PERK_X0 + (col - 1) * PERK_STEP
+    local y = (i % 2 == 1) and (FLOOR_Y - 12) or (FLOOR_Y - 60)
+    pickups.dropPerk(x, y, id, 0, 0)
   end
 
   -- A DPS dummy, like the one in every shop

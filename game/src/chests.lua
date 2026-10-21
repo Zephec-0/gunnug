@@ -53,7 +53,7 @@ end
 
 -- E: opens the nearest chest. Returns true if one was opened.
 function chests.interact(player)
-  local c = chests.nearest(player)
+  local c = player.center and chests.nearest(player) or (not player.center and player or nil) -- (or a chest itself: see checkSupport)
   if not c then
     return false
   end
@@ -77,6 +77,30 @@ function chests.interact(player)
     effects.particle(c.x + (love.math.random() - 0.5) * 8, c.y - H, (love.math.random() - 0.5) * 70, -40 - love.math.random() * 70, 0.5, { 1, 0.85, 0.4 }, 300, true)
   end
   return true
+end
+
+-- A chest whose floor has been dug away from under it breaks open (spilling what it held) and is gone
+function chests.checkSupport(world, px, py)
+  for i = #list, 1, -1 do
+    local c = list[i]
+    if not c.locked and not c.vault and math.abs(c.x - px) < 420 and math.abs(c.y - py) < 420 then
+      local ok = false
+      for _, dx in ipairs({ -5, 0, 5 }) do
+        for o = 0, 2 do
+          ok = ok or world:isSolid(math.floor(c.x) + dx, math.floor(c.y) + o)
+        end
+      end
+      if not ok then
+        if not c.opened then
+          chests.interact(c) -- (spills its loot as if opened)
+        end
+        for _ = 1, 10 do
+          effects.particle(c.x + (love.math.random() - 0.5) * 12, c.y - 4, (love.math.random() - 0.5) * 70, -20 - love.math.random() * 40, 0.6, { 0.36, 0.25, 0.17 }, 320)
+        end
+        table.remove(list, i)
+      end
+    end
+  end
 end
 
 function chests.update(dt)

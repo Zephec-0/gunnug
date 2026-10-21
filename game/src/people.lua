@@ -76,8 +76,9 @@ function people.has(id)
   return LOOKS[id] ~= nil
 end
 
--- A figure with feet at (x, g), facing +1 or -1. pose: "stand" or "work"
--- (the front hand busy; k: 0..1 through a cycle). alpha fades it.
+-- A figure with feet at (x, g), facing +1 or -1. pose: "stand", "work" (the front hand busy),
+-- "walk" (legs swing) or "drink" (crouched, scooping water to the mouth); k: 0..1 through a cycle.
+-- alpha fades it.
 function people.draw(id, x, g, facing, pose, k, alpha)
   local L = LOOKS[id]
   if not L then
@@ -90,12 +91,24 @@ function people.draw(id, x, g, facing, pose, k, alpha)
   local function r(c, dx, dy, w, h)
     R(c, dx, dy, w, h, a)
   end
-  r(BOOT, -3, -2, 3, 2)
-  r(BOOT, 1, -2, 3, 2)
-  r(L.trouser, -3, -7, 2, 5)
-  r(L.trouser, 1, -7, 2, 5)
+  local drink = pose == "drink"
+  local stride = pose == "walk" and math.floor((k or 0) * 4) % 2 or 0
+  if drink then
+    -- crouched at the water's edge: knees up, the whole body lower and a little forward
+    r(BOOT, -3, -2, 3, 2)
+    r(BOOT, 2, -2, 3, 2)
+    r(L.trouser, -3, -5, 2, 3)
+    r(L.trouser, 3, -5, 2, 3)
+    r(L.trouser, -3, -6, 7, 2)
+    love.graphics.translate(2, 3)
+  else
+    r(BOOT, -3 + stride, -2, 3, 2)
+    r(BOOT, 1 - stride, -2, 3, 2)
+    r(L.trouser, -3 + stride, -7, 2, 5)
+    r(L.trouser, 1 - stride, -7, 2, 5)
+  end
   -- a long coat reaches down over the trousers
-  if L.coat then
+  if L.coat and not drink then
     r(L.shirt, -4, -8, 8, 6)
     r(L.shirtD, -4, -8, 1, 6)
   end
@@ -106,8 +119,21 @@ function people.draw(id, x, g, facing, pose, k, alpha)
   -- front arm and what it holds
   local bob = (pose == "work") and math.floor(math.sin(k * math.pi * 2) + 0.5) or 0
   r(L.shirt, 3, -13, 1, 3)
-  r(L.skin, 3, -10 + bob, 2, 1)
-  if L.prop == "flask" then
+  if drink then
+    -- a cupped hand dips down to the water and comes up to the mouth
+    local lift = math.max(0, math.sin((k or 0) * math.pi * 2))
+    local hy = -8 - math.floor(lift * 7 + 0.5)
+    r(L.shirt, 3, -13, 1, math.max(1, hy + 15))
+    r(L.skin, 3, hy, 3, 2)
+    if lift > 0.4 then
+      r({ 0.55, 0.78, 0.95 }, 4, hy - 1, 1, 1) -- (water running off it)
+    end
+  else
+    r(L.skin, 3, -10 + bob, 2, 1)
+  end
+  if drink then
+    -- (no mug: his hands are full of water)
+  elseif L.prop == "flask" then
     r({ 0.60, 0.95, 0.70 }, 5, -12 + bob, 2, 3)
     r({ 0.85, 0.90, 0.85 }, 5, -13 + bob, 2, 1)
   elseif L.prop == "scroll" then

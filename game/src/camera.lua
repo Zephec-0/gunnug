@@ -19,6 +19,7 @@ local focus -- { x, y }: a point (a boss) the view looks toward as well as at th
 local limits = {} -- limits.top: the view's top edge never goes above this world y (the sky's roof)
 local kickX, kickY = 0, 0
 local trauma = 0
+local swayX, swayY = 0, 0 -- a drunk hunter's wandering view
 local clock = 0
 
 local target0
@@ -91,6 +92,11 @@ function camera.shake(amount)
   trauma = math.min(1, trauma + amount)
 end
 
+-- A steady drift of the drawn view (drunkenness); aiming still uses the steady camera
+function camera.setSway(x, y)
+  swayX, swayY = x, y
+end
+
 -- Whole-pixel offset so the low-res canvas stays crisp (steady: no kick or shake)
 function camera.baseOffset()
   return math.floor(camera.x + 0.5), math.floor(camera.y + 0.5)
@@ -101,7 +107,7 @@ function camera.offset()
   local s = trauma * trauma * MAX_SHAKE
   local sx = s * (math.sin(clock * 53.1) * 0.6 + math.sin(clock * 91.7 + 1.3) * 0.4)
   local sy = s * (math.sin(clock * 47.3 + 2.1) * 0.6 + math.sin(clock * 83.9) * 0.4)
-  return math.floor(camera.x + kickX + sx + 0.5), math.floor(camera.y + kickY + sy + 0.5)
+  return math.floor(camera.x + kickX + sx + swayX + 0.5), math.floor(camera.y + kickY + sy + swayY + 0.5)
 end
 
 return camera

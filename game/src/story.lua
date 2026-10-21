@@ -266,9 +266,28 @@ local function drawCairn(it)
   love.graphics.pop()
 end
 
+-- What is left lying on a floor that has been dug out from under it is gone with it
+function story.checkSupport(world, items, px, py)
+  for _, it in ipairs(items) do
+    if not it.gone and math.abs(it.x - px) < 420 and math.abs(it.y - py) < 420 then
+      local x, y, ok = math.floor(it.x), math.floor(it.y), false
+      for o = 0, 2 do
+        ok = ok or world:isSolid(x, y + o)
+      end
+      if not ok then
+        it.gone = true
+        local effects = require("src.effects")
+        for _ = 1, 6 do
+          effects.particle(it.x + (love.math.random() - 0.5) * 10, it.y - love.math.random() * 4, (love.math.random() - 0.5) * 50, -10 - love.math.random() * 30, 0.6, { 0.55, 0.5, 0.45 }, 320)
+        end
+      end
+    end
+  end
+end
+
 function story.draw(items, view)
   for _, it in ipairs(items) do
-    if inView(view, it, 40) then
+    if not it.gone and inView(view, it, 40) then
       if it.kind == "fallen" then
         drawFallen(it)
       elseif it.kind == "camp" then
@@ -288,7 +307,7 @@ end
 function story.drawEmissive(items, view)
   local t = love.timer.getTime()
   for _, it in ipairs(items) do
-    if inView(view, it, 30) then
+    if not it.gone and inView(view, it, 30) then
       if it.kind == "camp" then
         -- One last ember in the ashes
         local f = it.flip and -1 or 1
@@ -313,7 +332,7 @@ end
 function story.addLights(lighting, items, view)
   local t = love.timer.getTime()
   for _, it in ipairs(items) do
-    if inView(view, it, 100) then
+    if not it.gone and inView(view, it, 100) then
       if it.kind == "ritual" then
         for i = 0, 4 do
           local a = (i / 5) * math.pi * 2 + it.seed

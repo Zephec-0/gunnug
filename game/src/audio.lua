@@ -526,6 +526,23 @@ local DEFS = {
     end,
     volume = 0.5,
   },
+  -- A small gulp: two quick throat clicks, each a short pitch dip
+  gulp = {
+    gen = function()
+      return synth(0.34, function(t, p)
+        local v = 0
+        for _, st in ipairs({ 0, 0.15 }) do
+          local lt = t - st
+          if lt > 0 and lt < 0.12 then
+            local f = 210 - lt * 900
+            v = v + math.sin(lt * f * TAU * 3) * math.exp(-lt * 28) * 0.7 + noise() * 0.12 * math.exp(-lt * 40)
+          end
+        end
+        return v
+      end)
+    end,
+    volume = 0.55,
+  },
   deny = {
     gen = function()
       return synth(0.2, function(t, p)

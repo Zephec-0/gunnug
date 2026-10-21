@@ -636,14 +636,60 @@ local function drawBar(inv, u)
   drawFuser(inv, x + 5 * u, itemY, u, fusable, pip)
   -- The perks taken this run, as small badges under the bar
   local list = perks.list()
+  local px, py = margin, margin + WEAPON_SIZE * u + 3 * u
+  local size = 9 * u
   if #list > 0 then
-    local px, py = margin, margin + WEAPON_SIZE * u + 3 * u
-    local size = 9 * u
     for i, id in ipairs(list) do
       perkCache[id] = perkCache[id] or perks.new(id)
       drawSlot(inv, { kind = "perk", index = i, perk = perkCache[id] }, px, py, size, u, false)
       px = px + size + u
     end
+  end
+  -- What the Bartender poured sits in the same row: a bottle in its colour, how many, and its time running out
+  local mx, my = love.mouse.getPosition()
+  local hover
+  for _, d in ipairs(require("src.meta").drinksActive()) do
+    love.graphics.setColor(0.06, 0.05, 0.08, 0.85)
+    love.graphics.rectangle("fill", px, py, size, size, u, u)
+    love.graphics.setColor(d.color[1] * 0.7, d.color[2] * 0.7, d.color[3] * 0.7, 0.9)
+    love.graphics.setLineWidth(math.max(1, u * 0.4))
+    love.graphics.rectangle("line", px, py, size, size, u, u)
+    local s = math.max(1, math.floor(u * 0.75))
+    local bx, by = px + math.floor((size - 5 * s) / 2), py + math.floor(u * 1.2)
+    love.graphics.setColor(0.7, 0.76, 0.82)
+    love.graphics.rectangle("fill", bx + s, by, 3 * s, s)
+    love.graphics.rectangle("fill", bx, by + 2 * s, 5 * s, 5 * s)
+    love.graphics.setColor(d.color[1], d.color[2], d.color[3])
+    love.graphics.rectangle("fill", bx + s, by + s, s, s)
+    love.graphics.rectangle("fill", bx + s, by + 3 * s, 3 * s, 3 * s)
+    love.graphics.setColor(1, 1, 1, 0.5)
+    love.graphics.rectangle("fill", bx + s, by + 3 * s, s, 2 * s)
+    local frac = math.max(0, math.min(1, d.left / d.total))
+    love.graphics.setColor(0.15, 0.13, 0.18)
+    love.graphics.rectangle("fill", px + u, py + size - 2 * u, size - 2 * u, math.max(1, u))
+    love.graphics.setColor(d.color[1], d.color[2], d.color[3], (d.left < 20 and math.floor(love.timer.getTime() * 3) % 2 == 0) and 0.4 or 1)
+    love.graphics.rectangle("fill", px + u, py + size - 2 * u, (size - 2 * u) * frac, math.max(1, u))
+    if d.n > 1 then
+      love.graphics.setFont(require("src.hud").font(u * 0.8))
+      love.graphics.setColor(0, 0, 0, 0.9)
+      love.graphics.print("x" .. d.n, px + size - 5 * u + 1, py + 1)
+      love.graphics.setColor(1, 0.95, 0.8)
+      love.graphics.print("x" .. d.n, px + size - 5 * u, py)
+    end
+    if mx >= px and mx <= px + size and my >= py and my <= py + size then
+      hover = { d = d, x = px, y = py + size + 2 * u }
+    end
+    px = px + size + u
+  end
+  if hover then
+    local d = hover.d
+    local text = d.name .. (d.n > 1 and (" x" .. d.n) or "") .. ": " .. d.desc .. (d.n > 1 and " (stacked)" or "") .. string.format("  %d:%02d", math.floor(d.left / 60), math.floor(d.left % 60))
+    local f = require("src.hud").font(u * 0.9)
+    love.graphics.setFont(f)
+    love.graphics.setColor(0, 0, 0, 0.8)
+    love.graphics.rectangle("fill", hover.x, hover.y, f:getWidth(text) + 4 * u, f:getHeight() + 2 * u, u, u)
+    love.graphics.setColor(1, 0.92, 0.75)
+    love.graphics.print(text, hover.x + 2 * u, hover.y + u)
   end
 end
 

@@ -240,6 +240,7 @@ local function snapshotRun()
     y = b.y,
     hp = player.hp,
     time = os.time(),
+    drinks = meta.drinkSnapshot(),
     inv = {
       gold = inv.gold,
       dynamite = inv.dynamite or 0,
@@ -413,6 +414,7 @@ local function newRun()
   game.enter("overworld")
   if playing then
     save.stat("runs")
+    meta.countReset()
     bounties.refresh()
     meta.beginRun()
     inv.flasks = meta.startFlasks()
@@ -433,6 +435,10 @@ local seenTimer = 0
 local function track(area)
   if not save.profile() or not inv then
     return
+  end
+  if player and not player.dead then
+    local cx, cy = player:center()
+    require("src.chart").update(1 / 60, cx, cy) -- (the surface places found are kept on the profile)
   end
   for i = 1, inventory.WEAPON_SLOTS do
     local gun = inv.weapons[i]
@@ -627,6 +633,12 @@ function game.load()
       effects.popup(cx, player.body.y - 14, "Home", { 0.7, 0.95, 1 })
     end
   end
+  -- A drink bought or run out: max health may have changed
+  meta.onDrink = function()
+    if player then
+      player:refreshMaxHp()
+    end
+  end
   -- A flask or dynamite upgrade is handed over the moment it is bought
   meta.onBought = function(id)
     if inv and id == "flask" then
@@ -721,6 +733,7 @@ function game.menuAction(action, arg)
       itembar.toggle()
     end
     meta.beginRun()
+    meta.drinkRestore(run.drinks)
     inv = inventoryFrom(run)
     lastGold = inv.gold
     save.clearRun(arg) -- (used up: the run is saved again by saving and quitting again)
@@ -735,6 +748,38 @@ function game.menuAction(action, arg)
       effects.popup(px, py - 14, why or "Can't pay that", { 0.9, 0.5, 0.5 })
       audio.play("deny")
     end
+  elseif action == "buygun" then
+    -- The Gunsmith's one gun a run: paid in gold, always a B-grade roll, handed over at the hunter's feet
+    local price
+    for _, g in ipairs(meta.GUN_PRICES) do
+      if g[1] == arg then
+        price = g[2]
+      end
+    end
+    if price and inv and player and not meta.gunBought() and meta.isUnlocked("weapon", arg) and inv.gold >= price then
+      local gunInfo = require("src.gunInfo")
+      local gun
+      for _ = 1, 300 do
+        gun = guns.generate(arg, nil, 0.3)
+        if gunInfo.gradeIndex(gun) == 4 then
+          break
+        end
+      end
+      inv.gold = inv.gold - price
+      lastGold = inv.gold -- (not counted as earned)
+      meta.markGunBought()
+      local px, py = player:center()
+      pickups.dropWeapon(px, py - 6, gun, player.facing * 30, -60)
+    end
+  elseif action == "passout" then
+    -- Ten drinks: out cold, and the run resets
+    menu.close()
+    game.passT = 0.001
+    if player and not player.limp and not player.dead then
+      player.limp = true
+      require("src.ragdoll").start(player, player.facing or 1, 0.35) -- (he crumples and falls over)
+    end
+    hud.showBanner("Passed Out", "Ten drinks was one too many")
   elseif action == "refresh" then
     if player then
       player:refreshMaxHp() -- (a mounted trophy may have changed it)
@@ -971,6 +1016,34 @@ function game.update(dt)
   mouseVX, mouseVY = render.toVirtual(love.mouse.getPosition())
   local camX, camY = camera.baseOffset()
   local aimX, aimY = mouseVX + camX, mouseVY + camY
+
+  -- The Bartender's drinks wear off with time spent underground
+  if playing and not player.dead and underground > 0.3 then
+    meta.drinkTick(dt)
+  end
+  -- Drunk: the aim wanders far from the mouse and the view drifts, worse with every drink; ten pass him out
+  local drunk = playing and not player.dead and meta.drunkness() or 0
+  if drunk > 0 then
+    game.drunkClock = (game.drunkClock or 0) + dt
+    local c = game.drunkClock
+    local amp = 28 + drunk * 240 -- (a drunk's aim: far off the mouse, and wilder with every drink)
+    aimX = aimX + amp * (0.6 * math.sin(c * 1.3) + 0.4 * math.sin(c * 2.9 + 1)) + (love.math.random() - 0.5) * amp * 0.3
+    aimY = aimY + amp * (0.6 * math.sin(c * 1.1 + 2) + 0.4 * math.sin(c * 3.3)) + (love.math.random() - 0.5) * amp * 0.3
+    local sway = 8 + drunk * 52
+    camera.setSway(sway * (math.sin(c * 0.8) * 0.7 + math.sin(c * 1.9 + 1) * 0.3), sway * (math.sin(c * 0.7 + 1.5) * 0.7 + math.sin(c * 2.3) * 0.3))
+  else
+    camera.setSway(0, 0)
+  end
+  input.tick(dt, drunk)
+  if playing and (game.passT or 0) > 0 then
+    game.passT = game.passT + dt -- (seconds since he passed out; kept on game, as game.update is at Lua's upvalue limit)
+    restartFade = math.min(1, game.passT / 1.5)
+    if game.passT >= 2.2 then
+      game.passT, restartFade = 0, 0
+      newRun()
+      return
+    end
+  end
 
   -- A dead hunter stays where he fell until the run is restarted (R)
   if not player.dead then
@@ -1347,6 +1420,8 @@ function game.keypressed(key)
   elseif input.is("map", key) and not player.dead then
     if meta.tier("survey") > 0 then
       menu.open("map")
+    elseif meta.atCamp("cartographer") then
+      menu.open("chart")
     else
       local px, py = player:center()
       effects.popup(px, py - 14, "No survey map", { 0.8, 0.8, 0.85 })

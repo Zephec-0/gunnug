@@ -1653,7 +1653,7 @@ function cavegen.generate(world, area, seed, tick)
     end
     for _, sp in ipairs(mine.supports) do
       if sp.lantern and sp.state ~= "fallen" then
-        mine.lamps[#mine.lamps + 1] = { x = sp.x + sp.gap / 2, y = sp.c + 11, hung = true }
+        mine.lamps[#mine.lamps + 1] = { x = sp.x + sp.gap / 2, y = sp.c + 11, hung = true, support = sp }
       end
     end
 

@@ -257,3 +257,33 @@ Check items off as they land; append new ones at the bottom.
 - [x] Not restored (respawn/reset): terrain changes, enemies (slain bosses come back), pickups, shop stock, opened chests/broken props, map chart, random events; the hunter is moved to open ground if he stood in his own hole
 - [x] The saved run is used up on resume and cleared on death, restart, new run on the slot, slot delete (quitting saves it instead); corrupt, old or foreign-version files read as "no saved run"
 - [ ] Maybe: remember slain bosses (and skip their respawn), keep the map chart, save broken terrain as a diff
+
+## Batch 2026-10-21 (headless-tested: loads, camp page, bartender pond flow, support checks, bottle pulse frames; not played)
+- [x] Menu cursor light no longer lags the cursor (read at draw time, no smoothing)
+- [x] Mine scenery (rails, shoring, post/hung lamps, skeletons, pickaxes), story scenes and non-vault chests vanish when the ground under them is dug away (hung lamps when their ceiling or timber goes; breaking a lamp spills oil). Also fixed blasts never breaking lamps (string vs number grid key)
+- [x] Low-health bottle: shake is a whole-cell offset and the pulse is pre-drawn frames of the bottle's own outline, so the cached glass is used (1.36 ms -> 0.08 ms of CPU per frame)
+- [x] The first area is built at 8-12 ms a frame from the start of a run (title screen already did it), so entering the shaft no longer freezes for seconds
+- [x] Floating water: fluids.clear never reset blockVer/runCache (declared below it, so clear assigned globals): water cached from the previous run was drawn in the new world. Fixed
+- [~] Sprites no longer cast or take shadows from lights (lighting.spriteShadows = false, litSprites = false), a test; dev panel toggle "Sprites cast shadows (test)"
+- [x] Bartender: found drinking at the oasis pond after the 3rd death; talk to him, he walks off east and the saloon goes up once he is off screen (meta.bartenderAtPond / meetBartender)
+- [x] Bartender drinks (2 on the shelf, +2 per Back-Room Stock tier, 6 total), timed buffs bought with marks (wear off with underground time), HUD rows; upgrades Back-Room Stock, A Stiffer Pour, House Rules (house rules are locked until bought)
+- [ ] Rebalance NPC unlocks and weapon drops (see docs/unlocks.md for how they work now)
+
+## Batch 2026-10-21 b (headless-tested; not played)
+- [x] Bottle pulse: soft-edged ring following the bottle's shape, eased out (fast, then slowing)
+- [x] Sprite shadows back to normal; scenery lights (scene, props, chests, shop, npcs) are not shadowed by sprites (lighting.backgroundLights), rock still shadows them
+- [x] Bartender stays at the pond; saloon goes up once the pond and his lot are both off screen
+- [x] Resets (stats.resets) replace deaths for unlocks: Bartender/Apothecary/Cartographer/Gunsmith 1, Prospector 3
+- [x] Drink shelves with bottles, locked options hidden, gulp sound, stacking, drunk aim/view wander past 3, pass out at 10 (run resets); buffs shown beside perks
+- [x] Crossbow from the Sawbone, flare gun from the Cartographer (gifts; teachable once the giver is at camp); Sawbone moved to the lake's right edge
+
+## Batch 2026-10-21 c (released as 0.3.0; headless-loaded, not played)
+- [x] Drinks: bigger bottles, text spaced below the shelf, no tip; buffs halved (whiskey now +15% crit); drunk from the 3rd drink at double strength, lower jump, stumbling movement keys; passing out ragdolls
+- [x] Ragdoll (src/ragdoll.lua) on death and when passing out, instead of the topple-and-burst animation
+- [x] Gunsmith sells unlocked guns for gold, one per run, B-grade (shotgun 50, semiauto 80, flare 100, automatic 200, crossbow 200, gatling 300)
+- [x] NPC card prices centred on the card's height and kept clear of the text
+- [x] Prospector's Perk Shelf is a purchasable upgrade; perks shown as icons and picked onto the shelf
+- [x] Cartographer's chart (src/chart.lua): aged parchment map filled in as areas and surface places are found, kept on the profile (M opens it without the survey upgrade; buttons on his page and the survey map)
+- [x] No breakables in the camp except the crates by the tent; freed prisoners' cages are gone for good
+- [x] The sun's light casts no shadows (the blown-out shadow down the shaft); sprite shadows unchanged. Low-health pulse fainter, shorter, dies out before the next
+- [x] Test room: perk gallery at the far end (every perk)

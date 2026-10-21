@@ -95,8 +95,37 @@ function input.bind(id, slot, key)
   bindings[id][slot] = key or false
 end
 
+-- Drunk: the movement keys stumble. In a stumble the move and jump keys read as dropped (the hunter
+-- falters) or move/left swapped (he lurches the wrong way); how often and how long grows with `drunk` (0..1)
+local stumble = { left = 0, mode = "drop", wait = 0 }
+local OPPOSITE = { left = "right", right = "left" }
+
+function input.tick(dt, drunk)
+  if (drunk or 0) <= 0 then
+    stumble.left, stumble.wait = 0, 0
+    return
+  end
+  if stumble.left > 0 then
+    stumble.left = stumble.left - dt
+    return
+  end
+  stumble.wait = stumble.wait - dt
+  if stumble.wait <= 0 then
+    stumble.mode = love.math.random() < 0.55 and "drop" or "swap"
+    stumble.left = 0.2 + 0.5 * drunk * love.math.random()
+    stumble.wait = (1.1 - 0.8 * drunk) * (0.4 + love.math.random())
+  end
+end
+
 -- True while any key bound to the action is held
 function input.down(id)
+  if stumble.left > 0 then
+    if stumble.mode == "drop" and (id == "left" or id == "right" or id == "jump") then
+      return false
+    elseif stumble.mode == "swap" and OPPOSITE[id] then
+      id = OPPOSITE[id]
+    end
+  end
   local keys = bindings[id]
   if not keys then
     return false

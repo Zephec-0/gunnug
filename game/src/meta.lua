@@ -98,8 +98,8 @@ meta.PEOPLE.cartographer = {
 }
 meta.PEOPLE.bartender = {
   name = "The Bartender",
-  found = "Sets up camp after the first boss falls",
-  blurb = "Pick your poison for the next run: each house rule makes the dark worse, and pays more marks.",
+  found = "Drinking at the oasis pond once you have fallen three times",
+  blurb = "Drinks for the road down: each buff lasts a while. Later, house rules that make the dark worse and pay more marks.",
   greeting = {
     "First one's free. Second one's a monster.",
     "Back from the Queen? Then you can handle a stiffer drink.",
@@ -223,6 +223,13 @@ meta.UPGRADES = {
     costs = { 5, 10 },
   },
   {
+    id = "shelf",
+    npc = "prospector",
+    name = "Perk Shelf",
+    desc = "A shelf in his hut: keep one perk safe between runs, through death.",
+    costs = { 8 },
+  },
+  {
     id = "vigor",
     npc = "apothecary",
     name = "Vigor Tonic",
@@ -242,6 +249,27 @@ meta.UPGRADES = {
     name = "Survey Map",
     desc = "Press M for a map of everywhere you have been this run. A second tier marks the shops, bounty quarries and finds.",
     costs = { 6, 10 },
+  },
+  {
+    id = "cellar",
+    npc = "bartender",
+    name = "Back-Room Stock",
+    desc = "Two more drinks on the shelf per tier (two to start, six in all).",
+    costs = { 4, 8 },
+  },
+  {
+    id = "pour",
+    npc = "bartender",
+    name = "A Stiffer Pour",
+    desc = "Every drink lasts 50% longer per tier.",
+    costs = { 5, 10 },
+  },
+  {
+    id = "houserules",
+    npc = "bartender",
+    name = "House Rules",
+    desc = "Unlocks the switches that make a run harder and pay extra marks.",
+    costs = { 6 },
   },
   {
     id = "holster",
@@ -293,8 +321,9 @@ function meta.isSeen(category, id, p)
   if (p.found[category] and p.found[category][id] or 0) > 0 then
     return true
   end
-  if category == "weapon" and meta.SPECIAL_GUNS[id] == "gunsmith" and p.camp.gunsmith then
-    return true -- (he handed one over when he was freed, so he can make it)
+  local giver = category == "weapon" and meta.SPECIAL_GUNS[id]
+  if giver and giver ~= "queen" and p.camp[giver] then
+    return true -- (they handed one over when they were freed, so the Gunsmith can make it)
   end
   return p.seen[category] ~= nil and p.seen[category][id] == true
 end
@@ -375,7 +404,9 @@ end
 -- joins them to the pool): each has one source, the first time
 --   automatic  the Gunsmith's gift, the first time he is freed
 --   gatling    the Queen's prize
-meta.SPECIAL_GUNS = { automatic = "gunsmith", gatling = "queen" }
+--   crossbow   the Sawbone's gift, when he is woken
+--   flare      the Cartographer's gift, when she is freed
+meta.SPECIAL_GUNS = { automatic = "gunsmith", gatling = "queen", crossbow = "sawbone", flare = "cartographer" }
 
 -- No boss has been slain yet on this profile (checked as the first one drops its prize)
 function meta.firstBoss()
@@ -514,7 +545,7 @@ end
 
 function meta.canShelve(id)
   local def = require("src.perks").defs[id]
-  return def ~= nil and not def.gated and meta.bankedPerk() == nil
+  return def ~= nil and not def.gated and meta.bankedPerk() == nil and meta.tier("shelf") > 0
 end
 
 -- Puts the perk on the shelf (the caller takes it off the run). Returns true if it went.
@@ -559,21 +590,36 @@ end
 
 -- The camp ----------------------------------------------------------------------------
 
--- How the camp and the dungeon open up, run by run (a new profile starts with
--- nothing but the site):
+-- How the camp and the dungeon open up, reset by reset (a "reset" is a run begun after another: a restart,
+-- or a new run after a death; a new profile starts with nothing but the site):
 --   first run          nobody to find, no elites
---   after one death    elites spawn; the Gunsmith and the Prospector can be found
---   after two deaths   the Apothecary and the Cartographer can be found
+--   after 1 reset      elites spawn; the Gunsmith, the Apothecary and the Cartographer can be found,
+--                      and the Bartender is at the oasis pond (once he has been talked to and the hunter
+--                      has left the pond and his lot, he sets up the saloon)
+--   after 3 resets     the Prospector can be found
 --   an elite slain, then a death: the bounty board goes up, and the
 --                      Taxidermist can be found
---   first boss slain   the Bartender sets up the saloon
-local function deaths()
+-- (a profile from before resets were counted uses its deaths)
+local function resets()
   local p = profile()
-  return p and (p.stats.deaths or 0) or 0
+  return p and (p.stats.resets or p.stats.deaths or 0) or 0
+end
+
+function meta.resets()
+  return resets()
+end
+
+-- A run begins after another (restart, or a new run after a death)
+function meta.countReset()
+  local p = profile()
+  if p then
+    p.stats.resets = resets() + 1
+    save.touch()
+  end
 end
 
 function meta.elitesOn()
-  return profile() == nil or deaths() >= 1
+  return profile() == nil or resets() >= 1
 end
 
 -- Called when a run ends in death: if an elite fell in the profile's life so far, the board goes up
@@ -590,7 +636,7 @@ function meta.boardOpen()
   if not p then
     return true
   end
-  return p.board == true or (meta.trophyTotal() > 0 and deaths() >= 1) -- (older saves: the same rule from what they have)
+  return p.board == true or (meta.trophyTotal() > 0 and resets() >= 1) -- (older saves: the same rule from what they have)
 end
 
 -- May this person's cage be there to find in the dungeon yet?
@@ -599,13 +645,33 @@ function meta.canFind(id)
   if not p then
     return true
   end
-  if id == "gunsmith" or id == "prospector" then
-    return deaths() >= 1
-  elseif id == "apothecary" or id == "cartographer" then
-    return deaths() >= 2
+  if id == "gunsmith" or id == "apothecary" or id == "cartographer" then
+    return resets() >= 1
+  elseif id == "prospector" then
+    return resets() >= 3
   elseif id == "taxidermist" then
     return meta.boardOpen()
   end
+  return true
+end
+
+-- The Bartender waits at the oasis pond from the first reset until he has set up camp
+meta.BARTENDER_RESETS = 1
+function meta.bartenderAtPond()
+  local p = profile()
+  return p ~= nil and p.camp.bartender ~= true and resets() >= meta.BARTENDER_RESETS
+end
+
+-- He has been talked to: the saloon goes up. Returns true the first time.
+function meta.meetBartender()
+  local p = profile()
+  if not p or p.camp.bartender then
+    return false
+  end
+  p.camp.bartender = true
+  save.touch()
+  meta.earn(meta.EARN.rescue, "The Bartender freed")
+  save.flush()
   return true
 end
 
@@ -613,9 +679,6 @@ function meta.atCamp(id)
   local p = profile()
   if p and id == "taxidermist" and p.camp.taxidermist ~= true then
     return next(p.mounted) ~= nil -- (older saves: he came with the first mount)
-  end
-  if p and id == "bartender" then
-    return (p.stats.bosses or 0) > 0 -- (and the first boss)
   end
   return p ~= nil and p.camp[id] == true
 end
@@ -700,14 +763,19 @@ end
 
 local activeRules = {} -- id -> true for this run (copied from the profile when a run starts)
 
+-- The house rules are a purchase (the Bartender's House Rules)
+function meta.rulesUnlocked()
+  return meta.tier("houserules") > 0
+end
+
 function meta.ruleOn(id)
   local p = profile()
-  return p ~= nil and p.rules[id] == true
+  return p ~= nil and p.rules[id] == true and meta.rulesUnlocked()
 end
 
 function meta.toggleRule(id)
   local p = profile()
-  if not p then
+  if not p or not meta.rulesUnlocked() then
     return
   end
   p.rules[id] = not p.rules[id] or nil
@@ -729,6 +797,150 @@ function meta.toggleLimb(id)
   p.limbs[id] = not p.limbs[id] or nil
   meta.mountsDirty = true
   save.touch()
+end
+
+-- Drinks --------------------------------------------------------------------------------
+
+-- The Bartender's drinks: bought with marks, each a buff for a while (underground time, so standing about
+-- in camp doesn't spend it). The first two are on the shelf; each Back-Room Stock tier adds two more.
+-- fx tables are like a perk's (see LIMB_MULT for which keys multiply).
+meta.DRINKS = {
+  { id = "whiskey", name = "Redeye Whiskey", desc = "Critical hits +15%", cost = 1, stock = 0, fx = { crit = 0.15 }, color = { 0.80, 0.42, 0.14 }, shape = "flask" },
+  { id = "lager", name = "Cold Lager", desc = "Mends 1 health per 5 s", cost = 1, stock = 0, fx = { regen = 0.2 }, color = { 0.92, 0.76, 0.26 }, shape = "bottle" },
+  { id = "stout", name = "Black Stout", desc = "+13 maximum health", cost = 2, stock = 1, fx = { maxHp = 13 }, color = { 0.26, 0.14, 0.10 }, shape = "bottle" },
+  { id = "gin", name = "Quickshot Gin", desc = "Fire rate +8%", cost = 2, stock = 1, fx = { fireDelay = 0.92 }, color = { 0.72, 0.88, 0.92 }, shape = "tall" },
+  { id = "cider", name = "Hopper's Cider", desc = "Jump +10%, move +5%", cost = 2, stock = 2, fx = { jump = 1.1, speed = 1.05 }, color = { 0.66, 0.78, 0.22 }, shape = "jug" },
+  { id = "mead", name = "Gold Rush Mead", desc = "+15% gold from everything", cost = 3, stock = 2, fx = { gold = 1.15 }, color = { 0.96, 0.62, 0.12 }, shape = "jug" },
+}
+local drinkById = {}
+for _, d in ipairs(meta.DRINKS) do
+  drinkById[d.id] = d
+end
+meta.DRINK_TIME = 300 -- seconds a drink lasts (a Stiffer Pour makes it longer)
+-- Drinking the same drink again stacks its buff (the time is only set back to full, not added to). Every drink
+-- in you counts: past DRUNK_FROM (so on the third) the hunter is drunk (aim and view wander, worse with each), and at PASS_OUT
+-- he passes out and the run resets.
+meta.DRUNK_FROM = 2
+meta.PASS_OUT = 10
+local drinks = {} -- id -> { left = seconds, n = how many }, for this run
+-- Called when a drink is bought or runs out (src.game refreshes max health)
+meta.onDrink = nil
+
+function meta.drinkTime()
+  return meta.DRINK_TIME * (1 + 0.5 * meta.tier("pour"))
+end
+
+-- Is it on the shelf yet (Back-Room Stock)?
+function meta.drinkStocked(d)
+  return meta.tier("cellar") >= d.stock
+end
+
+function meta.drinkLeft(id)
+  return drinks[id] and drinks[id].left
+end
+
+function meta.drinkCount(id)
+  return drinks[id] and drinks[id].n or 0
+end
+
+-- How many drinks are in him
+function meta.drinkLevel()
+  local n = 0
+  for _, d in pairs(drinks) do
+    n = n + d.n
+  end
+  return n
+end
+
+-- 0 until he has had DRUNK_FROM, then rising to 1 at the drink that passes him out
+function meta.drunkness()
+  local n = meta.drinkLevel()
+  if n <= meta.DRUNK_FROM then
+    return 0
+  end
+  return math.min(1, (n - meta.DRUNK_FROM) / (meta.PASS_OUT - meta.DRUNK_FROM))
+end
+
+function meta.passedOut()
+  return meta.drinkLevel() >= meta.PASS_OUT
+end
+
+-- Buys a drink: it is drunk at once; another of the same stacks its buff and sets the time back to full.
+-- Returns true if paid.
+function meta.buyDrink(id)
+  local d = drinkById[id]
+  if not d or not profile() or not meta.drinkStocked(d) or not spend(d.cost) then
+    return false
+  end
+  local cur = drinks[id]
+  drinks[id] = { left = meta.drinkTime(), n = (cur and cur.n or 0) + 1 }
+  meta.mountsDirty = true
+  if meta.onDrink then
+    meta.onDrink(id)
+  end
+  return true
+end
+
+-- Time passes for the drinks (underground time: the caller says how much)
+function meta.drinkTick(dt)
+  if next(drinks) == nil then
+    return
+  end
+  local ended
+  for id, d in pairs(drinks) do
+    d.left = d.left - dt
+    if d.left <= 0 then
+      drinks[id] = nil
+      ended = true
+    end
+  end
+  if ended then
+    meta.mountsDirty = true
+    if meta.onDrink then
+      meta.onDrink(nil)
+    end
+  end
+end
+
+-- What is being drunk, for the HUD: { { name, left, n, color }, ... } in shelf order
+function meta.drinksActive()
+  local out = {}
+  for _, d in ipairs(meta.DRINKS) do
+    local cur = drinks[d.id]
+    if cur then
+      out[#out + 1] = { name = d.name, desc = d.desc, left = cur.left, n = cur.n, id = d.id, color = d.color, total = meta.drinkTime() }
+    end
+  end
+  return out
+end
+
+-- A saved run keeps what was being drunk
+function meta.drinkSnapshot()
+  local out = {}
+  for id, d in pairs(drinks) do
+    out[id] = { left = d.left, n = d.n }
+  end
+  return out
+end
+
+function meta.drinkRestore(saved)
+  drinks = {}
+  for id, d in pairs(type(saved) == "table" and saved or {}) do
+    if drinkById[id] and type(d) == "table" and tonumber(d.left) and d.left > 0 then
+      drinks[id] = { left = tonumber(d.left), n = math.max(1, math.floor(tonumber(d.n) or 1)) }
+    end
+  end
+  meta.mountsDirty = true
+end
+
+-- The Gunsmith's stock: the guns he knows, sold for gold, one per run (always rolled as B-grade)
+meta.GUN_PRICES = { { "shotgun", 50 }, { "semiauto", 80 }, { "flare", 100 }, { "automatic", 200 }, { "crossbow", 200 }, { "gatling", 300 } }
+local gunBought = false -- this run's one gun
+function meta.gunBought()
+  return gunBought
+end
+function meta.markGunBought()
+  gunBought = true
 end
 
 -- The Sawbone's patching up: how much a heal of `frac` of max health restores
@@ -767,10 +979,12 @@ end
 
 function meta.beginRun()
   meta.mountsDirty = true
+  gunBought = false
+  drinks = {}
   activeRules = {}
   local p = profile()
   for _, r in ipairs(meta.RULES) do
-    if p and p.rules[r.id] then
+    if p and p.rules[r.id] and meta.rulesUnlocked() then
       activeRules[r.id] = true
     end
   end
@@ -830,6 +1044,20 @@ function meta.mountFx()
           end
         end
       end
+    end
+    -- what is being drunk
+    for id, cur in pairs(drinks) do
+      for k, v in pairs(drinkById[id].fx) do
+        if meta.LIMB_MULT[k] then
+          out[k] = (out[k] or 1) * v ^ cur.n -- (each drink of a kind stacks)
+        else
+          out[k] = (out[k] or 0) + v * cur.n
+        end
+      end
+    end
+    local drunk = meta.drunkness()
+    if drunk > 0 then
+      out.jump = (out.jump or 1) * (1 - 0.45 * drunk) -- (drunk: a stumbling, low jump)
     end
     for kind in pairs(p.mounted) do
       local m = meta.MOUNTS[kind]

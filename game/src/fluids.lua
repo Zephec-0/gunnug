@@ -86,6 +86,12 @@ local clock = 0
 -- 0..1: how deep in gas the hunter has been lately (tints the screen)
 fluids.exposure = 0
 
+-- (declared here, above fluids.clear, so that clear really resets them: they were once declared lower down,
+-- where clear's assignments only made globals, and the water cached from the last run was drawn on into the
+-- next one: pools floating in thin air where the new world has none)
+local blockVer = {}
+local runCache, runCacheCount = {}, 0
+
 function fluids.clear()
   gas, water, fire, smoke, vents, braziers, columns = {}, {}, {}, {}, {}, {}, {}
   fluids.gasDwell = 0
@@ -96,6 +102,7 @@ function fluids.clear()
   acidRows = {}
   dry, floodRows = {}, {}
   blockVer = {}
+  runCache, runCacheCount = {}, 0
   active, waterRows, gasRows = {}, {}, {}
   gasTimer, fireTimer, drownTimer = TICK, TICK, TICK
   breathPlayer = nil
@@ -132,7 +139,7 @@ end
 -- runs by it). Per stretch rather than per row, so water pouring through a gap only has its own part of
 -- each row worked out again, not the whole width of the view.
 local WATER_BLOCK = 64 -- (K and KOFF are multiples of it, so floor(k / WATER_BLOCK) names the stretch)
-local blockVer = {}
+-- (blockVer: see the top of the file)
 
 local function setWater(k, v)
   local bk = floor(k / WATER_BLOCK)
@@ -2250,8 +2257,7 @@ local surfacePoolA, surfacePoolB = {}, {} -- (their records, reused frame to fra
 -- water in that row or the one above it changes: its runs of cells, and the
 -- spans of those with open air above (the surface). Blocks of 256 cells.
 local BLOCK = WATER_BLOCK
-local runCache = {}
-local runCacheCount = 0
+-- (runCache, runCacheCount: see the top of the file)
 
 local aboveRow = {}
 local function rowBlock(gy, block)

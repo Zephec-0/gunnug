@@ -863,7 +863,13 @@ function catacombs.step(budget, px, py, spare)
   if py then
     i = needed(py, px, 3500)
     local least = 0.00075 -- (always a little, so a frame that is busy on its own still gets the areas built)
-    if not i then
+    if levels[1] and not levels[1].info then
+      -- The first area is where every run goes first: it is built at a steady pace from the moment the run
+      -- begins (a good slice of every frame, more as the hunter nears the shaft), so it is standing before he
+      -- gets there, not built on the spot when he steps in
+      i = 1
+      least = needed(py, px, 700) and 0.012 or 0.008
+    elseif not i then
       i = nextUnfinished()
       if i and levels[i].entry and py < firstArea.y0 and not catacombs.levelAt(py, px) then -- (not while inside one of them)
         least = 0.007 -- (an area entered from the surface, with the hunter still up there: a fair share of each frame)
@@ -1174,9 +1180,9 @@ function catacombs.spawnProps()
         -- right beside the neck that drops down into the caverns
         local x0, x1 = lv.entry.x - lv.entry.half + 6, lv.entry.x + lv.entry.half - 6
         local rim = math.min(world:findGround(x0, -400), world:findGround(x1, -400))
-        pr = { id = lv.theme.prisoner, x = lv.entry.x + 24, y = rim + 36, held = "float" }
+        pr = { id = lv.theme.prisoner, x = x1 - 16, y = rim + 36, held = "float" } -- (out toward the lake's right edge, not mid-water)
       end
-      if pr and require("src.meta").canFind(pr.id) then
+      if pr and require("src.meta").canFind(pr.id) and not require("src.meta").atCamp(pr.id) then -- (once freed, their cage is gone for good)
         npcs.spawnCage(pr.id, pr.x, pr.y, pr.held, pr.top)
         for _, dx in ipairs(pr.held == "float" and {} or { -46, 52 }) do
           local gx = pr.x + dx
@@ -1249,6 +1255,7 @@ local gravityScale = 1
 local openGate -- (below)
 local glyphHint = 0 -- seconds until the sealed door may speak again
 
+local supportTimer = 0
 function catacombs.update(player, dt)
   catacombs.spawnProps()
   updateBossCamera(player, dt)
@@ -1260,6 +1267,23 @@ function catacombs.update(player, dt)
   end
   local px, py = player:center()
   local at = catacombs.levelAt(py, px)
+  -- Scenery, chests and the like that stood on ground the digging has taken away are gone with it
+  supportTimer = supportTimer - dt
+  if supportTimer <= 0 then
+    supportTimer = 0.3
+    for _, lv in ipairs(levels) do
+      local info = lv.info
+      if info then
+        if info.mine then
+          minedecor.checkSupport(world, info.mine, px, py)
+        end
+        if info.story then
+          story.checkSupport(world, info.story, px, py)
+        end
+      end
+    end
+    chests.checkSupport(world, px, py)
+  end
   -- The sky's door: opens once every glyph is in hand, and says what it wants when approached
   glyphHint = math.max(0, glyphHint - dt)
   for _, lv in ipairs(levels) do

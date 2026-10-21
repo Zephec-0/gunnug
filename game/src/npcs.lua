@@ -26,6 +26,7 @@ local npcs = {}
 npcs.onTalk = nil
 
 local cages = {}
+local pond -- the Bartender at the pond: { x, y = ground, state = "drink" | "talk" | "met", t, facing, line }
 local camp = {} -- id -> { x, y = ground }
 local TALK_REACH = 22
 local CALL_RANGE = 120 -- a prisoner calls out to the hunter within this
@@ -53,6 +54,7 @@ function npcs.clear()
   cages = {}
   camp = {}
   board = nil
+  pond = nil
 end
 
 -- A cage with `id` inside, standing on the floor at (x, groundY); held =
@@ -61,6 +63,19 @@ function npcs.spawnCage(id, x, groundY, held, top)
   local c = { id = id, x = math.floor(x), y = math.floor(groundY), state = "locked", t = 0, callT = 1.5, call = 0, door = 0, held = held or "cage", top = top or (groundY - 21), digT = 0 }
   cages[#cages + 1] = c
   return c
+end
+
+-- The Bartender before he has a saloon (src.meta.bartenderAtPond): found drinking at the oasis pond.
+-- Talking to him is enough: once the hunter has left both the pond and the saloon's lot (neither on screen) the saloon goes up.
+local POND_LINES = {
+  "Easy. I'm not a bear. Just thirsty.",
+  "Back from the dark, and wanting to go again. Brave, or stubborn.",
+  "I poured for miners once. Reckon I'll set up by your camp.",
+}
+local POND_LINE_TIME = 2.8
+
+function npcs.setPond(x, groundY)
+  pond = { x = x, y = groundY, state = "drink", t = 0, facing = 1, line = 0 }
 end
 
 -- The bounty board at camp (src.bounties): always there
@@ -118,10 +133,12 @@ function npcs.breakLock(c)
       -- A gift on the cage floor: a gun he doesn't make yet if there is one.
       -- The Gunsmith's is his machine gun, the only way to come by one until
       -- he crafts it for the pool (src.meta.SPECIAL_GUNS).
+      -- The Sawbone's is a crossbow and the Cartographer's a flare gun, likewise.
       local kind = meta.lockedArchetype()
-      if c.id == "gunsmith" and not meta.isUnlocked("weapon", "automatic") then
-        kind = "automatic"
-        meta.see("weapon", "automatic")
+      local gift = ({ gunsmith = "automatic", sawbone = "crossbow", cartographer = "flare" })[c.id]
+      if gift and not meta.isUnlocked("weapon", gift) then
+        kind = gift
+        meta.see("weapon", gift)
       end
       pickups.dropWeapon(c.x - 4, c.y - 8, guns.generate(kind, nil, 0.5), -30, -90)
     end
@@ -140,8 +157,43 @@ function npcs.explosion(x, y, radius)
   end
 end
 
+local function updatePond(dt, player, px, py)
+  if pond.say then
+    pond.say.age = pond.say.age + dt
+  end
+  pond.t = pond.t + dt
+  if pond.state == "talk" then
+    pond.facing = px < pond.x and -1 or 1
+    if pond.t >= pond.line * POND_LINE_TIME then
+      if pond.line >= #POND_LINES then
+        pond.state, pond.t = "met", 0
+      else
+        pond.line = pond.line + 1
+        say(pond, POND_LINES[pond.line])
+      end
+    end
+  elseif pond.state == "met" then
+    -- He stays at the water. Once the hunter has left, with neither the pond nor his lot on screen, the
+    -- saloon goes up (so nobody sees it built)
+    pond.facing = px < pond.x and -1 or 1
+    local camX = require("src.camera").baseOffset()
+    local w = require("src.config").VIRTUAL_W
+    local function offscreen(x)
+      return x < camX - 40 or x > camX + w + 40
+    end
+    local lot = require("src.town").lot("bartender")
+    if offscreen(pond.x) and offscreen(lot and lot.x or 1166) then
+      pond = nil
+      meta.meetBartender()
+    end
+  end
+end
+
 function npcs.update(dt, player)
   local px, py = player:center()
+  if pond and (pond.state ~= "drink" or meta.bartenderAtPond()) then
+    updatePond(dt, player, px, py)
+  end
   for _, c in ipairs(cages) do
     if c.say then
       c.say.age = c.say.age + dt
@@ -210,10 +262,16 @@ function npcs.update(dt, player)
       end
       if c.t > 5.2 then
         c.state = "empty"
+        c.remove = true -- (the cage goes with them)
         for _ = 1, 16 do
           effects.particle(c.x + 18 + (love.math.random() - 0.5) * 10, c.y - 2 - love.math.random() * 16, (love.math.random() - 0.5) * 20, -10 - love.math.random() * 10, 0.9, { 0.55, 0.5, 0.45 }, -10)
         end
       end
+    end
+  end
+  for i = #cages, 1, -1 do
+    if cages[i].remove then
+      table.remove(cages, i)
     end
   end
   for id, s in pairs(camp) do
@@ -264,6 +322,15 @@ local function nearestCamp(player)
   return nil
 end
 
+-- The Bartender at the pond, next to the hunter (before he has been talked to)
+local function nearPond(player)
+  if not pond or pond.state ~= "drink" or not meta.bartenderAtPond() then
+    return false
+  end
+  local px, py = player:center()
+  return math.abs(px - pond.x) < 34 and math.abs(py - (pond.y - 10)) < 24
+end
+
 local function nearBoard(player)
   if not board or not meta.boardOpen() then
     return false
@@ -298,6 +365,11 @@ function npcs.interact(player)
   local fl = nearFloat(player)
   if fl then
     npcs.breakLock(fl)
+    return true
+  end
+  if nearPond(player) then
+    audio.play("select")
+    pond.state, pond.t, pond.line = "talk", 0, 0
     return true
   end
   local s = nearestCamp(player)
@@ -843,6 +915,10 @@ function npcs.draw(view, player)
       drawStall(s)
     end
   end
+  if pond and (pond.state ~= "drink" or meta.bartenderAtPond()) and inView(view, pond.x, pond.y, 40) then
+    local pose = pond.state == "drink" and "drink" or "stand"
+    people.draw("bartender", math.floor(pond.x), pond.y, pond.facing, pose, (pond.t / 2.6) % 1)
+  end
 end
 
 function npcs.drawEmissive(view)
@@ -957,6 +1033,20 @@ function npcs.drawScreen(toScreen, font, player)
       local sx, sy = toScreen(s.x, s.y - 30)
       bubble(font, s.say.text, sx, sy, s.say.age)
     end
+  end
+  if pond and pond.say and (pond.state ~= "drink" or meta.bartenderAtPond()) then
+    local sx, sy = toScreen(pond.x, pond.y - 28)
+    bubble(font, pond.say.text, sx, sy, pond.say.age)
+  end
+  if player and not player.dead and nearPond(player) then
+    local text = "[" .. input.label("interact") .. "] Talk to the Bartender"
+    local sx, sy = toScreen(pond.x, pond.y + 4)
+    love.graphics.setFont(font)
+    local x, y = math.floor(sx - font:getWidth(text) / 2), math.floor(sy)
+    love.graphics.setColor(0, 0, 0, 0.85)
+    love.graphics.print(text, x + 2, y + 2)
+    love.graphics.setColor(1, 0.88, 0.6)
+    love.graphics.print(text, x, y)
   end
   if player and not player.dead and nearBoard(player) then
     local text = "[" .. input.label("interact") .. "] Read the bounty board"

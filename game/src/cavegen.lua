@@ -51,6 +51,8 @@ local SIZES = {
   cragram = { 22, 15, true },
   dustdevil = { 14, 22 },
   gargoyle = { 14, 16, false, true },
+  wraith = { 12, 18, false, true }, -- the Quarry's: wraiths hang from the ceiling, crabs stand
+  cairncrab = { 16, 10, true },
 }
 local ENTRANCE_GAP = 26 -- half-width of the opening down from the entrance chamber
 
@@ -66,6 +68,8 @@ local PLAYER_W, PLAYER_H = config.player.width, config.player.height
 --   shaftX0/X1     x range of the shaft that drops into the entrance chamber
 --   shaftTop       y where that shaft starts (default: just above y0)
 --   glowCount      how many glowing mushroom clusters to scatter (default 150)
+--   beacons        { count = per 1920x3680 }: the mine's hung oil lamps (src.minedecor) on the ceilings, in
+--                  an area that is not the old mine too (result.mine is then made with just the lamps)
 --   gasPools       how many pools of poison gas to settle in low spots (default 0)
 --   waterPools     how many pools of water to settle in low spots (default 0)
 --   lavaPools      how many pools of lava (default 0); acidPools the same for acid
@@ -1086,7 +1090,7 @@ function cavegen.generate(world, area, seed, tick)
     end
     exit = { cx = math.floor(arena.cx), x0 = math.floor(arena.cx) - 21, x1 = math.floor(arena.cx) + 21 }
     world:fillRect(exit.x0, Y0, exit.x1, arena.top - 10, AIR)
-    local gate = { x0 = exit.x0 - 1, x1 = exit.x1 + 1, y0 = arena.top - 9, y1 = arena.top - 6 }
+    local gate = { x0 = exit.x0 - 1, x1 = exit.x1 + 1, y0 = arena.top - 9, y1 = arena.top - 6, glyph = true } -- (the sky's door: it also wants every boss's glyph)
     world:fillRect(gate.x0, gate.y0, gate.x1, gate.y1, IRON)
     arena.gates[#arena.gates + 1] = gate
     addLadder(exit.cx, arena.top - 12, Y0, noiseSeed + 300)
@@ -1118,10 +1122,10 @@ function cavegen.generate(world, area, seed, tick)
     end
   end
 
-  -- Bedrock shell at the sides, and at the bottom of the last area (the
-  -- surface's rock, or the previous area, is above)
-  if not area.hasNext and not open then -- (the sky has no indestructible floor: its cloud can be dug through)
-    world:fillRect(X0, Y1 - BORDER + 1, X1, Y1, BEDROCK)
+  -- A shell of plain rock at the sides and the bottom of the last area: nothing
+  -- is indestructible at a dungeon's edge (only the boss arenas seal themselves)
+  if not area.hasNext and not open then
+    world:fillRect(X0, Y1 - BORDER + 1, X1, Y1, ROCKID)
   end
   -- (an inner side, facing the other path, is plain rock instead, with more
   -- rock out to the neighbour so the hunter can dig across)
@@ -1129,8 +1133,8 @@ function cavegen.generate(world, area, seed, tick)
   if open then
     sideTop = world.top -- (the sky's walls go up to the world's invisible ceiling)
   end
-  world:fillRect(X0, sideTop, X0 + BORDER - 1, Y1, (area.gapLeft or open) and ROCKID or BEDROCK) -- (the sky's walls are cloud: nothing there is indestructible)
-  world:fillRect(X1 - BORDER + 1, sideTop, X1, Y1, (area.gapRight or open) and ROCKID or BEDROCK)
+  world:fillRect(X0, sideTop, X0 + BORDER - 1, Y1, ROCKID)
+  world:fillRect(X1 - BORDER + 1, sideTop, X1, Y1, ROCKID)
   if area.gapLeft then
     world:fillRect(X0 - area.gapLeft, sideTop, X0 - 1, Y1, ROCKID)
   end
@@ -1289,6 +1293,12 @@ function cavegen.generate(world, area, seed, tick)
   end
   if counts.cragram then
     place("cragram", findFloorSpots(scaled(counts.cragram), 24, avoidForEnemies))
+  end
+  if counts.wraith then
+    place("wraith", findCeilingSpots(scaled(counts.wraith), 30, avoidForEnemies))
+  end
+  if counts.cairncrab then
+    place("cairncrab", findFloorSpots(scaled(counts.cairncrab), 24, avoidForEnemies))
   end
   if counts.worm then
     -- Worms lie coiled in solid rock: spots with nothing but rock all round
@@ -1841,6 +1851,17 @@ function cavegen.generate(world, area, seed, tick)
     end, tick)
   end
 
+  -- Hung lights (placed last, so the rest of the layout is the same as without them)
+  if area.beacons then
+    local mine = result.mine
+    if not mine then
+      mine = { tracks = {}, carts = {}, supports = {}, skeletons = {}, picks = {}, lamps = {} }
+      result.mine = mine
+    end
+    for _, s in ipairs(findCeilingSpots(scaled(area.beacons.count), 40, avoid)) do
+      mine.lamps[#mine.lamps + 1] = { x = s[1], y = s[2] + 10, hung = true, rope = 6 } -- (a long chain: up into the rock above)
+    end
+  end
   return result
 end
 

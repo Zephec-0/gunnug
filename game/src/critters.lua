@@ -245,6 +245,25 @@ function critters.draw(view)
   end
 end
 
+-- A soft round falloff (bright in the middle, fading to nothing at the rim) for the glowworms' light:
+-- a flat translucent disc read as a painted circle, not as light
+local haloImage
+local function halo()
+  if not haloImage then
+    local n = 41
+    local data = love.image.newImageData(n, n)
+    local c = (n - 1) / 2
+    data:mapPixel(function(x, y)
+      local d = math.min(1, math.sqrt((x - c) ^ 2 + (y - c) ^ 2) / c)
+      local a = (1 - d) ^ 2.4
+      return 1, 1, 1, a
+    end)
+    haloImage = love.graphics.newImage(data)
+    haloImage:setFilter("linear", "linear")
+  end
+  return haloImage
+end
+
 -- Glows, after the lighting
 function critters.drawEmissive(view)
   for _, c in ipairs(list) do
@@ -257,8 +276,10 @@ function critters.drawEmissive(view)
       love.graphics.setColor(col[1], col[2], col[3], g)
       love.graphics.rectangle("fill", math.floor(c.x) - 1, math.floor(c.y + c.len), 3, 2)
       love.graphics.setBlendMode("add")
-      love.graphics.setColor(col[1], col[2], col[3], 0.22 * g)
-      love.graphics.circle("fill", c.x + 0.5, c.y + c.len + 1, 6)
+      love.graphics.setColor(col[1], col[2], col[3], 0.7 * g)
+      love.graphics.draw(halo(), math.floor(c.x) + 0.5 - 13, math.floor(c.y + c.len) + 1 - 13, 0, 26 / 41, 26 / 41)
+      love.graphics.setColor(1, 1, 0.9, 0.8 * g)
+      love.graphics.rectangle("fill", math.floor(c.x), math.floor(c.y + c.len), 1, 1) -- (the bright heart)
       love.graphics.setBlendMode("alpha")
     elseif c.kind == "moth" then
       local up = math.floor(c.flap) % 2 == 0

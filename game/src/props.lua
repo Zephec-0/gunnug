@@ -622,7 +622,7 @@ props.defs = {
   tntBarrel = {
     width = 13, height = 16, mass = 1.8, hp = 12, itemChance = 0,
     shard = { 0.50, 0.31, 0.17 },
-    explosive = { count = 3, scale = 3.2, dig = 26, digPower = 4, fuse = 3.0 }, -- a huge blast and a real crater; the first hit lights a fuse
+    explosive = { count = 3, scale = 3.2, dig = 26, digPower = 4, fuse = 2.1 }, -- a huge blast and a real crater; the first hit lights a fuse
     gravityScale = 0.5, friction = 0.6, restitution = 0.15, linearDamping = 0.3, angularDamping = 0.5,
     showDamage = true, draw = drawTntBarrel, emit = emitTntBarrel,
   },
@@ -787,6 +787,7 @@ local function breakProp(p)
     if not p.lit then
       p.lit = true
       p.fuse = 0.15 + love.math.random() * 0.15
+      p.fuseMax = 2.1
     end
     return
   end
@@ -821,7 +822,7 @@ local function breakProp(p)
     pickups.dropGold(x, y, love.math.random(gold[1], gold[2]))
   end
   if p.def.itemChance then
-    pickups.maybeDropItem(x, y, p.def.itemChance)
+    pickups.maybeDropItem(x, y, p.def.itemChance * 0.5) -- (half what the props list)
   end
 end
 
@@ -843,7 +844,8 @@ function props.damage(p, amount)
     if not p.broken then
       if not p.lit then
         p.lit = true
-        p.fuse = p.def.explosive.fuse or 3
+        p.fuse = p.def.explosive.fuse or 2.1
+        p.fuseMax = p.fuse
       else
         p.fuse = math.max(0.12, p.fuse - amount * 0.12)
       end
@@ -1078,7 +1080,7 @@ function props.update(dt)
     if p.lit and not p.broken then
       p.fuse = p.fuse - dt
       if math.floor(p.fuse * 24) % 2 == 0 then
-        p.flash = 0.05 -- blinks white as the fuse burns down
+        p.flash = 0.05 -- blinks as the fuse burns down (orange at first, paler as it nears the end: see props.draw)
       end
       if p.fuse <= 0 then
         detonate(p)
@@ -1197,7 +1199,12 @@ local function drawOne(p)
   love.graphics.translate(math.floor(p.body:getX() + 0.5), math.floor(p.body:getY() + 0.5))
   love.graphics.rotate(p.body:getAngle())
   if p.flash > 0 and p.def.showDamage then
-    love.graphics.setColor(1, 1, 1)
+    if p.lit and p.fuseMax then
+      local k = math.max(0, math.min(1, 1 - p.fuse / p.fuseMax)) -- (a lit fuse's blink warms from orange to a pale yellow-white)
+      love.graphics.setColor(1, 0.55 + 0.4 * k, 0.18 + 0.62 * k)
+    else
+      love.graphics.setColor(1, 1, 1)
+    end
     love.graphics.rectangle("fill", -math.floor(p.width / 2), -math.floor(p.height / 2), p.width, p.height)
   else
     p.def.draw(p)

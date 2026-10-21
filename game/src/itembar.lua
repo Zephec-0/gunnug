@@ -7,6 +7,7 @@
 -- Everything is drawn at full window resolution; u = one game pixel.
 local input = require("src.input")
 local fuser = require("src.fuser")
+local bake = require("src.bake")
 local gunInfo = require("src.gunInfo")
 local gunhud = require("src.gunhud")
 local inventory = require("src.inventory")
@@ -211,7 +212,7 @@ local function band(x, y, c, row, n, from, to, col)
   end
 end
 
-local function pxRound(x, y, w, h, c, border, fill, rad)
+local function pxRoundLive(x, y, w, h, c, border, fill, rad)
   rad = rad or 1
   x, y = math.floor(x), math.floor(y)
   local cols, rows = math.floor(w / c + 0.5), math.floor(h / c + 0.5)
@@ -236,6 +237,47 @@ local function pxRound(x, y, w, h, c, border, fill, rad)
       row = row + n
     end
   end
+end
+
+-- The same box from a baked picture (src.bake): the slots are the same few shapes in the same few colours frame
+-- after frame, and each was a dozen rectangles. A shape whose colours keep changing (a pulsing glow) is found out
+-- after a few tries and drawn the plain way from then on.
+local roundSigs = {} -- shape -> { n = how many colour sets it has been baked in, bad = it never settles }
+local function colorKey(col)
+  if not col then
+    return "-"
+  end
+  return col[1] .. "," .. col[2] .. "," .. col[3] .. "," .. (col[4] or 1)
+end
+
+local function pxRound(x, y, w, h, c, border, fill, rad)
+  if not bake.enabled.itembar then
+    return pxRoundLive(x, y, w, h, c, border, fill, rad)
+  end
+  rad = rad or 1
+  local cols, rows = math.floor(w / c + 0.5), math.floor(h / c + 0.5)
+  local sig = cols .. "x" .. rows .. "@" .. c .. "r" .. rad
+  local s = roundSigs[sig]
+  if not s then
+    s = { n = 0, seen = {} }
+    roundSigs[sig] = s
+  end
+  if s.bad then
+    return pxRoundLive(x, y, w, h, c, border, fill, rad)
+  end
+  local key = sig .. "|" .. colorKey(border) .. "|" .. colorKey(fill)
+  if not s.seen[key] then
+    s.seen[key] = true
+    s.n = s.n + 1
+    if s.n > 8 then
+      s.bad = true
+      return pxRoundLive(x, y, w, h, c, border, fill, rad)
+    end
+  end
+  local cv = bake.shape(key, cols * c, rows * c, function()
+    pxRoundLive(0, 0, w, h, c, border, fill, rad)
+  end)
+  bake.blit(cv, math.floor(x), math.floor(y))
 end
 
 -- A coloured glow behind an item's icon (instead of a rim round it): soft stepped layers, kept inside the slot

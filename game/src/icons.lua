@@ -247,13 +247,13 @@ function icons.get(thing)
 end
 
 -- The same icon for the interface (the compendium, the item bar, the shop and camp
--- pages), in a flatter 16-bit style: the 8x8 art resampled to 12x12 (each pixel takes
--- whichever colour covers most of it: flat colours, hard edges, no blending), one flat
+-- pages), in a flatter 16-bit style: the 8x8 art doubled to 16x16 (each pixel a 2x2 block:
+-- flat colours, hard edges, no blending), one flat
 -- step lighter along the top and one darker along the bottom of any part two pixels
--- thick, and a very soft drop shadow baked in around it. The image is the 12x12 art
+-- thick, and a very soft drop shadow baked in around it. The image is the 16x16 art
 -- with HD_PAD pixels of room on every side for the shadow, nearest filtered. (The
 -- world still uses the plain 8x8 from icons.get: it is drawn at the game's own scale.)
-icons.HD_SIZE = 12
+icons.HD_SIZE = 16
 icons.HD_PAD = 2
 local hdCache = {}
 local hdShadow = setmetatable({}, { __mode = "k" }) -- art image -> its soft shadow image
@@ -285,34 +285,15 @@ function icons.getHD(thing)
     local ch = rows[y]:sub(x, x)
     return (palette[ch] or FIXED[ch]) and ch or "."
   end
-  -- Resample 8 -> N: per destination pixel, the letter with the most area under it
-  -- (any solid colour wins over clear once it covers a third of the pixel)
+  -- Every source pixel becomes a 2 x 2 block (8 -> 16): the art exactly as drawn, with square pixels. (The
+  -- earlier 1.5x resample made every other pixel a different width, which squashed circles and blurred the
+  -- shapes; smoothing the corners instead (Scale2x) turned thin rings into diamonds.)
   local big = {}
   for dy = 1, N do
     big[dy] = {}
     for dx = 1, N do
-      local x0, x1 = (dx - 1) * 8 / N, dx * 8 / N
-      local y0, y1 = (dy - 1) * 8 / N, dy * 8 / N
-      local weight = {}
-      for sy = math.floor(y0) + 1, math.min(8, math.ceil(y1)) do
-        local oy = math.min(y1, sy) - math.max(y0, sy - 1)
-        for sx = math.floor(x0) + 1, math.min(8, math.ceil(x1)) do
-          local ox = math.min(x1, sx) - math.max(x0, sx - 1)
-          local ch = src(sx, sy)
-          weight[ch] = (weight[ch] or 0) + ox * oy
-        end
-      end
-      local best, bw, solid = ".", 0, 0
-      for ch, w in pairs(weight) do
-        if ch ~= "." then
-          solid = solid + w
-          if w > bw or (w == bw and ch < best) then
-            best, bw = ch, w
-          end
-        end
-      end
-      local area = (x1 - x0) * (y1 - y0)
-      big[dy][dx] = solid >= area / 3 and (palette[best] or FIXED[best]) or false
+      local ch = src(math.ceil(dx / 2), math.ceil(dy / 2))
+      big[dy][dx] = ch ~= "." and (palette[ch] or FIXED[ch]) or false
     end
   end
   local function at(x, y)
@@ -373,7 +354,7 @@ function icons.drawHD(img, x, y, s, alpha)
   love.graphics.draw(img, x, y, 0, s, s)
 end
 
--- The same, with the middle of what is drawn (not of the 12 x 12 square it is drawn in)
+-- The same, with the middle of what is drawn (not of the 16 x 16 square it is drawn in)
 -- on (cx, cy), at whole pixels; tint (optional) = { r, g, b } multiplies the art
 function icons.drawHDAt(img, cx, cy, s, alpha, tint)
   local box = hdBox[img]

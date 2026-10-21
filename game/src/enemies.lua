@@ -424,7 +424,7 @@ local DAMAGE_PER_AREA = 0.35
 -- DPS_IDLE seconds pass without one; the reading then freezes until the next hit
 local DPS_IDLE = 2
 
-local ITEM_DROP_CHANCE = 0.1 -- chance a dying monster drops an ammo type or attachment
+local ITEM_DROP_CHANCE = 0.05 -- chance a dying monster drops an ammo type or attachment
 local ACTIVE_RANGE = 520 -- enemies further than this from the hunter are frozen
 -- Bullets only test the monsters within this of the hunter (rebuilt every
 -- frame): testing every monster in the world at every pixel a bullet moved
@@ -6097,9 +6097,10 @@ local function onScreen(e, view)
 end
 
 -- view: { x, y, w, h } in world pixels
-function enemies.draw(view)
+-- (lit: drawing for the lit sprites pass, which leaves out the creatures that def.noRelief marks)
+function enemies.draw(view, lit)
   for _, e in ipairs(near) do
-    if onScreen(e, view) then
+    if onScreen(e, view) and not (lit and e.def.noRelief) then
       local off = staggerOffset(e)
       love.graphics.push()
       love.graphics.translate(off, 0)
@@ -6404,6 +6405,8 @@ require("src.aquatic")
 require("src.colossus")
 require("src.darkhunter")
 require("src.needlemobs")
+require("src.quarrymobs")
+require("src.ethercrawler")
 
 -- The bosses and creatures in the modules above add their drawing functions after the
 -- table was copied for the bestiary's portraits: copy again, or they come out blank

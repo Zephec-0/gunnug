@@ -1533,7 +1533,51 @@ PAGES.camp = function()
       act("withdraw")
       audio.play("coin")
     end, { disabled = inBox <= 0 })
-    wrapped("What's in the box survives death. Walk back up with your gold to put it away, and take it out at the start of a run to spend it below.", gx, top + gh + 4 * u, gw, F.small, FAINT)
+    local th = wrapped("What's in the box survives death. Walk back up with your gold to put it away, and take it out at the start of a run to spend it below.", gx, top + gh + 4 * u, gw, F.small, FAINT)
+    -- The shelf: one perk kept between runs (the Diving Helm, say, so the flooded caverns stay open)
+    local perks = require("src.perks")
+    local sy = math.floor(top + gh + 4 * u + th + 8 * u)
+    shadowPrint("Perk shelf", gx, sy, F.body, WARM)
+    sy = sy + F.body:getHeight() + 2 * u
+    local shelved = meta.bankedPerk()
+    local rowH = math.floor(12 * u)
+    if shelved then
+      local def = perks.defs[shelved]
+      local _, descLines = F.small:getWrap(def.desc, gw - 10 * u)
+      local ph = math.floor(F.body:getHeight() + #descLines * F.small:getHeight() * F.small:getLineHeight() + 9 * u)
+      panel(gx, sy, gw, ph, 0.85)
+      printCentered(def.name, gx + gw / 2, sy + 4 * u, F.body, def.color)
+      wrapped(def.desc, gx + 5 * u, sy + 4 * u + F.body:getHeight() + u, gw - 10 * u, F.small, DIM)
+      local have = false
+      for _, id in ipairs(menu.runPerks and menu.runPerks() or {}) do
+        have = have or id == shelved
+      end
+      local by = sy + ph + 3 * u
+      button("camp:perktake", have and "You already carry one" or "Take it back", gx, by, gw, rowH, function()
+        act("perktake")
+        audio.play("pickup")
+      end, { disabled = have })
+      wrapped("It is yours again at the start of any run, whatever happened to the last one.", gx, by + rowH + 3 * u, gw, F.small, FAINT)
+    else
+      local mine = {}
+      for _, id in ipairs(menu.runPerks and menu.runPerks() or {}) do
+        if meta.canShelve(id) then
+          mine[#mine + 1] = id
+        end
+      end
+      if #mine == 0 then
+        wrapped("Nothing to keep yet. Bring a perk from below and he will hold on to it for you, through death.", gx, sy, gw, F.small, FAINT)
+      else
+        for i, id in ipairs(mine) do
+          local def = perks.defs[id]
+          button("camp:perkstore" .. id, "Keep: " .. def.name, gx, sy + (i - 1) * (rowH + 2 * u), gw, rowH, function()
+            act("perkstore", id)
+            audio.play("buy")
+          end)
+        end
+        wrapped("He keeps one perk safe between runs. It leaves your run when you hand it over.", gx, sy + #mine * (rowH + 2 * u) + 2 * u, gw, F.small, FAINT)
+      end
+    end
     return
   end
   -- Teaching: a grid of everything still locked (silhouettes until seen)

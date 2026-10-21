@@ -1,11 +1,9 @@
 -- Set dressing for the Barrens (the overworld desert): rock structures cut
 -- into the terrain (arches, hoodoos, ruined walls), skeletons half buried in
--- the sand (see the fossils), and one small mirage oasis that turns out to be a
--- dry bed with a coin pouch when the hunter walks up to it.
+-- the sand (see the fossils).
 local barrens = {}
 
 local list = {} -- { kind, x, v }: the buried bones
-local mirage -- { x, revealed, t }
 
 local BONE, BONE_DARK = { 0.78, 0.72, 0.60 }, { 0.54, 0.49, 0.40 }
 
@@ -74,22 +72,18 @@ end
 -- entrances, the mountain's ramp); lo and hi are the stretch to dress.
 function barrens.build(world, surface, seed, lo, hi, blocked, mat, fossilId)
   list = {}
-  mirage = nil
   local rng = love.math.newRandomGenerator((seed or 1) * 7 + 13)
   if fossilId then
     paintFossils(world, surface, love.math.newRandomGenerator((seed or 1) * 11 + 5), lo, hi, blocked, fossilId)
   end
   local x = lo
-  local arches, oasisPlaced = 0, false
+  local arches = 0
   while x < hi do
     x = x + 110 + rng:random(0, 90)
     if not blocked(x) and not blocked(x - 60) and not blocked(x + 60) then
       local slope = math.abs(surface(x + 30) - surface(x - 30))
       local roll = rng:random()
-      if not oasisPlaced and x > 2300 and roll < 0.35 then
-        oasisPlaced = true
-        mirage = { x = x, revealed = false, t = 0 }
-      elseif slope < 18 then
+      if slope < 18 then
         if roll < 0.12 and arches < 3 then
           arches = arches + 1
           arch(world, surface, x, mat, rng)
@@ -351,52 +345,6 @@ end
 
 local DRAW = { drawArm, drawRibs, drawSkull, drawLegs, drawSitting }
 
-local function drawMirage(m, surface, t)
-  local g = surface(m.x)
-  if m.revealed then
-    -- the dry bed: cracked ground and a bleached skull
-    love.graphics.setColor(0.62, 0.50, 0.34)
-    rect(m.x - 22, g - 1, 44, 2)
-    love.graphics.setColor(0.46, 0.36, 0.25)
-    for i = -18, 18, 6 do
-      rect(m.x + i, g - 1, 1, 2)
-      rect(m.x + i + 2, g, 3, 1)
-    end
-    drawSkull(m.x - 4, g, 0.1)
-    return
-  end
-  local a = 0.55 + 0.2 * math.sin(t * 1.3)
-  -- shimmering pond: bands of blue that wobble sideways
-  for row = 0, 5 do
-    local wob = math.floor(math.sin(t * 2 + row * 1.3) * 2)
-    love.graphics.setColor(0.45 + row * 0.03, 0.72, 0.85, a * (1 - row * 0.1))
-    rect(m.x - 22 + wob + row, g - 6 + row, 44 - row * 2, 1)
-  end
-  -- two palms, doubled and faint below as a reflection
-  for _, dx in ipairs({ -15, 14 }) do
-    local sway = math.floor(math.sin(t * 1.1 + dx) * 1.5)
-    love.graphics.setColor(0.40, 0.30, 0.18, a)
-    for k = 0, 17 do
-      rect(m.x + dx + math.floor(k * 0.08) + sway * (k > 12 and 1 or 0), g - 7 - k, 1, 1)
-    end
-    love.graphics.setColor(0.30, 0.62, 0.30, a)
-    local top = g - 25
-    for i = -6, 6 do
-      rect(m.x + dx + sway + i, top + math.floor(math.abs(i) * 0.7), 1, 1)
-      rect(m.x + dx + sway + i, top + math.floor(math.abs(i) * 0.7) + 1, 1, 1)
-    end
-    love.graphics.setColor(0.30, 0.62, 0.30, a * 0.25)
-    for k = 0, 6 do
-      rect(m.x + dx + sway + math.floor(math.sin(t * 2 + k) * 2), g - 5 + k * 0.4, 1, 1)
-    end
-  end
-  -- heat shimmer above it
-  love.graphics.setColor(1, 0.9, 0.7, 0.10)
-  for i = 0, 3 do
-    rect(m.x - 26 + math.floor(math.sin(t * 3 + i) * 3), g - 30 - i * 3, 52, 1)
-  end
-end
-
 function barrens.draw(vx0, vx1, surface)
   love.graphics.setColor(1, 1, 1)
   for _, b in ipairs(list) do
@@ -404,25 +352,7 @@ function barrens.draw(vx0, vx1, surface)
       DRAW[b.kind](b.x, surface(b.x + 2) + 1, b.v)
     end
   end
-  if mirage and mirage.x > vx0 - 40 and mirage.x < vx1 + 40 then
-    drawMirage(mirage, surface, love.timer.getTime())
-  end
   love.graphics.setColor(1, 1, 1)
-end
-
--- Walking up to the mirage: it breaks, and what was left there is a pouch of coins
-function barrens.update(dt, player, effects, pickups)
-  if mirage and not mirage.revealed then
-    local px, py = player:center()
-    if math.abs(px - mirage.x) < 44 and math.abs(py - (player.world:findGround(mirage.x, 160) - 10)) < 40 then
-      mirage.revealed = true
-      for _ = 1, 24 do
-        effects.particle(mirage.x + (love.math.random() - 0.5) * 44, player.world:findGround(mirage.x, 160) - 4 - love.math.random() * 10, (love.math.random() - 0.5) * 30, -10 - love.math.random() * 20, 0.8, { 0.5, 0.78, 0.9 }, -20, true)
-      end
-      effects.popup(mirage.x, player.world:findGround(mirage.x, 160) - 30, "Just a mirage...", { 0.7, 0.85, 0.95 })
-      pickups.dropGold(mirage.x, player.world:findGround(mirage.x, 160) - 8, 40)
-    end
-  end
 end
 
 return barrens

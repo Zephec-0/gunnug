@@ -24,6 +24,7 @@ local fluids = require("src.fluids")
 local ambience = require("src.ambience")
 local critters = require("src.critters")
 local weather = require("src.weather")
+local bake = require("src.bake")
 local chests = require("src.chests")
 local compare = require("src.compare")
 local visuals = require("src.visuals")
@@ -303,6 +304,9 @@ function game.load()
   menu.runGold = function()
     return inv and inv.gold or 0
   end
+  menu.runPerks = function()
+    return inv and inv.perks or {}
+  end
   bounties.onNotice = function(title, label)
     toasts.notice(title, label)
   end
@@ -386,7 +390,7 @@ function game.load()
       player:onKill(e, fx)
     end
     -- Its ether charges a locked fuser
-    if inv then
+    if inv and not e.def.noEther then
       local b = e.body
       fuser.onKill(inv, b.x + b.w / 2, b.y + b.h / 2, e.def.boss and not (e.group and e.group.alive > 1))
     end
@@ -466,6 +470,29 @@ function game.menuAction(action, arg)
   elseif action == "withdraw" then
     inv.gold = inv.gold + meta.withdraw()
     lastGold = inv.gold
+  elseif action == "perkstore" then
+    -- The perk leaves the run for the Prospector's shelf (its health and other effects go with it)
+    if meta.shelvePerk(arg) then
+      for i, id in ipairs(inv.perks) do
+        if id == arg then
+          table.remove(inv.perks, i)
+          break
+        end
+      end
+      perks.version = perks.version + 1
+      if player then
+        player:refreshMaxHp()
+      end
+    end
+  elseif action == "perktake" then
+    local id = meta.bankedPerk()
+    if id and not perks.has(id) then
+      meta.unshelvePerk()
+      perks.add(id)
+      if player then
+        player:refreshMaxHp()
+      end
+    end
   elseif action == "resume" then
     menu.close()
   elseif action == "restart" then
@@ -584,6 +611,8 @@ function game.update(dt)
     end
   end
   -- (with the weapon panel open the area's sound plays on, but muffled; under water too)
+  local dlg = menu.state() == "dialog" and menu.dialogState()
+  audio.setTable(dlg and dlg.music == "table")
   audio.update(dt, underground, menu.isOpen(), area, inShop, itembar.isOpen() or (playing and player.submerged))
   -- The weapon panel and the menus pause the game, like Noita's inventory
   love.mouse.setVisible(itembar.isOpen() or menu.isOpen() or compare.isOpen() or visuals.isOpen() or require("src.devpanel").isOpen())
@@ -797,6 +826,30 @@ drawFrame = function()
     -- light inside a monster's own body ignores that monster)
     love.graphics.setColor(1, 1, 1, 0.7)
     enemies.drawOccluders(view)
+    if lighting.objectShadows then
+      -- The things that stand in the world throw shadows too (their cached pieces drawn the plain way:
+      -- a cached piece is blitted with its own blend mode, which would wipe the rock out of the mask).
+      local baked = bake.enabled.minedecor
+      bake.enabled.minedecor = false
+      lighting.occluderScale(lighting.OBJECT_SHADOW)
+      props.draw(view)
+      chests.draw(view)
+      npcs.draw(view, player)
+      events.draw(view)
+      targets.draw()
+      if scene.drawLitDecor then
+        scene.drawLitDecor(view, true) -- (without the mine's timber frames)
+      end
+      -- (the hunter as his body's box: his hat and gun stick out, and would shade his own light)
+      if not player.dead then
+        local b = player.body
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.rectangle("fill", b.x + 1, b.y + 1, math.max(1, b.w - 2), math.max(1, b.h - 2))
+      end
+      lighting.occluderScale(1)
+      bake.enabled.minedecor = baked
+      love.graphics.setColor(1, 1, 1, 1)
+    end
   end)
   render.setLamps(lighting.lamps(camX, camY, 4))
 
@@ -832,7 +885,25 @@ drawFrame = function()
   love.graphics.pop()
 
   lighting.drawMotes(camX, camY)
-  lighting.apply()
+  local worldEnts
+  if lighting.litSprites then
+    -- (the lit sprites test: what stands in the world is drawn once more, for its silhouette)
+    worldEnts = lighting.entityMask(function()
+      love.graphics.translate(-camX, -camY)
+      props.draw(view)
+      chests.draw(view)
+      shop.draw(view)
+      npcs.draw(view, player)
+      events.draw(view)
+      targets.draw()
+      if scene.drawLitDecor then
+        scene.drawLitDecor(view) -- (the scene's own things: the mine's shoring, carts and lamps, the story's props)
+      end
+      enemies.draw(view, true)
+      player:draw()
+    end)
+  end
+  lighting.apply(worldEnts)
 
   -- Emissive pass: glows that ignore the darkness
   love.graphics.push()

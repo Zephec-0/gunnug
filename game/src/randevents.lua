@@ -433,6 +433,38 @@ local function rollSymbol()
   return 1
 end
 
+-- What a pull shows: the outcome is rolled first (a jackpot 2%, a pair 18%, otherwise three
+-- different symbols), then the reels are laid out to match
+local JACKPOT_CHANCE, PAIR_CHANCE = 0.02, 0.18
+
+local function rollReels()
+  local roll = love.math.random()
+  if roll < JACKPOT_CHANCE then
+    local a = rollSymbol()
+    return { a, a, a }
+  end
+  local a = rollSymbol()
+  local b = rollSymbol()
+  while b == a do
+    b = rollSymbol()
+  end
+  if roll < JACKPOT_CHANCE + PAIR_CHANCE then
+    local r = { a, a, a }
+    r[love.math.random(3)] = b
+    return r
+  end
+  local c = rollSymbol()
+  while c == a or c == b do
+    c = rollSymbol()
+  end
+  local r = { a, b, c }
+  for i = 3, 2, -1 do -- (shuffled)
+    local j = love.math.random(i)
+    r[i], r[j] = r[j], r[i]
+  end
+  return r
+end
+
 -- Pulling the slot machine's lever: it takes the coins, or says it needs them
 local function playSlot(o, player)
   local now = love.timer.getTime()
@@ -449,7 +481,7 @@ local function playSlot(o, player)
     return
   end
   player.inventory.gold = player.inventory.gold - SLOT_COST
-  local r = { rollSymbol(), rollSymbol(), rollSymbol() }
+  local r = rollReels()
   o.slot = {
     reels = r, from = sl and sl.reels or { 1, 2, 3 }, t0 = now, stops = { now + 1.1, now + 1.6, now + 2.1 },
     stopped = {}, endT = now + 2.45, leverT = now, paid = false, tick = 0, win = 0, hitT = -9, noT = -9,

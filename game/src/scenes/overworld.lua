@@ -415,7 +415,7 @@ function overworld.build(opts)
     world:fillRect(x1 + 1, surface(e.x) + 3, x1 + 3, SHAFT_BOTTOM, WOOD)
     ::nextEntry::
   end
-  -- Barrens set dressing: rock structures cut into the desert, buried bones, a mirage
+  -- Barrens set dressing: rock structures cut into the desert, buried bones
   barrens.build(world, surface, seed, LEFT + 400, 5100, function(x)
     if x > 230 and x < 2050 then
       return true -- (the town starts at 490; structures reach 200 px right of where they start)
@@ -707,7 +707,6 @@ end
 -- changing as the hunter goes underground
 function overworld.update(dt, player, game, effects)
   local px, py = player:center()
-  barrens.update(dt, player, effects, require("src.pickups"))
   town.sync() -- (a person has moved in, or the save file changed)
   smokeTimer = smokeTimer - dt
   if smokeTimer <= 0 then
@@ -1376,6 +1375,9 @@ function overworld.drawDecor(camX, camY)
   if vy1 > CAVE_TOP then
     local index = catacombs.levelAt((math.max(vy0, CAVE_TOP) + vy1) / 2, (vx0 + vx1) / 2) or 1
     depthblend.draw(index, camX, camY, vx0, vy0, vx1, vy1, CAVE_TOP)
+    -- (the caves' far backgrounds at half brightness)
+    love.graphics.setColor(0, 0, 0, 0.5)
+    love.graphics.rectangle("fill", vx0, math.max(vy0, CAVE_TOP), vx1 - vx0, vy1 - math.max(vy0, CAVE_TOP))
   end
   catacombs.drawDecor(view(camX, camY))
   if vy0 > CAVE_TOP then
@@ -1406,6 +1408,10 @@ function overworld.drawDecor(camX, camY)
   drawWinchHouse()
   drawHeadframe()
   drawWeeds()
+end
+
+function overworld.drawLitDecor(v, shadows)
+  catacombs.drawLitDecor(v, shadows)
 end
 
 -- The sign's lettering, at full resolution

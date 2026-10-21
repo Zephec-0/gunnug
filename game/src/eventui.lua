@@ -64,7 +64,7 @@ function eventui.highlow(o, player, env)
     o.hl = hl
   end
   local inv = player.inventory
-  local dlg = { title = "High-Low" }
+  local dlg = { title = "High-Low", music = "table" }
 
   local function land()
     local a = hl.anim

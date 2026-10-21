@@ -3,6 +3,8 @@
 -- Click a row; the mouse wheel scrolls the list; F2 or Esc closes. The game
 -- keeps running behind it.
 local dev = require("src.dev")
+local bake = require("src.bake")
+local lighting = require("src.lighting")
 local itembar = require("src.itembar")
 local catacombs = require("src.scenes.catacombs")
 
@@ -92,6 +94,12 @@ local function rows()
     { kind = "toggle", label = "No damage", get = function() return dev.noDamage end, set = function(v) dev.noDamage = v end },
     { kind = "toggle", label = "One-hit kills", get = function() return dev.oneHit end, set = function(v) dev.oneHit = v end },
     { kind = "toggle", label = "Fly / no clip (Shift fast)", get = function() return dev.noclip end, set = function(v) dev.noclip = v end },
+    { kind = "toggle", label = "Objects cast shadows", get = function() return lighting.objectShadows end, set = function(v) lighting.objectShadows = v end },
+    { kind = "toggle", label = "Lit sprites (test)", get = function() return lighting.litSprites end, set = function(v) lighting.litSprites = v end },
+    { kind = "head", label = "Cached drawing (off = the plain way)" },
+    { kind = "toggle", label = "Rock slabs", get = function() return bake.enabled.slabs end, set = function(v) bake.enabled.slabs = v end },
+    { kind = "toggle", label = "Mine decorations", get = function() return bake.enabled.minedecor end, set = function(v) bake.enabled.minedecor = v end },
+    { kind = "toggle", label = "Item bar boxes", get = function() return bake.enabled.itembar end, set = function(v) bake.enabled.itembar = v end },
     { kind = "head", label = "Save file" },
     { kind = "action", label = "Unlock everything", fn = unlockEverything },
     { kind = "action", label = "Drop 100 gold + 12 ether", fn = dropStash },

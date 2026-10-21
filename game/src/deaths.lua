@@ -29,6 +29,9 @@ local ADJECTIVES = {
   cragram = { "Hard-Headed", "Stubborn", "Charging" },
   dustdevil = { "Whirling", "Gritty", "Howling" },
   gargoyle = { "Stone-Faced", "Brooding", "Unforgiving" },
+  wraith = { "Lamp-Lit", "Pale", "Mournful" },
+  cairncrab = { "Rubble-Backed", "Pinching", "Rock-Slinging" },
+  ethercrawler = { "Skittish", "Ether-Laden", "Wall-Walking" },
   darkhunter = { "Shadowed", "Twin-Gunned", "Uncanny" },
 }
 local BOSS_ADJECTIVES = { "Mighty", "Merciless", "Terrible", "Dreaded" }

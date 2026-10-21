@@ -4,6 +4,7 @@
 -- skeletal remains and pickaxes. The flames are drawn again after the
 -- lighting, and every lantern gives light.
 local minedecor = {}
+local bake = require("src.bake")
 
 local WOOD, WOOD_L, WOOD_D = { 0.45, 0.30, 0.16 }, { 0.62, 0.43, 0.22 }, { 0.28, 0.19, 0.10 }
 local IRON, IRON_L, IRON_D = { 0.38, 0.39, 0.45 }, { 0.62, 0.63, 0.70 }, { 0.20, 0.20, 0.25 }
@@ -22,9 +23,8 @@ end
 
 -- Tracks ----------------------------------------------------------------------
 
--- (only the stretch in view: a long track is thousands of pixels)
-local function drawTrack(t, view)
-  for x = math.max(t.x0, math.floor(view.x) - 4), math.min(t.x1, math.ceil(view.x + view.w) + 4) do
+local function trackRange(t, xa, xb)
+  for x = xa, xb do
     local y = t.ys[x]
     if y then
       if (x - t.x0) % 7 == 3 then
@@ -37,6 +37,39 @@ local function drawTrack(t, view)
         R(IRON_D, x, y - 2, 1, 1) -- a spike
       end
     end
+  end
+end
+
+local TRACK_PIECE = 256 -- (a long track is baked in pieces of this many pixels)
+
+-- (only the stretch in view: a long track is thousands of pixels)
+local function drawTrack(t, view)
+  local xa, xb = math.max(t.x0, math.floor(view.x) - 4), math.min(t.x1, math.ceil(view.x + view.w) + 4)
+  if bake.enabled.minedecor then
+    t.boxes = t.boxes or {}
+    for k = math.floor((xa - t.x0) / TRACK_PIECE), math.floor((xb - t.x0) / TRACK_PIECE) do
+      local ca, cb = t.x0 + k * TRACK_PIECE, math.min(t.x1, t.x0 + k * TRACK_PIECE + TRACK_PIECE - 1)
+      local box = t.boxes[k]
+      if box == nil then
+        local lo, hi
+        for x = ca, cb do
+          local y = t.ys[x]
+          if y then
+            lo, hi = lo and math.min(lo, y) or y, hi and math.max(hi, y) or y
+          end
+        end
+        box = lo and { lo - 4, hi - lo + 6 } or false
+        t.boxes[k] = box
+      end
+      if box then
+        -- (two pixels of room each side: a sleeper is three wide)
+        bake.piece(t, k, 1, ca - 2, box[1], cb - ca + 5, box[2], function()
+          trackRange(t, ca, cb)
+        end)
+      end
+    end
+  else
+    trackRange(t, xa, xb)
   end
   -- A buffer stop at the far end
   local y = t.ys[t.x1]
@@ -122,7 +155,7 @@ local function drawLamp(l)
   if l.broken then
     -- what is left: the chain, or the post and its arm
     if l.hung then
-      R(IRON_D, math.floor(l.x), l.y - 8, 1, 5)
+      R(IRON_D, math.floor(l.x), l.y - 8 - (l.rope or 0), 1, 5 + (l.rope or 0))
     else
       local x = math.floor(l.x)
       local dir = l.flip and -1 or 1
@@ -133,7 +166,7 @@ local function drawLamp(l)
     return
   end
   if l.hung then
-    R(IRON_D, math.floor(l.x), l.y - 8, 1, 6) -- the chain
+    R(IRON_D, math.floor(l.x), l.y - 8 - (l.rope or 0), 1, 6 + (l.rope or 0)) -- the chain (a lamp hung from the rock has a longer one, up into it)
     local x, y = math.floor(l.x) - 2, l.y - 3
     R(IRON, x, y, 5, 1)
     R(IRON, x, y + 7, 5, 1)
@@ -359,8 +392,8 @@ local function inView(view, x0, x1, y0, y1, margin)
   return x1 > view.x - margin and x0 < view.x + view.w + margin and y1 > view.y - margin and y0 < view.y + view.h + margin
 end
 
--- The scenery in view, behind the hunter
-function minedecor.draw(mine, view)
+-- The scenery in view, behind the hunter (noSupports: without the timber frames and the lamps, for the shadow pass)
+function minedecor.draw(mine, view, noSupports)
   for _, t in ipairs(mine.tracks) do
     local y = t.ys[t.x0]
     if inView(view, t.x0, t.x1, y - 12, y + 12, 8) then
@@ -368,22 +401,42 @@ function minedecor.draw(mine, view)
     end
   end
   for _, s in ipairs(mine.supports) do
-    if inView(view, s.x - 6, s.x + s.gap + 6, s.c, math.max(s.g1, s.g2), 8) then
-      drawSupport(s)
+    if not noSupports and inView(view, s.x - 6, s.x + s.gap + 6, s.c, math.max(s.g1, s.g2), 8) then
+      if bake.enabled.minedecor then
+        -- (it changes only when it breaks or falls: its state is the version)
+        local y0 = s.c - 8
+        bake.piece(s, 0, s.state, s.x - 6, y0, s.gap + 14, math.max(s.g1, s.g2) + 6 - y0, function()
+          drawSupport(s)
+        end)
+      else
+        drawSupport(s)
+      end
     end
   end
   for _, s in ipairs(mine.skeletons) do
     if inView(view, s.x - 20, s.x + 22, s.y - 16, s.y, 4) then
-      drawSkeleton(s)
+      if bake.enabled.minedecor then
+        bake.piece(s, 0, 1, s.x - 26, s.y - 20, 54, 26, function()
+          drawSkeleton(s)
+        end)
+      else
+        drawSkeleton(s)
+      end
     end
   end
   for _, p in ipairs(mine.picks) do
     if inView(view, p.x - 6, p.x + 6, p.y - 14, p.y, 4) then
-      drawPick(p.x, p.y, p.flip, p.tilt)
+      if bake.enabled.minedecor then
+        bake.piece(p, 0, 1, p.x - 14, p.y - 16, 29, 18, function()
+          drawPick(p.x, p.y, p.flip, p.tilt)
+        end)
+      else
+        drawPick(p.x, p.y, p.flip, p.tilt)
+      end
     end
   end
   for _, l in ipairs(mine.lamps) do
-    if inView(view, l.x - 8, l.x + 8, l.y - 8, l.post or l.y + 8, 4) then
+    if not noSupports and inView(view, l.x - 8, l.x + 8, l.y - 8, l.post or l.y + 8, 4) then
       drawLamp(l)
     end
   end

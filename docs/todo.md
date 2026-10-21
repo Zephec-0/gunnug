@@ -130,16 +130,16 @@ Check items off as they land; append new ones at the bottom.
 ## Batch 5 (2026-10-18)
 - [x] Ghoul dig bigger; regular bats use flow pathing + orbit + unstick; roman numerals smaller; smoke fades faster and draws 1 pixel per cell
 - [~] Needle doorway mouth flared/flush floor; shop ceiling opening flared + rubble on roof (verify look in play)
-- [ ] Barrens set dressing (buried skeletons, rock formations, mirage oasis)
+- [ ] Barrens set dressing (buried skeletons, rock formations)
 - [ ] 5 more random events (carnival aim test, gambler den, +3)
 - [ ] 2 new weapons
 
 ## Batch 6 (2026-10-18, headless-tested; not played)
 - [x] Flow pathing for wisps and dread bats; Needle doorway backdrop feathered; shop opening flare
-- [x] Barrens dressing: arches, hoodoos, ruined walls, buried skeletons, a mirage oasis (turns into a dry bed with a coin pouch)
+- [x] Barrens dressing: arches, hoodoos, ruined walls, buried skeletons
 - [x] Random events (src/randevents.lua): carnival aim room (Easy/Medium/Hard), gambler den (slots + high-low), tinker (weapon re-roll), shrine, cave-in rescue, marked beast hunt; generic menu dialog page
 - [x] New weapons: Crossbow (pierce 2, bolts stick in rock) and Flare Pistol (burning, lit flares that stay lit); both locked until taught/found
-- [ ] Events: tune spawn timing/odds in play; mirage, hunt kinds, tinker price
+- [ ] Events: tune spawn timing/odds in play; hunt kinds, tinker price
 
 ## Batch 7 (2026-10-18)
 - [x] Water drag: bullets, acid globs and thrown dynamite lose speed in water (bullets sink); flow pathing for dust devils, gargoyles, crows; crate and iron crate art detailed; buried fossil skeletons in the desert ground (replacing surface bones)
@@ -216,3 +216,37 @@ Check items off as they land; append new ones at the bottom.
 - [x] Tinker: re-roll price is per gun (35 + 30 per re-roll of that gun), bigger cards, re-roll icon redrawn so the arrowhead is not cut off
 - [x] Gun cards: Impact / Recoil / Crit centred in their columns; effects line moved down
 
+
+## Batch 2026-10-20 polish round (headless-tested; not played)
+- [x] Slot machine: outcome rolled first, jackpot 2%, pair 18%, otherwise nothing
+- [x] High-Low: its own lounge track (src/audio.lua TABLE_TRACK, audio.setTable) while the table is open
+- [x] Cave far backgrounds at half brightness (dimmed in overworld.drawDecor)
+- [x] Item drops from enemies and destructibles halved
+- [x] Mountain: built early in the background (surface-entered areas right after area 1), and if the hunter still gets there first a "Building ..." progress screen replaces the 9 s freeze with a gap
+- [x] Summit arena: black hall with slow smoke swirls and drifting dust; the mountain sky-hole glow no longer shows inside it
+- [x] Item/perk UI icons: exact 2x of the 8x8 art (16x16) instead of the 1.5x resample that squashed circles
+- [ ] Maybe: optional full-world pre-generation at run start (about 80 s) / cache
+
+## Batch 2026-10-20 round 6 (headless-tested; not played)
+- [x] Needle lag: the surface-area generation boost no longer applies while the hunter is inside the mountain
+- [x] Sky-hole glow in the mountain is cut out round creatures and the hunter (lighting.entityMask) and a little subdued
+- [x] Dark Hunter hp 600 -> 300 (Crow Rider follows, it is double), aim spread about 3x looser, walking speed 140 -> 93
+- [x] Quarry 1.5x deeper (2300 -> 3450), its boss hall moved down with it
+- [x] Quarry creatures: Lamp Wraith, Cairn Crab (src/quarrymobs.lua) with sounds
+- [x] Ether Crawler (src/ethercrawler.lua): spawns while the fuser is locked, flees, walks walls and ceilings, drops 12 ether
+- [ ] Maybe: GPU offload ideas (bake parallax layers into canvases; LOVE 11 has no compute shaders)
+
+## Batch 2026-10-20 cached drawing (src/bake.lua; headless-tested; not played)
+- [x] Baked into canvases, each with a dev panel (F2) switch and a flag in bake.enabled: rock slabs, the mine's rails/supports/skeletons/pickaxes, item bar slot boxes
+- [ ] Next: the far-background cell caching idea (parallax.lua)
+- [x] Cave background cell caching (mesh per cell) tried and removed: no measurable gain (4.51 vs 4.47 ms draw in the Quarry, more GPU draw calls); the FFI rectangle batch is already cheap when JIT-compiled. Profile.lua hooks switch the JIT off, which made the rectangles look expensive.
+
+- [x] Hung lights ("beacons") added in world gen for the Old Mine, Hollows, Vents and Quarry: theme.beacons = { count, radius, color, strength, style } in src/scenes/catacombs.lua; placed last in cavegen so layouts do not change
+- [x] The beacons are now the mine's own hung oil lamps (breakable, same light), added to mine.lamps in cavegen
+
+## Batch 2026-10-21
+- [x] Mirage removed; mountain-door light now eases in over 160px instead of stepping
+- [x] Dungeon edge walls are plain rock (boss-arena seals unchanged); Quarry narrowed to 1800 wide (Foreman's Hall keeps its size)
+- [x] Boss glyphs (src/glyphs.lua): one per boss (Old Mine, Fen, Queen, Colossus, Big Fish), per run, shown left of the health bottle; all five + the Dark Hunter open the sky door
+- [x] Prospector perk shelf: one perk kept between runs (not Akimbo)
+- [ ] Sky dungeon boss still to design (Dark Hunter does not give a glyph)

@@ -632,6 +632,24 @@ function hud.draw(player, scale)
     love.graphics.setColor(1, 1, 1, hpFade)
     shadowText(hpText, tx, ty, hf)
   end
+  -- The boss glyphs taken so far, glowing on the bottle's body in two staggered columns (a spot each, so none moves
+  -- when another is won); the runes are sized to sit inside the glass
+  do
+    local glyphs = require("src.glyphs")
+    if glyphs.count() > 0 then
+      local c = hud.cell(u)
+      local gs = c * math.max(1, math.floor(13.5 * u / (15 * c)))
+      for i, id in ipairs(glyphs.order) do
+        if glyphs.has(id) then
+          -- (the right-hand column sits lower than the left, so they stagger down the bottle's lean)
+          local left = (i - 1) % 2 == 0
+          local gx = bcx + (left and -9 or 2) * gs
+          local gy = bcy + ((i <= 2 and -11 or 0) + (left and 0 or 5)) * gs
+          glyphs.draw(id, math.floor(gx), math.floor(gy), gs)
+        end
+      end
+    end
+  end
   local belowFlask = bb + 2 * u
   local meta = require("src.meta")
   local fh = f:getHeight()

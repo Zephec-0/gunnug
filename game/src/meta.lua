@@ -501,6 +501,46 @@ function meta.withdraw()
   return all
 end
 
+-- The Prospector's shelf: one perk kept between runs ("" / nil for none). The
+-- gated ones (Akimbo changes the weapon slots) can't be shelved.
+function meta.bankedPerk()
+  local p = profile()
+  local id = p and p.bankedPerk
+  if type(id) == "string" and id ~= "" and require("src.perks").defs[id] then
+    return id
+  end
+  return nil
+end
+
+function meta.canShelve(id)
+  local def = require("src.perks").defs[id]
+  return def ~= nil and not def.gated and meta.bankedPerk() == nil
+end
+
+-- Puts the perk on the shelf (the caller takes it off the run). Returns true if it went.
+function meta.shelvePerk(id)
+  local p = profile()
+  if not p or not meta.canShelve(id) then
+    return false
+  end
+  p.bankedPerk = id
+  save.touch()
+  save.flush()
+  return true
+end
+
+-- Takes the perk off the shelf. Returns its id (the caller gives it to the run).
+function meta.unshelvePerk()
+  local p = profile()
+  local id = meta.bankedPerk()
+  if p and id then
+    p.bankedPerk = ""
+    save.touch()
+    save.flush()
+  end
+  return id
+end
+
 -- The hunter died carrying `gold`: the Miner's Tithe banks some of it
 function meta.tithe(gold)
   local share = math.floor(gold * 0.15 * meta.tier("tithe"))

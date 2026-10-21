@@ -57,6 +57,7 @@ def.occluders = function(e)
     love.graphics.rectangle("fill", math.floor(x), math.floor(gy + (r[2] - fig.G)), math.ceil(r[3]), math.ceil(r[4]))
   end
 end
+def.noRelief = true -- (its drifting shards and glowing cracks come out mottled under the lit sprites shading)
 def.drawMargin = 150 -- (the figure and its shards reach well past its hitbox: no popping in at the screen's edge)
 def.barLift = 42 -- (its health bar floats above the crystal head and the shards, not on its hitbox)
 def.light = function(e)
@@ -74,6 +75,7 @@ mini.light = function(e)
   return { cx, cy - 4, 20, 1, 0.55, 0.2, 0.35 }
 end
 mini.blood = { 0.9, 0.7, 0.45 }
+mini.noRelief = true
 
 local ATTACKS = {
   -- name = { windup, act, recover } in seconds (half of what they were)

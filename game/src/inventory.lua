@@ -8,6 +8,7 @@ local fuser = require("src.fuser")
 local guns = require("src.guns")
 local items = require("src.items")
 local perks = require("src.perks")
+local glyphs = require("src.glyphs")
 
 local inventory = {}
 
@@ -58,8 +59,9 @@ function inventory.starterGun()
 end
 
 function inventory.new()
-  local self = setmetatable({ weapons = {}, items = {}, perks = {}, selected = 1, gold = 0, fuse = fuser.new() }, Inventory)
+  local self = setmetatable({ weapons = {}, items = {}, perks = {}, glyphs = {}, selected = 1, gold = 0, fuse = fuser.new() }, Inventory)
   perks.bind(self)
+  glyphs.bind(self)
   self.weapons[1] = inventory.starterGun()
   self.dynamite = inventory.startDynamite and inventory.startDynamite() or 0
   self.flasks = inventory.startFlasks and inventory.startFlasks() or 0

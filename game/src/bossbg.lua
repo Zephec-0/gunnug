@@ -675,16 +675,21 @@ bossbg.styles = { deep = deepStyle, quarryhall = quarryHallStyle, acid = acidSty
 -- What glows in the arena's far layers, drawn bright over the lit scene in the emissive pass, with
 -- the terrain mask hiding it wherever rock is in front. view = { x, y, w, h }, box = the arena's
 -- box, mask = the frame's terrain mask (nil: draw nothing).
-function bossbg.drawGlow(view, kind, box, mask)
+function bossbg.drawGlow(view, kind, box, mask, ents)
   if not mask then
     return
   end
   if glowShader == nil then
     local ok, sh = pcall(love.graphics.newShader, [[
 uniform Image mask;
+uniform Image ents; // the creatures and the hunter in front (alpha): they stay in front of the glow
 uniform vec2 canvasSize;
 vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
-  float solid = Texel(mask, sc / canvasSize).r;
+  vec2 q = sc / canvasSize;
+  vec2 px = 3.0 / canvasSize; // (a few pixels round each creature too: a dark rim to read it by)
+  float e = max(max(Texel(ents, q + vec2(px.x, 0.0)).a, Texel(ents, q - vec2(px.x, 0.0)).a),
+    max(Texel(ents, q + vec2(0.0, px.y)).a, Texel(ents, q - vec2(0.0, px.y)).a));
+  float solid = max(Texel(mask, q).r, max(e, Texel(ents, q).a));
   vec4 t = Texel(tex, uv) * color;
   return vec4(t.rgb, t.a * (1.0 - smoothstep(0.2, 0.6, solid)));
 }
@@ -699,6 +704,7 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
   love.graphics.push("all")
   love.graphics.setShader(glowShader)
   glowShader:send("mask", mask)
+  glowShader:send("ents", ents or mask)
   glowShader:send("canvasSize", { mask:getDimensions() })
   love.graphics.setBlendMode("add")
   if kind == "deep" then

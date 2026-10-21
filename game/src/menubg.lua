@@ -138,6 +138,7 @@ local function buildPool()
     else
       s = 2
     end
+    s = s * 0.5 -- (the images grew with the scaling change; keep them small in here)
     pool[#pool + 1] = { image = it.image, scale = s, w = w, h = h, category = it.category }
   end
 end

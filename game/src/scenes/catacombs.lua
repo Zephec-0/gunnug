@@ -20,7 +20,9 @@ local enemies = require("src.enemies")
 local fluids = require("src.fluids")
 local parallax = require("src.parallax")
 local bossbg = require("src.bossbg")
+local bake = require("src.bake")
 local pickups = require("src.pickups")
+local glyphs = require("src.glyphs")
 local hud = require("src.hud")
 local materials = require("src.materials")
 local minedecor = require("src.minedecor")
@@ -48,6 +50,7 @@ local THEMES = {
     glow = { 0.35, 0.95, 0.85 }, -- teal fungus
     glowCount = 150,
     glowRadius = 34,
+    beacons = { count = 26 }, -- more of the mine's hung oil lamps
     stalk = { 0.55, 0.62, 0.55 },
     backTop = { 0.10, 0.08, 0.14 },
     backDeep = { 0.06, 0.05, 0.09 },
@@ -74,6 +77,7 @@ local THEMES = {
     glowLight = 0.5, -- (480 of them: half the light each, or the fen is overpowered by green)
     glowCount = 480,
     glowRadius = 40,
+    beacons = { count = 18 },
     stalk = { 0.45, 0.62, 0.50 },
     backTop = { 0.045, 0.06, 0.105 },
     backDeep = { 0.03, 0.04, 0.075 },
@@ -97,6 +101,7 @@ local THEMES = {
     glowLight = 0.4, -- (yellow reads far brighter than the other areas' tints, so they give less light)
     glowCount = 220,
     glowRadius = 36,
+    beacons = { count = 18 },
     crystals = true,
     stalk = { 0.80, 0.72, 0.30 },
     backTop = { 0.085, 0.09, 0.04 },
@@ -104,6 +109,7 @@ local THEMES = {
     pillars = { { 0.035, 0.035, 0.012 }, { 0.20, 0.20, 0.08 }, { 0.11, 0.11, 0.05 } },
     monsters = { ghoul = 14, bat = 10, spitter = 12, hopper = 8, bloater = 46, wisp = 40, worm = 12, roller = 8, miner = 8 }, -- gas bags and fire wisps
     boss = "queen", -- the Sulfur Queen, in the arena that fills the last quarter
+    glyph = "sulfur",
     defy = "Caverns", -- (the pedestal at the middle of the arena says "Defy the ...")
     arenaParallax = "acid", -- the arena's own far scenery (src.bossbg), blended in over the area's
     arenaBack = { 0.05, 0.065, 0.02 }, -- ...and its own backdrop colour
@@ -173,12 +179,13 @@ local THEMES = {
     glow = { 1.0, 0.72, 0.28 }, -- amber crystals
     glowCount = 110,
     glowRadius = 36,
+    beacons = { count = 30 },
     crystals = true,
     stalk = { 0.75, 0.6, 0.38 },
     backTop = { 0.16, 0.11, 0.08 },
     backDeep = { 0.09, 0.06, 0.05 },
     pillars = { { 0.05, 0.035, 0.03 }, { 0.26, 0.18, 0.12 }, { 0.15, 0.10, 0.07 } },
-    monsters = { ghoul = 16, bat = 10, miner = 44, roller = 24, worm = 18, spitter = 6, wisp = 8 },
+    monsters = { ghoul = 16, bat = 10, miner = 44, roller = 24, worm = 18, spitter = 6, wisp = 8, wraith = 14, cairncrab = 22 },
     swarms = { swarmbat = 2 },
     waterPools = 8,
     breakables = { { "urn", 8 }, { "pouch", 14 }, { "lantern", 10 }, { "skullCandle", 6 }, { "tntBarrel", 30 }, { "tntBarrel", 12 }, { "crate", 18 } },
@@ -208,11 +215,12 @@ local THEMES = {
     arena = true,
     arenaFrac = 0.11,
     arenaH = 460,
-    arenaWidth = 0.5,
+    arenaWidth = 0.8, -- (of the Quarry's narrow width: the hall is as wide as ever)
     arenaShape = "rect", -- a walled hall: semi-flat rocky floor, stalactites overhead
     noPlatforms = true,
     arenaBanner = { "The Marble Hall", "A colossus of marble stands dormant at the middle of the hall. It guards the way into the flooded caverns" },
     boss = "golem",
+    glyph = "stone",
     defy = "Stone",
     bossReward = "diving_helm",
     arenaWon = { "The Colossus Has Fallen", "The gates are open. Take the Diving Helm: the flooded caverns lie beyond" },
@@ -276,6 +284,7 @@ local THEMES = {
     arenaBanner = { "The Deep", "Something old and large turns in the dark water" },
     arenaWon = { "The Biggest Fish Has Fallen", "The gates are open. The water is still at last" },
     boss = "bigfish",
+    glyph = "deep",
     arenaShape = "round", -- (an oval of water, no ledges)
     noPlatforms = true,
     defy = "Depths",
@@ -336,6 +345,7 @@ local THEMES = {
     noBraziers = true, -- (no orange fires in it)
     arenaBanner = { "The Summit", "Something wearing your shape waits at the top. The way up lies beyond it" },
     arenaWon = { "The Crow Rider Has Fallen", "The gate above the arena is open: the sky lies beyond" },
+    glyph = "hunter", -- (src.glyphs: what a boss leaves behind; the Dark Hunter can fall before the others)
     boss = "darkhunter", -- the Dark Hunter, then the Crow Rider (src.darkhunter)
     bossReward = "akimbo", -- (and beating him unlocks it for good)
     defy = "Heights",
@@ -419,6 +429,9 @@ THEMES[13] = derive(THEMES[5], {
 })
 
 local AREA_W, AREA_H = 2880, 3100
+-- The Quarry is a narrow dungeon: deep, but only QUARRY_W wide (centred where it always was)
+local QUARRY_W = 1800
+local QUARRY_X = AREA_W + math.floor((AREA_W - QUARRY_W) / 2)
 local PATH_GAP = 644 -- the rock between the two paths below the Queen
 local LAYOUT = {
   { x = 0, y = 0, w = AREA_W, h = AREA_H, tier = 1 },
@@ -431,9 +444,9 @@ local LAYOUT = {
   -- The Old Quarry: a side branch under the east desert, entered from a
   -- crevice on the surface (entry: its x and half-width). Shorter than the
   -- main areas. rank is what it counts as for "deepest reached".
-  { x = AREA_W, y = 0, w = AREA_W, h = 2300, tier = 2, rank = 2, entry = { x = 4300, half = 19 } },
+  { x = QUARRY_X, y = 0, w = QUARRY_W, h = 3450, tier = 2, rank = 2, entry = { x = 4300, half = 19 } },
   -- Under the Quarry: its boss's hall, about the size of the Queen's chamber
-  { x = AREA_W, y = 2300, w = AREA_W, h = 800, tier = 3, rank = 3, parent = 6 },
+  { x = QUARRY_X, y = 3450, w = QUARRY_W, h = 800, tier = 3, rank = 3, parent = 6 },
   -- The west: a flooded mine, entered from a shaft in the west desert (the
   -- hunter drowns without the Diving Helm), and a flooded chamber under it
   { x = -2800, y = 0, w = 2400, h = 2600, tier = 3, rank = 3, entry = { x = -900, half = 380, neck = 50, lake = true } },
@@ -629,6 +642,10 @@ function catacombs.start(w, first, seed, tiers)
         if BOSS_MUSIC[lv.theme.boss] then
           audio.setBoss(false)
         end
+        if lv.theme.glyph then
+          -- (the proof of the kill, left where it fell)
+          require("src.pickups").dropGlyph(e.body.x + e.body.w / 2 - 14, e.body.y + e.body.h / 2 - 6, lv.theme.glyph, -30, -80)
+        end
         catacombs.openGates(lv)
       end
     end
@@ -716,6 +733,7 @@ local function areaFor(i)
   base.palette = lv.theme.palette
   base.arena = lv.theme.arena
   base.glowCount = lv.theme.glowCount
+  base.beacons = lv.theme.beacons
   base.breakables = lv.theme.breakables
   base.mine = lv.theme.mine
   base.stalactites = lv.theme.stalactites
@@ -780,7 +798,21 @@ local function resume(i, budget)
   end
 end
 
+-- The next area to build when nothing is close: the first, then the areas entered from the surface
+-- (the mountain at the east end first: it is seen from the desert, so it must be standing before the
+-- hunter walks over, and they can all be reached on foot without going through the caves), then the
+-- rest in order
 local function nextUnfinished()
+  if levels[1] and not levels[1].info then
+    return 1
+  end
+  for pass = 1, 2 do
+    for i, lv in ipairs(levels) do
+      if not lv.info and lv.entry and (pass == 2 or lv.entry.walk) then
+        return i
+      end
+    end
+  end
   for i, lv in ipairs(levels) do
     if not lv.info then
       return i
@@ -833,6 +865,9 @@ function catacombs.step(budget, px, py, spare)
     local least = 0.00075 -- (always a little, so a frame that is busy on its own still gets the areas built)
     if not i then
       i = nextUnfinished()
+      if i and levels[i].entry and py < firstArea.y0 and not catacombs.levelAt(py, px) then -- (not while inside one of them)
+        least = 0.007 -- (an area entered from the surface, with the hunter still up there: a fair share of each frame)
+      end
     elseif needed(py, px, 700) then
       least = 0.006
     elseif needed(py, px, 1400) then
@@ -880,6 +915,44 @@ end
 -- hunter, plus a margin: everything further off is left to catacombs.step,
 -- a slice a frame. Building it here is a freeze of a second or more.)
 local ENSURE_NEAR = 450
+
+-- Builds area i (and what it needs) at once. When that takes a moment the screen shows a progress
+-- screen meanwhile, rather than the game freezing on a half-built world.
+local function generateShowing(i, started)
+  local lv = levels[i]
+  if not lv or lv.info then
+    return
+  end
+  if i > 1 and not lv.entry then
+    generateShowing(lv.parent or (i - 1), started)
+  end
+  while not lv.info do
+    resume(i, 0.03)
+    if lv.info or os.clock() - started < 0.25 or not love.graphics.isActive() then
+      goto continue
+    end
+    do
+      love.event.pump()
+      for name in love.event.poll() do
+        if name == "quit" then
+          love.event.quit()
+        end
+      end
+      local fonts = require("src.fonts")
+      local w, h = love.graphics.getDimensions()
+      love.graphics.origin()
+      love.graphics.clear(0.02, 0.015, 0.03)
+      love.graphics.setColor(1, 1, 1)
+      local font = fonts.get(math.max(16, math.floor(h / 30)))
+      love.graphics.setFont(font)
+      local dots = string.rep(".", math.floor(os.clock() * 3) % 4)
+      love.graphics.printf("Building " .. (lv.theme.name or "the next area") .. dots, 0, h / 2 - font:getHeight() / 2, w, "center")
+      love.graphics.present()
+    end
+    ::continue::
+  end
+end
+
 function catacombs.ensure(py, px)
   for i, lv in ipairs(levels) do
     -- (the first area is completed by the scene when the hunter goes underground)
@@ -888,10 +961,10 @@ function catacombs.ensure(py, px)
         -- A side branch: when the hunter is near its crevice (or already in its rock)
         local ey = lv.entry.y or lv.y0
         if px and math.abs(px - lv.entry.x) < ENSURE_NEAR + 300 and py < lv.y1 and py > ey - ENSURE_NEAR and py < ey + 600 then
-          catacombs.generate(i)
+          generateShowing(i, os.clock())
         end
       elseif py > lv.y0 - ENSURE_NEAR and py < lv.y1 + ENSURE_NEAR and (not px or (px > lv.x0 - ENSURE_NEAR and px < lv.x1 + ENSURE_NEAR)) then
-        catacombs.generate(i)
+        generateShowing(i, os.clock())
       end
     end
   end
@@ -935,15 +1008,20 @@ function catacombs.levelAt(y, x)
   return best or #levels
 end
 
--- 1 inside a mountain (well in from its silhouette), 0.5 near its skin, 0 outside: how
+-- 0 outside a mountain, easing to 1 once INDOORS_RAMP px in from its face: how
 -- dark the light should be there although the rock stands above the ground
+local INDOORS_RAMP = 160
+
 function catacombs.indoors(x, y)
   for _, lv in ipairs(levels) do
     local th = lv.theme
     if th.indoors and th.profile and x >= lv.x0 and x <= lv.x1 and y >= lv.y0 and y <= lv.y1 then
       local xa, xb = th.profile(y)
       if xa and x >= xa and x <= xb and y >= lv.y0 then
-        return (x >= xa + 24 and x <= xb - 24 and y >= lv.y0 + 24) and 1 or 0.5
+        -- darkens gradually over the first stretch inside (not in one step at the door)
+        local d = math.min(x - xa, xb - x, y - lv.y0)
+        local f = math.max(0, math.min(1, d / INDOORS_RAMP))
+        return f * f * (3 - 2 * f)
       end
     end
   end
@@ -1168,6 +1246,9 @@ local propTimer = 0
 local gravityScale = 1
 
 -- Banners as the hunter reaches each area, the shop-reached message, and gas
+local openGate -- (below)
+local glyphHint = 0 -- seconds until the sealed door may speak again
+
 function catacombs.update(player, dt)
   catacombs.spawnProps()
   updateBossCamera(player, dt)
@@ -1179,6 +1260,22 @@ function catacombs.update(player, dt)
   end
   local px, py = player:center()
   local at = catacombs.levelAt(py, px)
+  -- The sky's door: opens once every glyph is in hand, and says what it wants when approached
+  glyphHint = math.max(0, glyphHint - dt)
+  for _, lv in ipairs(levels) do
+    local held = lv.info and lv.info.arena and lv.info.arena.held
+    if held then
+      if glyphs.complete() then
+        lv.info.arena.held = nil
+        openGate(held)
+        audio.play("hatch")
+        hud.showBanner("The Door Opens", "Every glyph is lit. The way up to the sky lies open")
+      elseif glyphHint <= 0 and math.abs(px - (held.x0 + held.x1) / 2) < 70 and math.abs(py - held.y1) < 70 then
+        glyphHint = 6
+        effects.popup((held.x0 + held.x1) / 2, held.y1 + 14, "Sealed: " .. glyphs.count() .. " / " .. glyphs.total() .. " glyphs", { 0.85, 0.8, 0.95 })
+      end
+    end
+  end
   -- Gravity: lighter in the sky
   do
     local want = 1
@@ -1281,6 +1378,19 @@ function catacombs.seal(lv, room)
   end
 end
 
+function openGate(g)
+  for y = g.y0, g.y1 do
+    for x = g.x0, g.x1 do
+      world:setRaw(x, y, materials.AIR)
+    end
+  end
+  world:repaintRegion(g.x0, g.y0, g.x1, g.y1)
+  physics.rebuildRegion(g.x0, g.y0, g.x1, g.y1)
+  for _ = 1, 30 do
+    effects.particle(g.x0 + love.math.random() * (g.x1 - g.x0), g.y0 + 2, (love.math.random() - 0.5) * 40, 10 + love.math.random() * 50, 1.0, { 0.40, 0.41, 0.48 }, 520)
+  end
+end
+
 -- The Queen is dead: the iron gates over both shafts open
 function catacombs.openGates(lv)
   local a = lv.info.arena
@@ -1325,18 +1435,16 @@ function catacombs.openGates(lv)
     a.seal = nil
   end
   for _, g in ipairs(a.gates) do
-    for y = g.y0, g.y1 do
-      for x = g.x0, g.x1 do
-        world:setRaw(x, y, materials.AIR)
-      end
-    end
-    world:repaintRegion(g.x0, g.y0, g.x1, g.y1)
-    physics.rebuildRegion(g.x0, g.y0, g.x1, g.y1)
-    for _ = 1, 30 do
-      effects.particle(g.x0 + love.math.random() * (g.x1 - g.x0), g.y0 + 2, (love.math.random() - 0.5) * 40, 10 + love.math.random() * 50, 1.0, { 0.40, 0.41, 0.48 }, 520)
+    if g.glyph and not glyphs.complete() then
+      a.held = g -- (the sky's door stays shut until every glyph is in hand: see catacombs.update)
+    else
+      openGate(g)
     end
   end
   local won = lv.theme.arenaWon or { "The Queen Has Fallen", "The gates are open. Two shops lie below, left and right: choose one" }
+  if a.held then
+    won = { won[1], "The door to the sky is sealed by " .. glyphs.total() .. " glyphs. Bring the proof of every boss" }
+  end
   hud.showBanner(won[1], won[2])
 end
 
@@ -1793,23 +1901,47 @@ float fbm(vec2 p) {
 vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
   vec2 p = uv * sliceSize + offset;
   if (hall > 0.5) {
-    // the hall: near-black slate with one slow, soft haze (no folds, no lensing) and
-    // sparks winking in it
-    vec2 hq = p * 0.006;
-    float h1 = fbm(hq + vec2(time * 0.012, 0.0));
-    vec3 hc = mix(vec3(0.012, 0.014, 0.026), vec3(0.036, 0.030, 0.066), smoothstep(0.25, 0.8, h1));
+    // the hall: black, with a few slow swirls of faint smoke turning through it, dust
+    // drifting up, and the odd spark winking
+    vec2 hq = p * 0.007;
+    vec2 centre = (boxMin + boxMax) * 0.5;
+    // (the smoke is warped twice and turns a little about the hall's middle)
+    float ang = 0.35 * sin(time * 0.05) + length(p - centre) * 0.0011;
+    vec2 rp = p - centre;
+    rp = vec2(rp.x * cos(ang) - rp.y * sin(ang), rp.x * sin(ang) + rp.y * cos(ang));
+    vec2 sq = rp * 0.0065 + vec2(time * 0.006, 0.0);
+    vec2 w1 = vec2(fbm(sq + vec2(0.0, time * 0.018)), fbm(sq + vec2(5.2, 1.3) - vec2(time * 0.014, 0.0)));
+    float sm = fbm(sq + 2.6 * w1);
+    float arm = smoothstep(0.52, 0.82, sm);
+    vec3 hc = vec3(0.004, 0.004, 0.008);
+    hc += vec3(0.030, 0.022, 0.060) * smoothstep(0.30, 0.85, fbm(hq + vec2(time * 0.01, 0.0))) * 0.8;
+    hc += vec3(0.095, 0.058, 0.17) * arm;
+    // dust: small pale specks drifting slowly up and across, each a little different
+    for (int k = 0; k < 2; k++) {
+      float sz = k == 0 ? 7.0 : 13.0;
+      vec2 dp = p + vec2(time * (k == 0 ? 3.0 : 1.6), -time * (k == 0 ? 5.0 : 2.8)) + float(k) * 41.0;
+      vec2 dc = floor(dp / sz);
+      float dr = hash(dc + 17.3 + float(k));
+      if (dr > 0.8) {
+        vec2 at = vec2(0.2 + 0.6 * hash(dc + 4.1), 0.2 + 0.6 * hash(dc + 8.8));
+        at += 0.12 * vec2(sin(time * 0.7 + dr * 50.0), cos(time * 0.6 + dr * 30.0));
+        float dd = length(fract(dp / sz) - at) * sz;
+        float fade = 0.4 + 0.6 * (0.5 + 0.5 * sin(time * 0.5 + dr * 90.0));
+        hc += vec3(0.40, 0.36, 0.55) * smoothstep(1.3, 0.3, dd) * fade * (k == 0 ? 0.32 : 0.2);
+      }
+    }
     vec2 cell = floor(p / 9.0);
     vec2 inCell = fract(p / 9.0);
     float r = hash(cell + 3.7);
-    if (r > 0.955) {
+    if (r > 0.975) {
       vec2 at = vec2(0.25 + 0.5 * hash(cell + 9.1), 0.25 + 0.5 * hash(cell + 2.3));
       float tw = 0.5 + 0.5 * sin(time * (1.2 + 2.0 * hash(cell + 5.5)) + r * 40.0);
       float spark = smoothstep(0.16, 0.0, length(inCell - at)) * tw * tw;
-      hc += mix(vec3(0.55, 0.40, 0.95), vec3(0.45, 0.80, 1.0), hash(cell + 7.7)) * spark * 0.85;
+      hc += mix(vec3(0.55, 0.40, 0.95), vec3(0.45, 0.80, 1.0), hash(cell + 7.7)) * spark * 0.6;
     }
-    float ha = 1.0;
-    ha *= smoothstep(0.0, 90.0, p.x - boxMin.x) * smoothstep(0.0, 90.0, boxMax.x - p.x);
-    ha *= smoothstep(0.0, 90.0, p.y - boxMin.y) * smoothstep(0.0, 90.0, boxMax.y - p.y);
+    // (solid to the edge of the box: only the last few pixels soften)
+    float ha = smoothstep(0.0, 6.0, p.x - boxMin.x) * smoothstep(0.0, 6.0, boxMax.x - p.x)
+      * smoothstep(0.0, 6.0, p.y - boxMin.y) * smoothstep(0.0, 6.0, boxMax.y - p.y);
     return vec4(hc * ha, ha);
   }
   vec2 q = p * 0.011;
@@ -1918,8 +2050,8 @@ function catacombs.drawDecor(view)
       local drawGlow = lv.theme.crystals and drawCrystals or drawFungus
       local arena = info.arena
       if lv.theme.arenaDecor and arena and view.x + view.w > arena.x0 and view.x < arena.x1 and view.y + view.h > arena.top - 10 and view.y < arena.floorY + 10 then
-        -- The Dark Hunter's hall: the shop's void (black and violet) behind the oval, whatever the cave's
-        -- own scenery was (the rock round the oval covers the rest of the box)
+        -- The Dark Hunter's hall: near-black with slow swirls and drifting dust behind the oval, whatever
+        -- the mountain's own scenery was (the rock round the oval covers the rest of the box)
         drawVoidRect({ x = arena.x0, y = arena.top }, arena.x0 - 4, arena.top - 4, arena.w + 8, arena.h + 8, view, nil, nil, nil, nil, nil, nil, true)
       end
       if lv.boss and not lv.boss.noAltar and lv.boss.state ~= "done" and lv.info.arena and visible(view, lv.info.arena.cx, lv.info.arena.floorY, 160) then
@@ -1965,12 +2097,27 @@ function catacombs.drawDecor(view)
         end
         for _, p in ipairs(slabs) do
           if visible(view, (p.x0 + p.x1) / 2, p.y, 60) then
-            for x = p.x0, p.x1 do
-              local thick = 5 + math.floor(love.math.noise(x * 0.2, p.y) * 3)
-              love.graphics.setColor(def.topColor[1], def.topColor[2], def.topColor[3])
-              love.graphics.rectangle("fill", x, p.y, 1, 1)
-              love.graphics.setColor(def.color[1] * 0.85, def.color[2] * 0.85, def.color[3] * 0.85)
-              love.graphics.rectangle("fill", x, p.y + 1, 1, thick - 1)
+            -- (a slab never changes: drawn once into a canvas, in pieces of at most 512 px, see src.bake)
+            local function columns(xa, xb)
+              for x = xa, xb do
+                local thick = 5 + math.floor(love.math.noise(x * 0.2, p.y) * 3)
+                love.graphics.setColor(def.topColor[1], def.topColor[2], def.topColor[3])
+                love.graphics.rectangle("fill", x, p.y, 1, 1)
+                love.graphics.setColor(def.color[1] * 0.85, def.color[2] * 0.85, def.color[3] * 0.85)
+                love.graphics.rectangle("fill", x, p.y + 1, 1, thick - 1)
+              end
+            end
+            if bake.enabled.slabs then
+              for xa = p.x0, p.x1, 512 do
+                local xb = math.min(p.x1, xa + 511)
+                if xb >= view.x - 4 and xa <= view.x + view.w + 4 then
+                  bake.piece(p, (xa - p.x0) / 512, 1, xa, p.y, xb - xa + 1, 9, function()
+                    columns(xa, xb)
+                  end)
+                end
+              end
+            else
+              columns(p.x0, p.x1)
             end
           end
         end
@@ -1997,9 +2144,35 @@ end
 
 function catacombs.drawEmissive(view)
   fluids.drawEmissive(view)
+  -- (the far scenery's glow is cut out round the creatures and the hunter, so they stay readable against it)
+  local ents
+  local function entities()
+    if ents == nil then
+      ents = require("src.lighting").entityMask(function()
+        require("src.enemies").draw(view)
+        local p = require("src.game").player()
+        if p then
+          p:draw()
+        end
+      end) or false
+    end
+    return ents or nil
+  end
   for _, lv in ipairs(levels) do
     if lv.theme.parallax == 9 and lv.theme.profile and inArea(lv, view) then
-      parallax.drawSkyGlow(view.x, view.y, view.x + view.w, view.y + view.h, require("src.lighting").mask(), lv.theme.profile)
+      local a = lv.info and lv.info.arena
+      parallax.drawSkyGlow(view.x, view.y, view.x + view.w, view.y + view.h, require("src.lighting").mask(), lv.theme.profile,
+        a and lv.theme.arenaDecor and { a.x0 - 4, a.top - 4, a.x1 + 4, a.floorY + 4 } or nil, entities())
+    end
+  end
+  -- The old mine's far lanterns (their flames and glow, bright over the lit scene, hidden behind rock)
+  for _, lv in ipairs(levels) do
+    if lv.index == 1 and not lv.theme.parallax and inArea(lv, view) then
+      -- (only inside the area's own box: the far scenery is not drawn outside it, nor the sky over it)
+      local x0, y0, x1, y1 = math.max(view.x, lv.x0), math.max(view.y, lv.y0), math.min(view.x + view.w, lv.x1), math.min(view.y + view.h, lv.y1)
+      if x1 > x0 and y1 > y0 then
+        parallax.drawLanternGlow(view.x, view.y, x0, y0, x1, y1, require("src.lighting").mask(), entities())
+      end
     end
   end
   -- What glows in a boss arena's far scenery (src.bossbg), drawn bright over the lit scene but
@@ -2008,7 +2181,7 @@ function catacombs.drawEmissive(view)
     if lv.theme.arenaParallax and inArea(lv, view) then
       local bx0, by0, bx1, by1 = catacombs.arenaBox(lv.index)
       if bx0 and view.x + view.w > bx0 and view.x < bx1 and view.y + view.h > by0 and view.y < by1 then
-        bossbg.drawGlow(view, lv.theme.arenaParallax, { bx0, by0, bx1, by1 }, require("src.lighting").mask())
+        bossbg.drawGlow(view, lv.theme.arenaParallax, { bx0, by0, bx1, by1 }, require("src.lighting").mask(), entities())
       end
     end
   end
@@ -2099,6 +2272,23 @@ function catacombs.drawEmissive(view)
 end
 
 -- Water and smoke, in front of the hunter
+-- What is drawn in the dungeon's decor that stands in the world, once more for the lit sprites test (see game.draw)
+-- (shadows: for the shadow pass, without the timber frames: their pillars and the beams he jumps up through
+-- do not block light)
+function catacombs.drawLitDecor(view, shadows)
+  for _, lv in ipairs(levels) do
+    local info = inArea(lv, view) and lv.info
+    if info then
+      if info.mine then
+        minedecor.draw(info.mine, view, shadows)
+      end
+      if info.story then
+        story.draw(info.story, view)
+      end
+    end
+  end
+end
+
 function catacombs.drawFront(view)
   fluids.drawFront(view)
 end

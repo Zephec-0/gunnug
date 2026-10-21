@@ -32,6 +32,7 @@ local glow -- radial falloff sprite (fallback path)
 local white -- 1x1 sprite the shader quads are drawn with
 local creatureMaskShader
 local lightShader, maskShader, terrainShader, softShader
+local litShader, litTemp -- the sprite relief pass (see lighting.litSprites)
 local fogGather, fogBlur, fogApply -- fog shaders (nil if unavailable)
 local fogA, fogB -- quarter-size fog canvases, ping-ponged by the blur
 local FOG_DIV = 4
@@ -85,8 +86,15 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
   // A light inside a creature (its own glow) is not shadowed by that creature
   vec2 lq = lightPos / canvasSize;
   float creatureGate = 1.0;
-  if (lq.x > 0.0 && lq.y > 0.0 && lq.x < 1.0 && lq.y < 1.0 && Texel(mask, lq).b > 0.0) {
-    creatureGate = 0.0;
+  float objectGate = 0.0; // a light inside an object (a lantern, the hunter) is not shadowed by it, only near itself
+  if (lq.x > 0.0 && lq.y > 0.0 && lq.x < 1.0 && lq.y < 1.0) {
+    vec4 at = Texel(mask, lq);
+    if (at.b > 0.0) {
+      creatureGate = 0.0;
+    }
+    if (at.g > 0.0) {
+      objectGate = 1.0;
+    }
   }
   if (dist > 6.0) {
     float occ = 0.0;
@@ -99,7 +107,8 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
       if (along > 3.0 && along < dist - 3.0) {
         vec2 q = (p + (lightPos - p) * t) / canvasSize;
         vec4 m = Texel(mask, q);
-        occ += max(m.r, m.b * creatureGate);
+        float own = (objectGate > 0.5 && dist - along < 14.0) ? 0.0 : 1.0;
+        occ += max(m.r, max(m.b * creatureGate, m.g * own));
       }
     }
     occ = occ * dist / 24.0;
@@ -217,9 +226,11 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
 
 -- Creatures are written to the blue channel only (see the light shader)
 local CREATURE_MASK_SOURCE = [[
+uniform float scale;
+uniform float objects; // 1: drawn into the objects' channel (green), whose shadows a light inside the object only skips near itself
 vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
-  float a = Texel(tex, uv).a * color.a;
-  return vec4(0.0, 0.0, a, 1.0);
+  float a = Texel(tex, uv).a * color.a * scale;
+  return objects > 0.5 ? vec4(0.0, a, 0.0, 1.0) : vec4(0.0, 0.0, a, 1.0);
 }
 ]]
 
@@ -312,6 +323,55 @@ function lighting.resize(w, h)
   end
 end
 
+-- Everything that stands in the world (props, chests, people, the hunter, the mine's shoring) throws shadows
+-- from the lights too, like the creatures: it is drawn into the occluder pass (see game.draw), a little
+-- softer than rock. lighting.occluderScale sets how solid the shapes drawn next are (1 = as solid as drawn).
+lighting.objectShadows = true
+lighting.OBJECT_SHADOW = 0.7
+-- (what is drawn while it is set goes into the objects' channel of the mask: see the light shader)
+function lighting.occluderScale(v)
+  if creatureMaskShader then
+    creatureMaskShader:send("scale", v)
+    creatureMaskShader:send("objects", v < 1 and 1 or 0)
+  end
+end
+
+-- An experiment (dev panel: "Lit sprites"): everything that stands in the world (props, chests, shops, people,
+-- creatures, the hunter) is shaded by the light falling on it. Each sprite's own pixels give it a little relief
+-- (brighter pixels and its silhouette stand up from it), and the light map says which way the light comes from,
+-- so the side toward a lamp brightens and the side away darkens, before the light map is multiplied over.
+local LIT_SOURCE = [[
+uniform Image light;  // the light map
+uniform Image ents;   // what stands in the world (alpha)
+uniform vec2 texel;
+uniform float strength;
+float lum(vec3 c) { return dot(c, vec3(0.3, 0.59, 0.11)); }
+float height(vec2 p, Image tex) {
+  float a = Texel(ents, p).a;
+  return a * (lum(Texel(tex, p).rgb) + 0.12); // (the silhouette counts for little: its edges stay soft)
+}
+vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
+  vec4 c = Texel(tex, uv);
+  if (Texel(ents, uv).a < 0.5) {
+    return c;
+  }
+  vec2 dx = vec2(texel.x, 0.0);
+  vec2 dy = vec2(0.0, texel.y);
+  float hx = height(uv + dx, tex) - height(uv - dx, tex);
+  float hy = height(uv + dy, tex) - height(uv - dy, tex);
+  vec3 n = normalize(vec3(-hx * 2.2, -hy * 2.2, 1.0));
+  float r = 6.0;
+  float gx = lum(Texel(light, uv + dx * r).rgb) - lum(Texel(light, uv - dx * r).rgb);
+  float gy = lum(Texel(light, uv + dy * r).rgb) - lum(Texel(light, uv - dy * r).rgb);
+  vec3 ld = normalize(vec3(gx * 14.0, gy * 14.0, 0.7));
+  float lit = smoothstep(0.03, 0.5, lum(Texel(light, uv).rgb));
+  float shade = 1.0 + (dot(n, ld) - ld.z) * 1.5 * strength * (0.35 + lit);
+  return vec4(c.rgb * clamp(shade, 0.8, 1.45), c.a);
+}
+]]
+lighting.litSprites = true
+lighting.litStrength = 1.6
+
 function lighting.load()
   canvas = love.graphics.newCanvas(W, H)
   hazeCanvas = love.graphics.newCanvas(W, H)
@@ -333,6 +393,12 @@ function lighting.load()
       softShader = sf
       canvas:setFilter("linear", "linear")
       hazeCanvas:setFilter("linear", "linear")
+    end
+    local okL, lt = pcall(love.graphics.newShader, LIT_SOURCE)
+    if okL then
+      litShader = lt
+    else
+      print("lighting: lit sprite shader unavailable", lt)
     end
     local okT, t = pcall(love.graphics.newShader, TERRAIN_SOURCE)
     if okT then
@@ -467,6 +533,8 @@ function lighting.render(camX, camY, drawTerrain, drawOccluders)
       love.graphics.setBlendMode("lighten", "premultiplied")
       if creatureMaskShader then
         love.graphics.setShader(creatureMaskShader)
+        creatureMaskShader:send("scale", 1)
+        creatureMaskShader:send("objects", 0)
         drawOccluders()
       end
       love.graphics.setBlendMode("alpha")
@@ -550,6 +618,27 @@ end
 -- The terrain mask of this frame (solid = white), at the size of the frame; nil if the lighting shaders are unavailable
 function lighting.mask()
   return lightShader and maskCanvas or nil
+end
+
+-- A picture of the creatures and the hunter as they stand this frame (their alpha), at the size of the
+-- frame, for glows that must stay behind them: draw() draws them in world coordinates. nil without the shaders.
+local entCanvas
+function lighting.entityMask(draw)
+  if not maskCanvas then
+    return nil
+  end
+  local w, h = maskCanvas:getDimensions()
+  if not entCanvas or entCanvas:getWidth() ~= w or entCanvas:getHeight() ~= h then
+    entCanvas = love.graphics.newCanvas(w, h)
+    entCanvas:setFilter("nearest", "nearest")
+  end
+  love.graphics.push("all")
+  love.graphics.setCanvas(entCanvas)
+  love.graphics.clear(0, 0, 0, 0)
+  love.graphics.setColor(1, 1, 1, 1)
+  draw()
+  love.graphics.pop()
+  return entCanvas
 end
 
 -- This frame's lights (read-only; for things that reflect them)
@@ -646,11 +735,40 @@ function lighting.drawMotes(camX, camY)
   love.graphics.pop()
 end
 
+-- The relief pass over what stands in the world (ents: its alpha, see lighting.entityMask)
+local function litPass(ents)
+  local target = love.graphics.getCanvas()
+  if not (target and litShader and ents) then
+    return
+  end
+  local tw, th = target:getDimensions()
+  if not litTemp or litTemp:getWidth() ~= tw or litTemp:getHeight() ~= th then
+    litTemp = love.graphics.newCanvas(tw, th)
+    litTemp:setFilter("nearest", "nearest")
+  end
+  love.graphics.setCanvas(litTemp)
+  love.graphics.clear(0, 0, 0, 0)
+  love.graphics.setBlendMode("replace", "premultiplied")
+  love.graphics.setColor(1, 1, 1, 1)
+  love.graphics.draw(target)
+  love.graphics.setCanvas(target)
+  love.graphics.setShader(litShader)
+  litShader:send("light", canvas)
+  litShader:send("ents", ents)
+  litShader:send("texel", { 1 / tw, 1 / th })
+  litShader:send("strength", lighting.litStrength)
+  love.graphics.draw(litTemp)
+  love.graphics.setShader()
+end
+
 -- Multiplies the light map over everything drawn so far on the current
--- canvas, then adds the haze
-function lighting.apply()
+-- canvas, then adds the haze (ents: what stands in the world, if the lit sprites test is on)
+function lighting.apply(ents)
   love.graphics.push("all")
   love.graphics.origin()
+  if lighting.litSprites and ents then
+    litPass(ents)
+  end
   love.graphics.setBlendMode("multiply", "premultiplied")
   love.graphics.setColor(1, 1, 1)
   if softShader then

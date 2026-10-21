@@ -77,6 +77,20 @@ end
 
 -- Style 1: the old mine ------------------------------------------------------
 
+-- The lanterns hung from the standing timber frames: fn(x, y, flicker), (x, y) the top of the bulb.
+-- (their light is drawn apart, over the lit scene: see parallax.drawLanternGlow)
+local function mineLanterns(camX, camY, vx0, vy0, vx1, vy1, t, fn)
+  cells(0.78, 104, 168, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
+    if hash(i, j) < 0.25 or hash(i + 11, j + 2) < 0.35 or hash(i, j + 17) >= 0.5 then
+      return
+    end
+    local fx = x + math.floor(hash(i + 3, j) * 60)
+    local fy = y + math.floor(hash(i, j + 5) * 60)
+    local gap = 22 + math.floor(hash(i, j + 9) * 10)
+    fn(fx + gap / 2, fy + 8, 0.55 + 0.25 * math.sin(t * 7 + i * 3 + j))
+  end)
+end
+
 local function mineStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
   -- Far rock pillars
   local p, spacing = 0.55, 74
@@ -115,12 +129,11 @@ local function mineStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
         rect(wood, 0.7, fx + 3 + k, fy + 3 + k, 1, 1)
         rect(wood, 0.7, fx + gap - 1 - k, fy + 3 + k, 1, 1)
       end
-      -- A lantern hung from the beam, a warm spark in the dark
+      -- A lantern hung from the beam: its chain and cage here, its flame and glow in parallax.drawLanternGlow
       if hash(i, j + 17) < 0.5 then
-        local flick = 0.55 + 0.25 * math.sin(t * 7 + i * 3 + j)
         rect(PCOL_1, 0.6, fx + gap / 2, fy + 3, 1, 5)
-        rect(PCOL_2, flick, fx + gap / 2 - 1, fy + 8, 3, 4)
-        rect(PCOL_2, flick * 0.25, fx + gap / 2 - 4, fy + 5, 9, 10)
+        rect(PCOL_1, 0.9, fx + gap / 2 - 1, fy + 8, 3, 1)
+        rect(PCOL_1, 0.9, fx + gap / 2 - 1, fy + 11, 3, 1)
       end
     end
   end)
@@ -561,28 +574,38 @@ end
 -- The holes' sky drawn bright over the lit scene, but only where the air shows them
 -- (the terrain mask hides it behind rock), so it never spills onto the ground
 local glowShader
-function parallax.drawSkyGlow(vx0, vy0, vx1, vy1, mask, profile)
-  if not mask then
-    return
-  end
+local function getGlowShader()
   if glowShader == nil then
     local ok, sh = pcall(love.graphics.newShader, [[
 uniform Image mask;
+uniform Image ents; // the creatures and the hunter in front (alpha): they stay in front of the glow
 uniform vec2 canvasSize;
 vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
-  float solid = Texel(mask, sc / canvasSize).r;
+  vec2 q = sc / canvasSize;
+  vec2 px = 3.0 / canvasSize; // (a few pixels round each creature too: a dark rim to read it by)
+  float e = max(max(Texel(ents, q + vec2(px.x, 0.0)).a, Texel(ents, q - vec2(px.x, 0.0)).a),
+    max(Texel(ents, q + vec2(0.0, px.y)).a, Texel(ents, q - vec2(0.0, px.y)).a));
+  float solid = max(Texel(mask, q).r, max(e, Texel(ents, q).a));
   vec4 t = Texel(tex, uv) * color;
   return vec4(t.rgb, t.a * (1.0 - smoothstep(0.2, 0.6, solid)));
 }
 ]])
     glowShader = ok and sh or false
   end
-  if not glowShader then
+  return glowShader
+end
+
+function parallax.drawSkyGlow(vx0, vy0, vx1, vy1, mask, profile, skip, ents)
+  if not mask then
+    return
+  end
+  if not getGlowShader() then
     return
   end
   local camX, camY = vx0, vy0
   love.graphics.setShader(glowShader)
   glowShader:send("mask", mask)
+  glowShader:send("ents", ents or mask)
   glowShader:send("canvasSize", { mask:getDimensions() })
   cells(HOLE_P, HOLE_CW, HOLE_CH, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
     local hx, hy, rw, rh = holeAt(i, j, x, y)
@@ -593,11 +616,57 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
     if not (xa and hx > xa + 40 and hx < xb - 40) then
       return
     end
+    -- (skip: a box { x0, y0, x1, y1 } the sky is not to show in, the summit's hall)
+    if skip and hx + rw > skip[1] and hx - rw < skip[3] and hy + rh > skip[2] and hy - rh < skip[4] then
+      return
+    end
     local sp = holeSprite(i, j, hx, hy, rw, rh)
-    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.setColor(1, 1, 1, 0.7) -- (the sky through a hole, a little subdued so what stands against it shows)
     love.graphics.draw(sp.glow, math.floor(hx) + sp.ox, math.floor(hy) + sp.oy)
   end)
   love.graphics.setShader()
+end
+
+-- The old mine's far lanterns, lit: a flame and a soft round glow drawn bright over the lit scene
+-- (the lighting would otherwise tint them like the rock), hidden behind terrain and creatures
+local lanternGlow
+local function lanternSprite()
+  if not lanternGlow then
+    local n = 49
+    local data = love.image.newImageData(n, n)
+    local c = (n - 1) / 2
+    data:mapPixel(function(x, y)
+      local d = math.sqrt((x - c) ^ 2 + (y - c) ^ 2) / c
+      local a = math.max(0, 1 - d)
+      return 1, 0.6 + 0.25 * a, 0.26 + 0.35 * a, a * a * 0.8
+    end)
+    lanternGlow = love.graphics.newImage(data)
+    lanternGlow:setFilter("linear", "linear")
+  end
+  return lanternGlow
+end
+
+-- (camX, camY: the camera; vx0..vy1: the part of the view to draw, the area's own box: the far scenery is drawn
+-- nowhere else, so neither are its lanterns)
+function parallax.drawLanternGlow(camX, camY, vx0, vy0, vx1, vy1, mask, ents)
+  if not mask or not getGlowShader() then
+    return
+  end
+  love.graphics.setShader(glowShader)
+  glowShader:send("mask", mask)
+  glowShader:send("ents", ents or mask)
+  glowShader:send("canvasSize", { mask:getDimensions() })
+  local sprite = lanternSprite()
+  mineLanterns(camX, camY, vx0, vy0, vx1, vy1, love.timer.getTime(), function(x, y, flick)
+    love.graphics.setColor(1, 1, 1, 0.55 + 0.45 * flick)
+    love.graphics.draw(sprite, math.floor(x) + 0.5 - 24.5, math.floor(y) + 2 - 24.5)
+    love.graphics.setColor(1, 0.72, 0.3, 0.5 + 0.5 * flick)
+    love.graphics.rectangle("fill", math.floor(x) - 1, math.floor(y) + 1, 3, 3)
+    love.graphics.setColor(1, 0.95, 0.72, 0.5 + 0.5 * flick)
+    love.graphics.rectangle("fill", math.floor(x), math.floor(y) + 2, 1, 2)
+  end)
+  love.graphics.setShader()
+  love.graphics.setColor(1, 1, 1)
 end
 
 local stalSprites = {} -- (each hanging rock drawn once into a picture)

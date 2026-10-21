@@ -89,7 +89,7 @@ local CROW_SEAT = 5 -- how much higher than its middle he sits, on top of its fe
 
 -- Tuning
 local T = {
-  speed = 140, -- on foot, a quarter quicker than the hunter
+  speed = 93, -- on foot, a little slower than the hunter (112)
   keep = 150, -- the distance he keeps
   jump = 250,
   airJumps = 3, -- jumps before he must land
@@ -110,7 +110,7 @@ local T = {
 local def = {
   name = "The Dark Hunter",
   boss = true, anchored = true, ground = true, alwaysActive = true,
-  w = 8, h = 19, hp = 600, speed = T.speed,
+  w = 8, h = 19, hp = 300, speed = T.speed,
   sight = 900, forget = 4000,
   knockback = 0.02, knockMul = 0.05, gold = { 220, 280 }, weight = 20,
   spriteW = 8, spriteH = 19, scale = 1,
@@ -254,7 +254,7 @@ local function fireVolley(e, world)
   end
   for i, g in ipairs(e.guns) do
     if g:canFire() then
-      local spread = (love.math.random() - 0.5) * 0.08
+      local spread = (love.math.random() - 0.5) * 0.26 -- (a loose aim: about 7 degrees either way)
       local list = g:fire(fig.aimAngle + spread, {})
       if list then
         fired = true

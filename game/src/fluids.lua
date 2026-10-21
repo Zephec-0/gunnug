@@ -2263,8 +2263,12 @@ local function rowBlock(gy, block)
   end
   if not entry or entry.ver ~= ver then
     local runs, spans = entry and entry.runs or {}, entry and entry.spans or {}
+    local lent = entry and entry.lent or {} -- (cells the simulation took for rock that touch this water: see below)
     for i = #runs, 1, -1 do
       runs[i] = nil
+    end
+    for i = #lent, 1, -1 do
+      lent[i] = nil
     end
     for i = #spans, 1, -1 do
       spans[i] = nil
@@ -2285,6 +2289,14 @@ local function rowBlock(gy, block)
               world:solidRow(g0 * C + HALF, g1 * C + HALF, (gy - 1) * C + HALF, above, 0)
             end
             open = above[(gx - g0) * C] == 0
+            if not open then
+              lent[#lent + 1] = gx -- (a rock cell over the water: its open pixels are water's)
+              lent[#lent + 1] = gy - 1
+            end
+          end
+          if not water[row + gx + K] and solidAt(row + gx + K) then
+            lent[#lent + 1] = gx
+            lent[#lent + 1] = gy + 1
           end
           if open and not s0 then
             s0 = gx
@@ -2299,6 +2311,15 @@ local function rowBlock(gy, block)
           spans[#spans + 1] = s0
           spans[#spans + 1] = gx - 1
         end
+        -- (rock cells at the ends of the run lend their open pixels too)
+        if not water[row + a - 1] and solidAt(row + a - 1) then
+          lent[#lent + 1] = a - 1
+          lent[#lent + 1] = gy
+        end
+        if not water[row + gx] and solidAt(row + gx) then
+          lent[#lent + 1] = gx
+          lent[#lent + 1] = gy
+        end
         runs[#runs + 1] = a
         runs[#runs + 1] = gx - 1
       else
@@ -2306,7 +2327,7 @@ local function rowBlock(gy, block)
       end
     end
     entry = entry or {}
-    entry.runs, entry.spans, entry.ver = runs, spans, ver
+    entry.runs, entry.spans, entry.lent, entry.ver = runs, spans, lent, ver
     runCache[bk] = entry
   end
   return entry
@@ -2522,10 +2543,16 @@ local function drawWaterShaded(view, gx0, gy0, gx1, gy1, t, mask)
   for gy = gy0, gy1 do
     if (waterRows[gy] or 0) > 0 then
       for block = b0, b1 do
-        local runs = rowBlock(gy, block).runs
+        local entry = rowBlock(gy, block)
+        local runs = entry.runs
         for i = 1, #runs, 2 do
           local a, z = runs[i], runs[i + 1] + 1
           qrect(1, 1, 1, 1, a * C, gy * C, (z - a) * C, C)
+        end
+        -- (the shader cuts the rock out, so only the open pixels of these show)
+        local lent = entry.lent
+        for i = 1, #lent, 2 do
+          qrect(1, 1, 1, 1, lent[i] * C, lent[i + 1] * C, C, C)
         end
       end
     end

@@ -17,7 +17,7 @@ local list = {}
 local REACH = 20 -- how close the hunter must be to open one
 local GOLD_CHANCE = 0.8 -- a chest holds gold with this chance, otherwise a weapon
 local LOCKED_CHANCE = 0.3 -- and that weapon is a locked kind (src.meta) with this chance
-local W, H = 14, 9
+local W, H = 14, 10
 
 function chests.clear()
   list = {}
@@ -91,55 +91,96 @@ local function onScreen(c, view)
   return c.x > view.x - 16 and c.x < view.x + view.w + 16 and c.y > view.y - 16 and c.y < view.y + view.h + 16
 end
 
+local WOOD, WOOD_L, WOOD_D = { 0.36, 0.25, 0.17 }, { 0.47, 0.34, 0.22 }, { 0.22, 0.15, 0.10 }
+local IRON, IRON_L, IRON_D = { 0.30, 0.31, 0.37 }, { 0.44, 0.45, 0.52 }, { 0.17, 0.18, 0.22 }
+local PLATE, PLATE_L = { 0.62, 0.48, 0.20 }, { 0.80, 0.66, 0.30 }
+local INSIDE = { 0.09, 0.06, 0.05 }
+local LID_H = { 4, 4, 3, 2, 2 } -- the lid's front face as it tips back (frames 0..4), and how far it has risen
+local LID_UP = { 0, 1, 3, 4, 5 }
+local OPEN_FRAMES = 4
+
+local function px(c, x, y, w, h)
+  love.graphics.setColor(c[1], c[2], c[3])
+  love.graphics.rectangle("fill", x, y, w, h)
+end
+
+-- All of it is drawn before the lighting, so it takes the light (and the dark) of where it stands
 function chests.draw(view)
   for _, c in ipairs(list) do
     if onScreen(c, view) then
       local x, y = math.floor(c.x - W / 2), math.floor(c.y)
-      -- Body: dark wood with iron bands
-      love.graphics.setColor(0.36, 0.25, 0.17)
-      love.graphics.rectangle("fill", x, y - H + 3, W, H - 3)
-      love.graphics.setColor(0.25, 0.17, 0.12)
-      love.graphics.rectangle("fill", x, y - 2, W, 2)
-      love.graphics.setColor(0.30, 0.31, 0.37)
-      love.graphics.rectangle("fill", x + 2, y - H + 3, 2, H - 3)
-      love.graphics.rectangle("fill", x + W - 4, y - H + 3, 2, H - 3)
-      -- Lid: closed it sits on top; open it is tipped back
-      local lift = math.floor(c.open * 4)
-      love.graphics.setColor(0.42, 0.30, 0.20)
-      love.graphics.rectangle("fill", x, y - H - 1 - lift, W, 4)
-      love.graphics.setColor(0.30, 0.31, 0.37)
-      love.graphics.rectangle("fill", x + 2, y - H - 1 - lift, 2, 4)
-      love.graphics.rectangle("fill", x + W - 4, y - H - 1 - lift, 2, 4)
-    end
-  end
-end
-
--- After the lighting: the lock glints on closed chests, gold glows from open ones
-function chests.drawEmissive(view)
-  local t = love.timer.getTime()
-  for _, c in ipairs(list) do
-    if onScreen(c, view) then
-      local x, y = math.floor(c.x), math.floor(c.y)
-      if c.opened then
-        love.graphics.setColor(1, 0.85, 0.4, 0.8 * (1 - c.open * 0.5))
-        love.graphics.rectangle("fill", x - 4, y - H, 8, 2)
-      else
-        love.graphics.setColor(0.95, 0.74, 0.22)
-        love.graphics.rectangle("fill", x - 1, y - H + 1, 3, 3)
-        if math.sin(t * 3 + c.x) > 0.85 then
-          love.graphics.setColor(1, 1, 0.9)
-          love.graphics.rectangle("fill", x - 3, y - H + 2, 7, 1)
-          love.graphics.rectangle("fill", x, y - H - 1, 1, 6)
-        end
+      local frame = math.floor(c.open * OPEN_FRAMES + 0.001)
+      -- Body: planks with iron bands and rivets, a pale top edge, dark feet
+      local top = y - 6
+      px(WOOD, x, top, W, 6)
+      px(WOOD_L, x, top, W, 1)
+      px(WOOD_D, x + 4, top + 1, 1, 5)
+      px(WOOD_D, x + 9, top + 1, 1, 5)
+      px(WOOD_D, x, y - 1, W, 1)
+      px(IRON_D, x, y - 1, 2, 1)
+      px(IRON_D, x + W - 2, y - 1, 2, 1)
+      for _, bx in ipairs({ 1, W - 4 }) do
+        px(IRON, x + bx, top, 3, 6)
+        px(IRON_L, x + bx, top, 1, 6)
+        px(IRON_D, x + bx + 2, top, 1, 6)
+        px(IRON_D, x + bx + 1, top + 1, 1, 1) -- rivets
+        px(IRON_D, x + bx + 1, top + 4, 1, 1)
+      end
+      if frame > 0 then
+        -- The open mouth: the dark inside
+        px(INSIDE, x + 1, top - 1, W - 2, 2)
+      end
+      -- Lid: a rounded cap that tips back and up as it opens (its underside shows once it is up)
+      local lh, lift = LID_H[frame + 1], LID_UP[frame + 1]
+      local ly = top - lh - lift + 1
+      if frame >= 2 then
+        px(WOOD_D, x + 2, ly + lh, W - 4, top - 1 - ly - lh) -- (the back of the chest, up to the tipped lid)
+      end
+      local face, edge = frame >= 3 and WOOD_D or WOOD, frame >= 3 and WOOD or WOOD_L
+      px(face, x, ly + 1, W, lh - 1)
+      px(face, x + 1, ly, W - 2, 1)
+      px(edge, x + 1, ly, W - 2, 1)
+      if lh > 2 then
+        px(WOOD_D, x, ly + lh - 1, W, 1)
+      end
+      for _, bx in ipairs({ 1, W - 4 }) do
+        px(IRON, x + bx, ly, 3, lh)
+        px(IRON_L, x + bx, ly, 1, lh)
+        px(IRON_D, x + bx + 2, ly, 1, lh)
+      end
+      -- The lock plate, on the lid and the body, until the lid comes up
+      if frame == 0 then
+        px(PLATE, x + 5, top - 2, 4, 4)
+        px(PLATE_L, x + 5, top - 2, 4, 1)
+        px(PLATE_L, x + 5, top - 1, 1, 3)
+        px(INSIDE, x + 6, top - 1, 2, 2)
       end
     end
   end
 end
 
+-- After the lighting: the lock of a closed chest gives off a faint warm glow, with a twinkle now and then
+function chests.drawEmissive(view)
+  local t = love.timer.getTime()
+  for _, c in ipairs(list) do
+    if not c.opened and onScreen(c, view) then
+      local x, y = math.floor(c.x), math.floor(c.y)
+      love.graphics.setColor(1, 0.8, 0.35, 0.16 + 0.05 * math.sin(t * 2 + c.x))
+      love.graphics.rectangle("fill", x - 2, y - 9, 4, 4)
+      if math.sin(t * 3 + c.x) > 0.93 then
+        love.graphics.setColor(1, 1, 0.9, 0.7)
+        love.graphics.rectangle("fill", x - 1, y - 7, 3, 1)
+        love.graphics.rectangle("fill", x, y - 8, 1, 3)
+      end
+    end
+  end
+end
+
+-- (a closed chest has a slight glow of its own; an open one gives none)
 function chests.addLights(lighting, view)
   for _, c in ipairs(list) do
-    if onScreen(c, view) then
-      lighting.add(c.x, c.y - 6, c.opened and 18 or 30, 1, 0.75, 0.35, c.opened and 0.4 or 0.6)
+    if not c.opened and onScreen(c, view) then
+      lighting.add(c.x, c.y - 6, 22, 1, 0.75, 0.35, 0.22)
     end
   end
 end

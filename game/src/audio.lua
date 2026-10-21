@@ -1133,6 +1133,147 @@ DEFS.card_flip = {
   end,
   volume = 0.4,
 }
+-- The Quarry's creatures and the ether crawler ---------------------------------------------------------------
+-- a wraith's moan: a breathy, wavering voice that sags
+DEFS.wraith_moan = {
+  gen = function()
+    local air = lp(0.12)
+    return synth(1.1, function(t, p)
+      local f = 210 - 70 * p + 8 * math.sin(t * 5.5 * TAU)
+      local v = math.sin(t * f * TAU) * 0.5 + math.sin(t * f * 2.01 * TAU) * 0.22 + math.sin(t * f * 3.02 * TAU) * 0.08
+      return (v + air(noise()) * 0.9) * math.sin(p * math.pi) ^ 0.8 * 0.8
+    end)
+  end,
+  volume = 0.4,
+  cooldown = 0.5,
+}
+-- ...its wail before it lunges: a rising, tremoring shriek
+DEFS.wraith_wail = {
+  gen = function()
+    local band = hp(0.15)
+    return synth(0.85, function(t, p)
+      local f = 320 + 520 * p ^ 1.3 + 14 * math.sin(t * 24 * TAU)
+      local v = math.sin(t * f * TAU) * 0.45 + math.sin(t * f * 1.5 * TAU) * 0.2 + band(noise()) * 0.35
+      return v * math.sin(p * math.pi) ^ 0.5 * (0.8 + 0.2 * math.sin(t * 30 * TAU))
+    end)
+  end,
+  volume = 0.5,
+  cooldown = 0.4,
+}
+-- ...going to mist and coming back: a falling breath of air
+DEFS.wraith_phase = {
+  gen = function()
+    local low = lp(0.2)
+    return synth(0.6, function(t, p)
+      return low(noise()) * 2.2 * math.sin(p * math.pi) ^ 1.2 + math.sin(t * (700 - 500 * p) * TAU) * 0.08 * (1 - p)
+    end)
+  end,
+  volume = 0.35,
+  cooldown = 0.2,
+}
+-- a crab's chitter: quick dry clicks
+DEFS.crab_chitter = {
+  gen = function()
+    return synth(0.35, function(t, p)
+      local v = 0
+      for k = 0, 5 do
+        local st = k * 0.045
+        if t >= st then
+          v = v + (noise() * 0.6 + math.sin((t - st) * (1800 + k * 170) * TAU)) * math.exp(-(t - st) * 90) * 0.45
+        end
+      end
+      return v
+    end)
+  end,
+  volume = 0.4,
+  cooldown = 0.15,
+}
+-- ...its claw snapping shut: a hard clack and a ring
+DEFS.crab_snap = {
+  gen = function()
+    local band = hp(0.3)
+    return synth(0.22, function(t, p)
+      return band(noise()) * math.exp(-t * 90) * 1.1 + math.sin(t * 1250 * TAU) * math.exp(-t * 40) * 0.5 + math.sin(t * 330 * TAU) * math.exp(-t * 25) * 0.4
+    end)
+  end,
+  volume = 0.55,
+  cooldown = 0.1,
+}
+-- ...the stones shifting as it climbs out of its heap: a low grinding rumble
+DEFS.crab_rumble = {
+  gen = function()
+    local low = lp(0.1)
+    return synth(0.8, function(t, p)
+      local grit = (noise() > 0.86 and 1 or 0) * noise() * 0.9
+      return (low(noise()) * 1.8 * (0.6 + 0.4 * math.sin(t * 19 * TAU)) + grit + math.sin(t * 52 * TAU) * 0.25) * math.sin(p * math.pi) ^ 0.7
+    end)
+  end,
+  volume = 0.45,
+  cooldown = 0.3,
+}
+-- ...its scuttling: a tiny tick
+DEFS.crab_scuttle = {
+  gen = function()
+    local band = hp(0.4)
+    return synth(0.05, function(t, p)
+      return band(noise()) * math.exp(-p * 9) * 0.8 + math.sin(t * 900 * TAU) * math.exp(-p * 12) * 0.25
+    end)
+  end,
+  volume = 0.3,
+  cooldown = 0.05,
+}
+-- ...and the stone it throws: a heavy whoomph
+DEFS.crab_hurl = {
+  gen = function()
+    local low = lp(0.2)
+    return synth(0.35, function(t, p)
+      return low(noise()) * math.exp(-p * 7) * 1.4 + math.sin(t * (140 - 80 * p) * TAU) * math.exp(-p * 8) * 0.9
+    end)
+  end,
+  volume = 0.5,
+  cooldown = 0.1,
+}
+-- ...landing: a rattle of gravel
+DEFS.crab_rock = {
+  gen = function()
+    return synth(0.2, function(t, p)
+      local v = 0
+      for k = 0, 3 do
+        local st = k * 0.03
+        if t >= st then
+          v = v + (noise() * 0.7 + math.sin((t - st) * (300 + k * 90) * TAU) * 0.5) * math.exp(-(t - st) * 50) * 0.4
+        end
+      end
+      return v
+    end)
+  end,
+  volume = 0.35,
+  cooldown = 0.08,
+}
+-- an ether crawler's chitter: a squeaky, bubbling trill
+DEFS.ether_chitter = {
+  gen = function()
+    return synth(0.28, function(t, p)
+      local f = 1500 + 700 * math.sin(t * 38 * TAU) + 500 * p
+      return math.sin(t * f * TAU) * math.sin(p * math.pi) * 0.5 * (0.6 + 0.4 * math.sin(t * 60 * TAU))
+    end)
+  end,
+  volume = 0.35,
+  cooldown = 0.2,
+}
+-- ...and its sac bursting: a glassy pop and a rising shimmer
+DEFS.ether_pop = {
+  gen = function()
+    local band = hp(0.25)
+    return synth(0.7, function(t, p)
+      local pop = band(noise()) * math.exp(-t * 60) * 1.0 + math.sin(t * 240 * TAU) * math.exp(-t * 20) * 0.7
+      local shimmer = (math.sin(t * 1400 * TAU) + math.sin(t * 2100 * TAU) * 0.7) * math.exp(-t * 7) * (1 - math.exp(-t * 40)) * 0.3
+      return pop + shimmer
+    end)
+  end,
+  volume = 0.55,
+  cooldown = 0.1,
+}
 -- the tinker's rattle as a weapon is shaken: tools and bolts clattering
 DEFS.tinker_shake = {
   gen = function()
@@ -2456,8 +2597,37 @@ local GOLEM_TRACK = {
   },
 }
 
+-- The card table's theme: a smoky lounge in C, a walking bass, soft brushes and a lazy
+-- plucked melody over ii-V-I seventh chords
+local TABLE_TRACK = {
+  bpm = 92,
+  bars = 8,
+  echo = { delay = 0.326, fb = 0.3 },
+  prog = { "Dm", "G", "C", "A", "Dm", "G", "C", "G" },
+  chords = {
+    Dm = { root = "D2", fifth = "A2", pad = { "F3", "A3", "C4", "E4" }, notes = { "D4", "F4", "A4", "C5", "E5" } },
+    G = { root = "G1", fifth = "D2", pad = { "F3", "B3", "D4", "G4" }, notes = { "G3", "B3", "D4", "F4", "A4" } },
+    C = { root = "C2", fifth = "G2", pad = { "E3", "G3", "B3", "D4" }, notes = { "C4", "E4", "G4", "B4", "D5" } },
+    A = { root = "A1", fifth = "E2", pad = { "G3", "C#4", "E4", "A4" }, notes = { "A3", "C#4", "E4", "G4", "B4" } },
+  },
+  channels = {
+    { drum = true, gain = 0.3, steps = 8, tokens = everyBar("k - - - k - - -") },
+    { drum = true, gain = 0.16, steps = 8, tokens = everyBar("- - h - - h h -") },
+    { wave = "tri", gain = 0.2, steps = 4, a = 0.01, r = 0.2, legato = 0.85, tokens = bassPattern("R 5 8 5") },
+    { wave = "tri", gain = 0.07, steps = 1, a = 0.5, r = 0.9, legato = 1.0, tokens = padPattern() },
+    { wave = "sine", gain = 0.06, steps = 1, a = 0.5, r = 0.9, legato = 1.0, tokens = padPattern() },
+    {
+      wave = "p25", gain = 0.07, steps = 8, pluck = 3.5,
+      tokens = explicit({
+        "F4 . A4 . C5 . . .", "D5 . B4 . G4 . . .", "E4 . G4 . B4 . C5 .", "A4 . . . E4 . C#4 .",
+        "A4 . F4 . D5 . . .", "B4 . . D5 . F5 . .", "E5 . D5 . B4 . G4 .", "A4 . B4 . D5 . . .",
+      }),
+    },
+  },
+}
+
 -- Each boss fight's theme (audio.setBoss): the Dark Hunter's is the "hunter" one
-local BOSS_TRACKS = { hunter = BOSS_TRACK, bigfish = FISH_TRACK, queen = QUEEN_TRACK, golem = GOLEM_TRACK }
+local BOSS_TRACKS = { hunter = BOSS_TRACK, bigfish = FISH_TRACK, queen = QUEEN_TRACK, golem = GOLEM_TRACK, table = TABLE_TRACK }
 
 -- The title screen's theme: a slow, cold drift in D minor with a glassy bell
 -- line, falling away into a long echo
@@ -2618,6 +2788,7 @@ local TARGET_RMS = 0.126 -- the loudness (RMS, 0..1) a recorded theme is brought
 local menuMusic -- the title screen's theme
 local bossMusic = {} -- each boss fight's own theme, by kind (see audio.setBoss)
 local bossKind -- which of them is wanted now (nil: none)
+local tableOn = false -- the card table is open: its lounge theme plays (audio.setTable)
 local bossFade = {} -- kind -> how far that theme is faded in, 0..1
 local bossMix = 0 -- the strongest of them: how far the area's own music has stepped aside
 local recapMusic -- the death recap's theme
@@ -2963,7 +3134,7 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
   -- A boss fight's theme takes over from the area's, and its tension layer
   bossMix = 0
   for kind, src in pairs(bossMusic) do
-    local want = kind == bossKind
+    local want = kind == (bossKind or (tableOn and "table" or nil))
     local f = bossFade[kind] or 0
     f = f + ((want and 1 or 0) - f) * math.min(1, dt * (want and 1.5 or 0.6))
     bossFade[kind] = f
@@ -3006,6 +3177,10 @@ end
 
 -- A boss fight's music on or off. kind picks its theme: "hunter" (the default, the Dark
 -- Hunter's), "bigfish", "queen" or "golem".
+function audio.setTable(on)
+  tableOn = on and true or false
+end
+
 function audio.setBoss(on, kind)
   bossKind = on and (BOSS_TRACKS[kind or "hunter"] and (kind or "hunter")) or nil
 end

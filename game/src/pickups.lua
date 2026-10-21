@@ -17,6 +17,7 @@ local guns = require("src.guns")
 local inventory = require("src.inventory")
 local itembar = require("src.itembar")
 local perks = require("src.perks")
+local glyphs = require("src.glyphs")
 local icons = require("src.icons")
 local items = require("src.items")
 
@@ -143,6 +144,23 @@ function pickups.dropPerk(x, y, id, vx, vy)
   }
 end
 
+-- Drops a boss's glyph (an id from src.glyphs): taken with E like a perk, and
+-- the hunter's for the rest of the run
+function pickups.dropGlyph(x, y, id, vx, vy)
+  list[#list + 1] = {
+    kind = "glyph",
+    glyphId = id,
+    perk = glyphs.new(id), -- (shaped like a perk for the prompt and the glow)
+    value = 0,
+    x = x,
+    y = y,
+    vx = vx or (love.math.random() - 0.5) * 40,
+    vy = vy or -90,
+    age = 0,
+    sparkle = love.math.random() * 6,
+  }
+end
+
 -- Spills `amount` gold at (x, y) as a handful of coins, flung outward
 function pickups.dropGold(x, y, amount)
   if amount <= 0 then
@@ -201,6 +219,14 @@ local function collect(p, player)
     effects.popup(p.x, p.y - 8, p.perk.name, p.perk.color)
     for _ = 1, 12 do
       effects.particle(p.x, p.y - 4, (love.math.random() - 0.5) * 80, -love.math.random() * 70, 0.5, p.perk.color, 200, true)
+    end
+  elseif p.kind == "glyph" then
+    glyphs.add(p.glyphId)
+    audio.play("buy")
+    effects.popup(p.x, p.y - 8, p.perk.name, p.perk.color)
+    effects.popup(p.x, p.y - 18, glyphs.count() .. " / " .. glyphs.total(), { 0.85, 0.85, 0.9 })
+    for _ = 1, 16 do
+      effects.particle(p.x, p.y - 4, (love.math.random() - 0.5) * 90, -love.math.random() * 80, 0.6, p.perk.color, 200, true)
     end
   elseif p.kind == "gold" then
     local value = math.max(1, math.floor(p.value * perks.prod("gold") + 0.5))
@@ -278,7 +304,7 @@ function pickups.nearestItem(player)
   local px, py = player:center()
   local best, bestDist = nil, ITEM_REACH
   for _, p in ipairs(list) do
-    if p.kind == "item" or p.kind == "weapon" or p.kind == "perk" then
+    if p.kind == "item" or p.kind == "weapon" or p.kind == "perk" or p.kind == "glyph" then
       local d = math.sqrt((p.x - px) ^ 2 + (p.y - py) ^ 2)
       if d < bestDist then
         best, bestDist = p, d
@@ -340,6 +366,15 @@ function pickups.drawEmissive(view)
       local pulse = 0.85 + 0.15 * math.sin(t * 4 + p.sparkle)
       love.graphics.setColor(pulse, pulse, pulse)
       love.graphics.draw(icon, math.floor(p.x - icon:getWidth() / 2), math.floor(p.y - icon:getHeight()))
+    elseif p.kind == "glyph" and onScreen(p, view) then
+      -- A glyph: its tablet hovering over the ground in a pulsing halo
+      local c = p.perk.color
+      local pulse = 0.5 + 0.5 * math.sin(t * 3 + p.sparkle)
+      local bob = math.floor(math.sin(t * 2.5 + p.sparkle) * 1.5)
+      local x, y = math.floor(p.x) - 4, math.floor(p.y) - 15 + bob
+      love.graphics.setColor(c[1], c[2], c[3], 0.12 + 0.1 * pulse)
+      love.graphics.rectangle("fill", x - 3, y - 3, 15, 15)
+      glyphs.draw(p.glyphId, x + 1, y + 1, 1)
     elseif p.kind == "perk" and onScreen(p, view) then
       -- A perk: its icon hovering over the ground in a pulsing halo of its colour
       local c = p.perk.color
@@ -405,7 +440,7 @@ function pickups.addLights(lighting, view)
     if onScreen(p, view) then
       if p.kind == "weapon" then
         lighting.add(p.x, p.y - 4, 30, 1, 0.85, 0.5, 0.6)
-      elseif p.kind == "perk" then
+      elseif p.kind == "perk" or p.kind == "glyph" then
         local c = p.perk.color
         lighting.add(p.x, p.y - 6, 34, c[1], c[2], c[3], 0.7)
       elseif p.kind == "item" then

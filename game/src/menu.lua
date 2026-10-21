@@ -11,7 +11,7 @@
 --
 -- The menu carries out its own pages; for anything that changes the game it
 -- calls menu.onAction(action, arg), set by src.game:
---   "play" (slot), "resume", "restart", "title", "quit"
+--   "play" (slot), "continue" (slot: a saved run), "resume", "restart", "title", "quit"
 local audio = require("src.audio")
 local compendium = require("src.compendium")
 local fonts = require("src.fonts")
@@ -134,21 +134,28 @@ end
 local NAME_MAX = 14
 local nameState = { slot = nil, text = "" }
 
--- Starts a run on slot i: a file with no name yet asks for one first
-local function startSlot(i)
-  local p = save.peek(i)
-  if p and p.name then
-    act("play", i)
-  else
-    nameState = { slot = i, text = "" }
-    push("name")
-  end
-end
-
 local function confirm(box)
   confirmBox = box
   push("confirm")
   focusId = "confirm:no"
+end
+
+-- Starts a run on slot i: a file with no name yet asks for one first, and a
+-- slot with a saved run asks before that run is thrown away
+local function startSlot(i)
+  local p = save.peek(i)
+  if p and p.name then
+    if save.peekRun(i) then
+      confirm({ text = "Start a new run?", detail = "The run saved in this slot will be lost.", yesLabel = "New run", danger = true, yes = function()
+        act("play", i)
+      end })
+    else
+      act("play", i)
+    end
+  else
+    nameState = { slot = i, text = "" }
+    push("name")
+  end
 end
 
 local recapData -- what the death recap tells: { name, killer, quip, discoveries }
@@ -546,6 +553,16 @@ local function slotSummary(i)
   return string.format("%sSlot %d - %s - %d%%", p.name and (p.name .. " - ") or "", i, save.formatTime(p.playtime), total > 0 and math.floor(found / total * 100) or 0)
 end
 
+-- "Sulfur Caves - 340 gold" for slot i's saved run
+local function runSummary(i)
+  local r = save.peekRun(i)
+  if not r then
+    return nil
+  end
+  local name = (r.area or 0) > 0 and r.areaName or "The Barrens"
+  return string.format("%s - %d gold", name or "The caves", tonumber(r.inv.gold) or 0)
+end
+
 local PAGES = {}
 local WASH_STEPS = 24
 local washMesh
@@ -724,7 +741,14 @@ PAGES.title = function()
 
   local last = lastProfileSlot()
   if last then
-    button("title:continue", "Continue", x, y, w, math.floor(h * 1.35), function()
+    local saved = save.peekRun(last)
+    if saved then
+      button("title:resume", "Continue run", x, y, w, math.floor(h * 1.35), function()
+        act("continue", last)
+      end, { align = "left", sub = runSummary(last) })
+      y = y + math.floor(h * 1.35) + gap
+    end
+    button("title:continue", saved and "New run" or "Continue", x, y, w, math.floor(h * 1.35), function()
       startSlot(last)
     end, { align = "left", sub = slotSummary(last) })
     y = y + math.floor(h * 1.35) + gap
@@ -769,7 +793,7 @@ end
 PAGES.slots = function()
   litBackdrop()
   pageTitle("Save Files", X(22), Y(14))
-  shadowPrint("Each file keeps its own compendium and records. Runs are not saved part-way.", X(22), Y(30), F.small, FAINT)
+  shadowPrint("Each file keeps its own compendium and records. Quitting a run saves it.", X(22), Y(30), F.small, FAINT)
   local x, w, h = X(22), math.floor(230 * u), math.floor(40 * u)
   local y = Y(42)
   for i = 1, save.SLOTS do
@@ -809,6 +833,9 @@ PAGES.slots = function()
       local l1 = string.format("Playtime %s    Runs %d    Deaths %d", save.formatTime(p.playtime), s.runs, s.deaths)
       local l2 = string.format("Monsters slain %d    Bosses %d    Gold earned %d    Marks %d", s.kills, s.bosses, s.gold, p.marks or 0)
       local l3 = "Deepest: " .. deepestName(p) .. "    Last played " .. os.date("%Y-%m-%d", p.lastPlayed)
+      if save.peekRun(i) then
+        l3 = "Run saved: " .. runSummary(i) .. "    " .. l3
+      end
       shadowPrint(l1, px, by + 3.5 * u, F.small, DIM)
       shadowPrint(l2, px, by + 3.5 * u + F.small:getHeight() * 1.3, F.small, DIM)
       shadowPrint(l3, px, by + 3.5 * u + F.small:getHeight() * 2.6, F.small, FAINT)
@@ -818,8 +845,18 @@ PAGES.slots = function()
     end
     -- Delete
     local dx = x + cardW + 3 * u
+    local saved = p and save.peekRun(i)
+    if saved then
+      button("slots:resume" .. i, "Resume", dx, y, math.floor(33 * u), math.floor(h * 0.48), function()
+        act("continue", i)
+      end, { font = F.small })
+    end
     if p then
-      button("slots:delete" .. i, "Delete", dx, y, math.floor(33 * u), h, function()
+      local dy, dh = y, h
+      if saved then
+        dy, dh = y + math.floor(h * 0.52), math.floor(h * 0.48)
+      end
+      button("slots:delete" .. i, "Delete", dx, dy, math.floor(33 * u), dh, function()
         confirm({
           text = "Delete Slot " .. i .. "?",
           detail = "Its compendium and records will be lost for good.",
@@ -2472,12 +2509,18 @@ PAGES.pause = function()
       push("settings")
     end },
     { "pause:restart", "Restart run", abandon("Restart the run?", "restart") },
-    { "pause:title", "Quit to title", abandon("Quit to the title screen?", "title") },
-    { "pause:quit", "Quit to desktop", abandon("Quit the game?", "quit") },
+    { "pause:title", "Quit to title", function()
+      act("title")
+    end },
+    { "pause:quit", "Quit to desktop", function()
+      act("quit")
+    end },
   }
   for _, b in ipairs(list) do
-    button(b[1], b[2], x, y, w, h, b[3])
-    y = y + h + gap
+    if b then
+      button(b[1], b[2], x, y, w, h, b[3])
+      y = y + h + gap
+    end
   end
 end
 

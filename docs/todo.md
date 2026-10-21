@@ -250,3 +250,10 @@ Check items off as they land; append new ones at the bottom.
 - [x] Boss glyphs (src/glyphs.lua): one per boss (Old Mine, Fen, Queen, Colossus, Big Fish), per run, shown left of the health bottle; all five + the Dark Hunter open the sky door
 - [x] Prospector perk shelf: one perk kept between runs (not Akimbo)
 - [ ] Sky dungeon boss still to design (Dark Hunter does not give a glyph)
+
+## Batch 2026-10-21 save and quit (headless-tested; not played)
+- [x] Quit to title / Quit to desktop / closing the window save the run, no confirm (no separate Save and quit button): writes runN.sav (src/save.lua saved runs, versioned, loadstring'd table) and returns to the title; the title offers "Continue run" (New run beside it), and the Save Files page has a Resume button per slot
+- [x] Restored: seed (areas regenerate identically), position, hp, gold, guns (rolls, fitted items, chambers), loose items, fuser, perks, glyphs, flasks, dynamite, keys, relics
+- [x] Not restored (respawn/reset): terrain changes, enemies (slain bosses come back), pickups, shop stock, opened chests/broken props, map chart, random events; the hunter is moved to open ground if he stood in his own hole
+- [x] The saved run is used up on resume and cleared on death, restart, new run on the slot, slot delete (quitting saves it instead); corrupt, old or foreign-version files read as "no saved run"
+- [ ] Maybe: remember slain bosses (and skip their respawn), keep the map chart, save broken terrain as a diff

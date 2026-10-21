@@ -153,8 +153,256 @@ local function load(name, opts)
   end
 end
 
+-- Saving and resuming a run ("Save and quit", src.save's saved runs) ------------
+--
+-- Restored: the seed (the world's areas grow from it, so the caves are laid out
+-- exactly as before), where the hunter stood, his health, gold, guns (with their
+-- rolls, fitted ammo/attachments and chambers), loose items, the fuser, perks,
+-- glyphs, flasks, dynamite, keys and relics.
+-- Not restored: changes made to the world (dug rock, spilled water, fires,
+-- opened chests, broken props, bought shop stock), enemies (they spawn afresh,
+-- slain bosses included), pickups on the ground, map chart and random events
+-- under way. The hunter is moved to open ground if the rock he stood in was
+-- one of his own holes.
+
+local function itemData(item)
+  return { id = item.id, level = item.level or 0 }
+end
+
+local function itemFrom(d)
+  if type(d) ~= "table" or not items.defs[d.id] then
+    return nil
+  end
+  local level = math.max(0, math.min(items.MAX_LEVEL, math.floor(tonumber(d.level) or 0)))
+  return items.new(d.id, level)
+end
+
+local function gunData(g)
+  local d = {
+    id = g.id,
+    name = g.name,
+    slotCount = g.slotCount,
+    chambers = g.chambers,
+    spent = g.spent,
+    generated = g.generated or false,
+    tinkerRolls = g.tinkerRolls,
+    rolls = g.rolls,
+    slots = {},
+  }
+  for i = 1, g.slotCount do
+    if g.slots[i] then
+      d.slots[i] = itemData(g.slots[i])
+    end
+  end
+  return d
+end
+
+local function gunFrom(d)
+  if type(d) ~= "table" or not guns.defs[d.id] then
+    return nil
+  end
+  local g = guns.new(d.id, math.max(1, math.min(8, math.floor(tonumber(d.slotCount) or guns.defs[d.id].slots))))
+  if type(d.name) == "string" then
+    g.name = d.name
+  end
+  if type(d.rolls) == "table" then
+    g.rolls = {}
+    for k, v in pairs(d.rolls) do
+      if type(k) == "string" and type(v) == "number" then
+        g.rolls[k] = v
+      end
+    end
+  end
+  g.generated = d.generated == true
+  g.tinkerRolls = tonumber(d.tinkerRolls)
+  g.spent = tonumber(d.spent) or 0
+  g.chambers = math.max(0, math.min(99, math.floor(tonumber(d.chambers) or g.chambers))) -- (limited to the gun's size once the perks are back)
+  if type(d.slots) == "table" then
+    for i = 1, g.slotCount do
+      g.slots[i] = itemFrom(d.slots[i])
+    end
+  end
+  return g
+end
+
+-- Whether "Save and quit" is on offer: a living hunter in the overworld
+function game.canSaveRun()
+  return playing and not pending and player ~= nil and not player.dead and scene == scenes.overworld and save.activeSlot() ~= nil
+end
+
+-- What leaving a run saves
+local function snapshotRun()
+  local cat = require("src.scenes.catacombs")
+  local b = player.body
+  local run = {
+    seed = cat.seed(),
+    x = b.x,
+    y = b.y,
+    hp = player.hp,
+    time = os.time(),
+    inv = {
+      gold = inv.gold,
+      dynamite = inv.dynamite or 0,
+      flasks = inv.flasks or 0,
+      keys = inv.keys or 0,
+      selected = inv.selected,
+      secondWindUsed = inv.secondWindUsed or false,
+      weapons = {},
+      items = {},
+      perks = {},
+      glyphs = {},
+      relics = {},
+      fuse = { locked = inv.fuse.locked or false, ether = inv.fuse.ether or 0, slots = {} },
+    },
+  }
+  local r = run.inv
+  for i = 1, inventory.WEAPON_SLOTS do
+    r.weapons[i] = inv.weapons[i] and gunData(inv.weapons[i]) or nil
+  end
+  for i = 1, inventory.ITEM_SLOTS do
+    r.items[i] = inv.items[i] and itemData(inv.items[i]) or nil
+  end
+  for i = 1, 2 do
+    r.fuse.slots[i] = inv.fuse.slots[i] and itemData(inv.fuse.slots[i]) or nil
+  end
+  for i, id in ipairs(inv.perks) do
+    r.perks[i] = id
+  end
+  for id in pairs(inv.glyphs) do
+    r.glyphs[id] = true
+  end
+  for idx in pairs(inv.relics or {}) do
+    r.relics[idx] = true
+  end
+  local area = cat.levelAt(player:center())
+  run.area = area or 0
+  run.areaName = area and cat.areaName(area) or nil
+  return run
+end
+
+-- Leaving the run (quit to title or desktop, closing the window): a living
+-- hunter in the overworld is saved to be continued, anything else clears the saved run
+local function keepRun()
+  if not playing then
+    return
+  end
+  if not (game.canSaveRun() and save.writeRun(save.activeSlot(), snapshotRun())) then
+    save.clearRun(save.activeSlot())
+  end
+end
+
+-- A saved run's inventory, rebuilt (bad entries are dropped, not fatal)
+local function inventoryFrom(run)
+  local r = run.inv
+  local new = inventory.new() -- (binds perks and glyphs to itself)
+  new.weapons = {}
+  for i = 1, inventory.WEAPON_SLOTS do
+    new.weapons[i] = gunFrom(r.weapons[i])
+    if new.weapons[i] then
+      counted[new.weapons[i]] = true -- (already in the compendium from the first time)
+    end
+  end
+  new.items = {}
+  for i = 1, inventory.ITEM_SLOTS do
+    new.items[i] = itemFrom(r.items[i])
+  end
+  if type(r.fuse) == "table" then
+    for i = 1, 2 do
+      new.fuse.slots[i] = itemFrom(r.fuse.slots and r.fuse.slots[i])
+    end
+    new.fuse.locked = r.fuse.locked == true and new.fuse.slots[1] ~= nil and new.fuse.slots[2] ~= nil
+    new.fuse.ether = tonumber(r.fuse.ether) or 0
+  end
+  for _, id in ipairs(r.perks or {}) do
+    if perks.defs[id] then
+      new.perks[#new.perks + 1] = id
+      runPerks[id] = true
+    end
+  end
+  perks.version = perks.version + 1
+  for _, g in pairs(new.weapons) do
+    g.chambers = math.min(g.chambers, g:maxChambers())
+  end
+  for id in pairs(r.glyphs or {}) do
+    if require("src.glyphs").defs[id] then
+      new.glyphs[id] = true
+    end
+  end
+  for idx in pairs(r.relics or {}) do
+    new.relics = new.relics or {}
+    new.relics[idx] = true
+  end
+  new.gold = math.max(0, math.floor(tonumber(r.gold) or 0))
+  new.dynamite = tonumber(r.dynamite) or 0
+  new.flasks = tonumber(r.flasks) or 0
+  new.keys = tonumber(r.keys) or 0
+  new.secondWindUsed = r.secondWindUsed == true
+  new.selected = math.max(1, math.min(inventory.weaponSlots(), math.floor(tonumber(r.selected) or 1)))
+  -- (items the fuser holds, loose items and guns' attachments count too)
+  for _, list in ipairs({ new.items, new.fuse.slots }) do
+    for _, it in pairs(list) do
+      counted[it] = true
+    end
+  end
+  for _, g in pairs(new.weapons) do
+    for _, it in pairs(g.slots) do
+      counted[it] = true
+    end
+  end
+  return new
+end
+
+-- Where the hunter stands again: his saved spot, or the nearest open ground to it
+local function freeSpot(x, y)
+  local Body = require("src.body")
+  local cfg = config.player
+  local function free(px, py)
+    return not Body.terrainOverlaps(world, px, py, cfg.width, cfg.height)
+  end
+  if free(x, y) then
+    return x, y
+  end
+  for dist = 2, 160, 2 do
+    for _, d in ipairs({ { 0, -dist }, { -dist, 0 }, { dist, 0 }, { 0, dist }, { -dist, -dist }, { dist, -dist } }) do
+      if free(x + d[1], y + d[2]) then
+        return x + d[1], y + d[2]
+      end
+    end
+  end
+  return nil
+end
+
+-- Once the scene is built: the areas the hunter was in exist again, and he is
+-- put back in them
+local function placeHunter(run)
+  local cat = require("src.scenes.catacombs")
+  local x, y = math.floor(run.x), math.floor(run.y)
+  local area = run.area and run.area > 0 and cat.levelAt(y + config.player.height / 2, x + config.player.width / 2) or nil
+  if area then
+    if area > 1 then
+      cat.ensure(y, x) -- (with a "Building ..." screen if it takes a while)
+    end
+    cat.generate(area)
+  end
+  local px, py = freeSpot(x, y)
+  if not px then
+    local info = area and cat.info(area)
+    px, py = info and info.spawnX or x, info and info.spawnY or y
+  end
+  local b = player.body
+  b.x, b.y, b.vx, b.vy = px, py, 0, 0
+  player.physBody:setPosition(b.x + b.w / 2, b.y + b.h / 2)
+  player:refreshMaxHp()
+  player.hp = math.max(1, math.min(player.maxHp, run.hp))
+  camera.snap(player:center())
+  hud.showBanner("Run Resumed", area and cat.areaName(area) or scene.title)
+end
+
 -- Starts a fresh run in the overworld
 local function newRun()
+  if playing then
+    save.clearRun(save.activeSlot())
+  end
   inv = inventory.new()
   runPerks, lastGold = {}, 0
   discoveries, deadTime, deathPhoto = {}, 0, nil
@@ -245,6 +493,7 @@ local function track(area)
   end
   if player.dead and deathCounted ~= player then
     deathCounted = player
+    save.clearRun(save.activeSlot()) -- (no saved run to go back to)
     meta.tithe(inv.gold) -- (the Miner's Tithe banks a share of what he carried)
     save.stat("deaths")
     meta.onDeath()
@@ -307,6 +556,7 @@ function game.load()
   menu.runPerks = function()
     return inv and inv.perks or {}
   end
+  menu.canSaveRun = game.canSaveRun
   bounties.onNotice = function(title, label)
     toasts.notice(title, label)
   end
@@ -426,6 +676,7 @@ function game.menuAction(action, arg)
   if action == "play" then
     -- Into a run with the chosen save slot (the world behind the title is fresh)
     save.use(arg)
+    save.clearRun(arg) -- (a new run replaces a saved one)
     settings.set("lastSlot", arg)
     playing = true
     save.stat("runs")
@@ -451,6 +702,32 @@ function game.menuAction(action, arg)
       inv.weapons[1] = inventory.starterGun()
     end
     hud.showBanner(scene.title, scene.subtitle)
+  elseif action == "continue" then
+    -- Back into a saved run of slot arg: the world is rebuilt from its seed and the hunter put back
+    local run = save.peekRun(arg)
+    if not run then
+      return
+    end
+    save.use(arg)
+    settings.set("lastSlot", arg)
+    playing = true
+    runPerks, deathCounted = {}, nil
+    discoveries, deadTime, deathPhoto = {}, 0, nil
+    menu.close()
+    audio.setMenu(false)
+    audio.setRecap(false)
+    toasts.clear()
+    if itembar.isOpen() then
+      itembar.toggle()
+    end
+    meta.beginRun()
+    inv = inventoryFrom(run)
+    lastGold = inv.gold
+    save.clearRun(arg) -- (used up: the run is saved again by saving and quitting again)
+    game.enter("overworld", { seed = math.floor(run.seed) })
+    devQueue = function()
+      placeHunter(run)
+    end
   elseif action == "ghostbuy" then
     local ok, why = events.buy(arg, player)
     if not ok then
@@ -499,12 +776,14 @@ function game.menuAction(action, arg)
     newRun()
     menu.close()
   elseif action == "title" then
+    keepRun()
     save.flush()
     playing = false
     newRun()
     menu.open("title")
     audio.setMenu(true)
   elseif action == "quit" then
+    keepRun()
     save.flush()
     love.event.quit()
   end
@@ -517,6 +796,7 @@ end
 
 -- Saves on the way out (main.lua calls this from love.quit)
 function game.quit()
+  keepRun()
   save.flush()
 end
 

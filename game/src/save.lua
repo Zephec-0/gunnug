@@ -1,9 +1,10 @@
 -- Save files (design doc §9c): three profile slots. A profile keeps what the
 -- hunter has learned across runs: the compendium (every weapon, ammo type,
 -- attachment and perk ever collected, and every monster slain, with counts)
--- and lifetime stats. Runs themselves are roguelike and are not saved
--- mid-way; a profile is chosen on the title screen and every run played
--- after that adds to it.
+-- and lifetime stats. Runs themselves are roguelike: the only mid-run save is
+-- "Save and quit" (see the saved runs below), which is used up when resumed.
+-- A profile is chosen on the title screen and every run played after that
+-- adds to it.
 --
 -- A profile is written to the LÖVE save directory as slotN.sav: a plain Lua
 -- table literal, loaded back in an empty environment (it can't run code).
@@ -241,10 +242,11 @@ function save.setName(i, name)
   write(i)
 end
 
--- Deletes the profile in slot i (and its backup)
+-- Deletes the profile in slot i (and its backup and any saved run)
 function save.erase(i)
   love.filesystem.remove(path(i))
   love.filesystem.remove(path(i, "bak"))
+  save.clearRun(i)
   slots[i] = false
   if active == i then
     active = nil
@@ -280,6 +282,61 @@ function save.update(dt, playing)
   flushTimer = flushTimer + dt
   if dirty and flushTimer >= FLUSH_INTERVAL then
     save.flush()
+  end
+end
+
+-- Saved runs -------------------------------------------------------------------------
+
+-- "Save and quit" writes the run in progress to runN.sav, beside the profile of
+-- the slot it belongs to: the same kind of table literal, with its own version.
+-- It holds what the world can't rebuild by itself (the hunter, his kit, the
+-- seed the areas grow from, see src.game); a file that is missing, broken or
+-- from another version reads as "no saved run". Resuming deletes it, and so
+-- does a death, a restart or leaving the run.
+save.RUN_VERSION = 1
+
+local runs = {} -- slot -> saved run, false if none (read lazily)
+
+local function runPath(i)
+  return "run" .. i .. ".sav"
+end
+
+local function validRun(r)
+  return type(r) == "table"
+    and r.version == save.RUN_VERSION
+    and type(r.seed) == "number"
+    and type(r.x) == "number"
+    and type(r.y) == "number"
+    and type(r.hp) == "number"
+    and type(r.inv) == "table"
+    and type(r.inv.weapons) == "table"
+    and type(r.inv.items) == "table"
+end
+
+-- The saved run of slot i, or nil
+function save.peekRun(i)
+  if runs[i] == nil then
+    local r = readFile(runPath(i))
+    runs[i] = validRun(r) and r or false
+  end
+  return runs[i] or nil
+end
+
+-- Writes run as slot i's saved run; false if the file could not be written
+function save.writeRun(i, run)
+  run.version = save.RUN_VERSION
+  runs[i] = nil
+  local ok, err = love.filesystem.write(runPath(i), save.encode(run))
+  if not ok then
+    print("save: could not write " .. runPath(i) .. ": " .. tostring(err))
+  end
+  return ok and true or false
+end
+
+function save.clearRun(i)
+  if i then
+    love.filesystem.remove(runPath(i))
+    runs[i] = false
   end
 end
 
@@ -347,7 +404,7 @@ end
 
 -- For tests: forget what's cached so files are read again
 function save.reset()
-  slots, active, dirty = {}, nil, false
+  slots, runs, active, dirty = {}, {}, nil, false
 end
 
 return save

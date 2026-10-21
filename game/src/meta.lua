@@ -853,12 +853,19 @@ function meta.drinkLevel()
 end
 
 -- 0 until he has had DRUNK_FROM, then rising to 1 at the drink that passes him out
+-- (a hidden mechanic: once a save file has put away 40 drinks it can hold one more before it shows)
+function meta.drunkFrom()
+  local p = profile()
+  return meta.DRUNK_FROM + ((p and (p.stats.drinks or 0) >= 40) and 1 or 0)
+end
+
 function meta.drunkness()
   local n = meta.drinkLevel()
-  if n <= meta.DRUNK_FROM then
+  local from = meta.drunkFrom()
+  if n <= from then
     return 0
   end
-  return math.min(1, (n - meta.DRUNK_FROM) / (meta.PASS_OUT - meta.DRUNK_FROM))
+  return math.min(1, (n - from) / (meta.PASS_OUT - from))
 end
 
 function meta.passedOut()
@@ -874,6 +881,8 @@ function meta.buyDrink(id)
   end
   local cur = drinks[id]
   drinks[id] = { left = meta.drinkTime(), n = (cur and cur.n or 0) + 1 }
+  profile().stats.drinks = (profile().stats.drinks or 0) + 1 -- (counted for good, on the save file)
+  save.touch()
   meta.mountsDirty = true
   if meta.onDrink then
     meta.onDrink(id)

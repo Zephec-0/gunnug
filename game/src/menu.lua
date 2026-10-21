@@ -1377,12 +1377,49 @@ PAGES.camp = function()
   for _, up in ipairs(meta.UPGRADES) do
     hasUpgrades = hasUpgrades or up.npc == campNpc
   end
+  if campNpc == "cartographer" then
+    hasUpgrades = false -- (his one upgrade is a small row of its own, to leave the page to the chart)
+  end
   if hasUpgrades then
     shadowPrint("Upgrades", x, y, F.body, WARM)
   end
   y = y + F.body:getHeight() + 2 * u
+  if campNpc == "cartographer" then
+    -- A slim row: its name, tiers and price, and what it does beside it
+    for _, up in ipairs(meta.UPGRADES) do
+      if up.npc == campNpc then
+        local h, rw = math.floor(15 * u), math.floor(130 * u)
+        local tier, cost = meta.tier(up.id), meta.nextCost(up.id)
+        local focused = widget({ id = "camp:up:" .. up.id, x = x, y = Y(36), w = rw, h = h, activate = function()
+          if meta.buy(up.id) then
+            audio.play("buy")
+          else
+            audio.play("deny")
+          end
+        end })
+        local ry = Y(36)
+        panel(x, ry, rw, h, focused and 0.95 or 0.82)
+        if focused then
+          focusFrame(x, ry, rw, h)
+        end
+        local ty = ry + (h - F.body:getHeight()) / 2
+        shadowPrint(up.name, x + 5 * u, ty, F.body, focused and TEXT or DIM)
+        local px2 = x + 5 * u + F.body:getWidth(up.name) + 4 * u
+        for k = 1, #up.costs do
+          love.graphics.setColor(k <= tier and WARM or { 0.25, 0.22, 0.3 })
+          love.graphics.rectangle("fill", math.floor(px2 + (k - 1) * 4 * u), math.floor(ty + F.body:getHeight() / 2 - 1.2 * u), math.ceil(2.6 * u), math.ceil(2.6 * u))
+        end
+        if cost then
+          markPrice(tostring(cost), x + rw - 4 * u, ty, F.body, marks >= cost and meta.SIGIL_COLOR or DANGER)
+        else
+          shadowPrint("Done", x + rw - 4 * u - F.body:getWidth("Done"), ty, F.body, FAINT)
+        end
+        wrapped(up.desc, x + rw + 6 * u, ry, X(386) - (x + rw + 6 * u), F.small, FAINT)
+      end
+    end
+  end
   for _, up in ipairs(meta.UPGRADES) do
-    if up.npc == campNpc then
+    if up.npc == campNpc and campNpc ~= "cartographer" then
       local h = math.floor(23 * u)
       local tier, cost = meta.tier(up.id), meta.nextCost(up.id)
       local focused = widget({ id = "camp:up:" .. up.id, x = x, y = y, w = w, h = h, activate = function()
@@ -1566,7 +1603,10 @@ PAGES.camp = function()
           local cost = tostring(d.cost)
           markPrice(cost, mid + (F.small:getWidth(cost) + 8 * u) / 2, ty, F.small, canBuy and meta.SIGIL_COLOR or DANGER)
           ty = ty + F.small:getHeight() + 2 * u
-          wrapped(d.desc, cx + 3 * u, ty, cw - 8 * u, F.small, FAINT)
+          local _, descLines = F.small:getWrap(d.desc, cw - 8 * u)
+          for li, line in ipairs(descLines) do
+            printCentered(line, mid, ty + (li - 1) * F.small:getHeight() * F.small:getLineHeight(), F.small, FAINT)
+          end
           if n > 0 then
             local t = "x" .. n .. "  " .. string.format("%d:%02d", math.floor(left / 60), math.floor(left % 60))
             shadowPrint(t, cx + cw - 3 * u - F.small:getWidth(t), sy + 1 * u, F.small, ACCENT)
@@ -1615,19 +1655,23 @@ PAGES.camp = function()
     wrapped(open and ("Rules apply from your next run (restart or start a new one). Together they pay marks x" .. string.format("%.2f", total) .. " on everything earned.") or "Buy House Rules above to switch these on.", rx, ry + u * 0.5, rw, F.small, FAINT)
     return
   end
-  -- The Cartographer: the chart of what has been found
+  -- The Cartographer: his chart, right on the page (src.chart); wheel or +/- zooms, a drag moves it
   if campNpc == "cartographer" then
     local chart = require("src.chart")
-    local gx, gy, gw = X(198), Y(36), math.floor(188 * u)
-    shadowPrint("The chart", gx, gy, F.body, WARM)
-    local n, total = chart.progress()
-    local ty = gy + F.body:getHeight() + 2 * u
-    panel(gx, ty, gw, math.floor(40 * u), 0.85)
-    printCentered(n .. " of " .. total .. " places charted", gx + gw / 2, ty + 5 * u, F.body, DIM)
-    button("camp:chart", "Open the chart", gx + math.floor(24 * u), ty + math.floor(20 * u), gw - math.floor(48 * u), math.floor(14 * u), function()
-      menu.open("chart")
-    end)
-    wrapped("Places are drawn on it the first time you find them: the surface and every area below. It keeps them between runs.", gx, ty + math.floor(44 * u), gw, F.small, FAINT)
+    local cx0, cy0, cw0 = X(14), Y(58), math.floor(372 * u)
+    local ch0 = math.floor(Y(218) - cy0)
+    chart.draw(cx0, cy0, cw0, ch0, u, F)
+    local bs, gap = math.floor(10 * u), math.floor(2 * u)
+    local bx = cx0 + cw0 - gap - bs
+    button("chart:zoomin", "+", bx, cy0 + gap, bs, bs, function()
+      chart.zoom(1.3)
+    end, { font = F.body })
+    button("chart:zoomout", "-", bx - bs - gap, cy0 + gap, bs, bs, function()
+      chart.zoom(1 / 1.3)
+    end, { font = F.body })
+    button("chart:reset", "o", bx - 2 * (bs + gap), cy0 + gap, bs, bs, function()
+      chart.resetView()
+    end, { font = F.body })
     return
   end
   -- The Taxidermist's wall: one row per kind of elite (src.meta.MOUNTS)
@@ -2375,21 +2419,6 @@ end
 
 -- The survey map (src.surveymap) ---------------------------------------------------------
 
--- The Cartographer's chart: an aged map of the Barrens and below, filled in as places are found (src.chart)
-PAGES.chart = function()
-  local ww, wh = love.graphics.getDimensions()
-  love.graphics.setColor(0.015, 0.01, 0.025, 0.94)
-  love.graphics.rectangle("fill", 0, 0, ww, wh)
-  pageTitle("The Cartographer's Chart", X(14), Y(9))
-  shadowPrint("Drawn as you discover places, and kept from run to run. Not to scale.", X(14), Y(26), F.small, FAINT)
-  require("src.chart").draw(X(14), Y(36), math.floor(372 * u), math.floor(182 * u), u, F)
-  if meta.tier("survey") > 0 then
-    button("chart:survey", "Survey map", X(318), Y(8), math.floor(68 * u), math.floor(12 * u), function()
-      menu.open("map")
-    end)
-  end
-end
-
 PAGES.map = function()
   local ww, wh = love.graphics.getDimensions()
   love.graphics.setColor(0.015, 0.01, 0.025, 0.94)
@@ -2405,11 +2434,6 @@ PAGES.map = function()
   -- zoom buttons in the corner of the map's border (the wheel zooms too)
   local bs = math.floor(10 * u)
   local gap = math.floor(2 * u)
-  if meta.atCamp("cartographer") then
-    button("map:chart", "Chart", X(330), Y(8), math.floor(56 * u), math.floor(12 * u), function()
-      menu.open("chart")
-    end)
-  end
   button("map:zoomout", "-", mx + mw - bs * 2 - gap * 2, my + gap, bs, bs, function()
     sm.zoom(1 / 1.4)
   end, { font = F.body })
@@ -2802,7 +2826,7 @@ local function back()
     audio.play("back")
     return
   end
-  if not pop() and (root == "pause" or root == "camp" or root == "board" or root == "map" or root == "chart" or root == "ghost" or root == "dialog") then
+  if not pop() and (root == "pause" or root == "camp" or root == "board" or root == "map" or root == "ghost" or root == "dialog") then
     act("resume")
   end
 end
@@ -2843,7 +2867,7 @@ function menu.keypressed(key)
     return
   end
   local cur = find(focusId)
-  if (root == "map" or root == "chart") and #stack == 0 then
+  if root == "map" and #stack == 0 then
     if input.is("map", key) or input.is("interact", key) then
       act("resume")
       return
@@ -2911,6 +2935,10 @@ function menu.mousepressed(x, y, button)
     return
   end
   mouseX, mouseY = x, y
+  if top() == "camp" and campNpc == "cartographer" and button == 1 and require("src.chart").inBox(x, y) and not hovered() then
+    mapDrag = { x = x, y = y, moved = false, chart = true } -- (a drag on his chart moves it)
+    return
+  end
   if top() == "map" then
     -- On the survey map: left-click marks a spot, right-click takes a mark down
     -- (or, dragged, moves the map)
@@ -2977,6 +3005,9 @@ function menu.mousereleased(x, y, button)
 end
 
 function menu.wheelmoved(_, dy)
+  if top() == "camp" and campNpc == "cartographer" and require("src.chart").inBox(mouseX, mouseY) then
+    require("src.chart").zoom(1.18 ^ dy, mouseX, mouseY)
+  end
   if top() == "map" then
     require("src.surveymap").zoom(1.18 ^ dy, mouseX, mouseY)
   end
@@ -2995,6 +3026,14 @@ function menu.update(dt)
   end
   local mx, my = love.mouse.getPosition()
   light.x, light.y = mx, my
+  if mapDrag and mapDrag.chart then
+    if love.mouse.isDown(1) then
+      require("src.chart").pan(mx - mapDrag.x, my - mapDrag.y)
+      mapDrag.x, mapDrag.y = mx, my
+    else
+      mapDrag = nil
+    end
+  end
   if top() == "map" then
     local sm = require("src.surveymap")
     -- a right-button drag moves the map; the arrow keys and WASD do too

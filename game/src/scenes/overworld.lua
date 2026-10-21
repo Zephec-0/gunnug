@@ -785,7 +785,7 @@ function overworld.addLights(lighting, camX, camY)
   -- Low warm light from the setting sun's place in the sky, fading underground
   local sunlight = 1 - underground(camX + config.VIRTUAL_W / 2, camY + config.VIRTUAL_H / 2)
   if sunlight > 0 then
-    lighting.add(camX + SUN_X, camY + SUN_Y, 420, 1, 0.62, 0.38, 0.3 * sunlight, true) -- (the sun shines down the shaft without casting shadows)
+    lighting.add(camX + SUN_X, camY + SUN_Y, 420, 1, 0.62, 0.38, 0.3 * sunlight)
   end
   catacombs.addLights(lighting, view(camX, camY))
   town.addLights(lighting, view(camX, camY))

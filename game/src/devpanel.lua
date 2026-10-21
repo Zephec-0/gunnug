@@ -60,6 +60,7 @@ local function unlockEverything()
   for id in pairs(meta.PEOPLE) do
     p.camp[id] = true
   end
+  p.marks = (p.marks or 0) + 10
   p.board = true
   p.stats.bosses = math.max(1, p.stats.bosses or 0)
   for _, c in ipairs(compendium.CATEGORIES) do
@@ -102,7 +103,16 @@ local function rows()
     { kind = "toggle", label = "Mine decorations", get = function() return bake.enabled.minedecor end, set = function(v) bake.enabled.minedecor = v end },
     { kind = "toggle", label = "Item bar boxes", get = function() return bake.enabled.itembar end, set = function(v) bake.enabled.itembar = v end },
     { kind = "head", label = "Save file" },
-    { kind = "action", label = "Unlock everything", fn = unlockEverything },
+    { kind = "action", label = "Unlock everything (+10 marks)", fn = unlockEverything },
+    { kind = "action", label = "Give 10 marks", fn = function()
+      local p = require("src.save").profile()
+      if not p then
+        return "No save file in use"
+      end
+      p.marks = (p.marks or 0) + 10
+      require("src.save").touch()
+      return "+10 marks"
+    end },
     { kind = "action", label = "Drop 100 gold + 12 ether", fn = dropStash },
     { kind = "head", label = "Go to" },
     { kind = "button", label = "Camp", spec = { kind = "camp" } },

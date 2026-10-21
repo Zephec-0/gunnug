@@ -10,35 +10,34 @@ local chart = {}
 local REACH = 260
 chart.PLACES = {
   { id = "farwest", name = "Far Mesas", x = -2000, cx = 0.05, kind = "mesa" },
-  { id = "lake", name = "The Drowned Lake", x = -900, cx = 0.17, kind = "lake" },
-  { id = "westmesa", name = "West Mesa", x = 356, cx = 0.30, kind = "mesa" },
-  { id = "camp", name = "Camp", x = 1000, cx = 0.39, kind = "camp" },
-  { id = "oasis", name = "Oasis", x = 1348, cx = 0.46, kind = "pond" },
-  { id = "mine", name = "Old Mine", x = 1659, cx = 0.53, kind = "derrick" },
-  { id = "ruins", name = "Ruins", x = 2390, cx = 0.61, kind = "arch" },
-  { id = "quarry", name = "Quarry Crevice", x = 4300, cx = 0.74, kind = "crevice" },
+  { id = "lake", name = "The Lake", x = -900, cx = 0.15, kind = "lake" },
+  { id = "camp", name = "Camp", x = 1000, cx = 0.40, kind = "camp" },
+  { id = "mine", name = "Old Mine Shaft", x = 1659, cx = 0.50, kind = "derrick" },
+  { id = "quarry", name = "Quarry Shaft", x = 4300, cx = 0.74, kind = "crevice" },
   { id = "mountain", name = "The Mountain", x = 6320, cx = 0.90, kind = "mountain" },
 }
 
 -- Areas under the ground: where each sits on the chart (cx, cy as fractions of the page), by layout index
+local SURFACE_Y = 0.27
 chart.AREAS = {
-  [1] = { cx = 0.46, cy = 0.42 },
-  [2] = { cx = 0.46, cy = 0.55 },
+  [1] = { cx = 0.46, cy = 0.40 },
+  [2] = { cx = 0.46, cy = 0.54 },
   [3] = { cx = 0.46, cy = 0.68 },
-  [4] = { cx = 0.34, cy = 0.81 },
-  [5] = { cx = 0.58, cy = 0.81 },
-  [12] = { cx = 0.34, cy = 0.93 },
-  [13] = { cx = 0.58, cy = 0.93 },
+  [4] = { cx = 0.34, cy = 0.82 },
+  [5] = { cx = 0.58, cy = 0.82 },
+  [12] = { cx = 0.34, cy = 0.96 },
+  [13] = { cx = 0.58, cy = 0.96 },
   [6] = { cx = 0.76, cy = 0.45 },
-  [7] = { cx = 0.76, cy = 0.62 },
+  [7] = { cx = 0.76, cy = 0.66 },
   [8] = { cx = 0.15, cy = 0.45 },
-  [9] = { cx = 0.15, cy = 0.64 },
-  [10] = { cx = 0.90, cy = 0.20 },
+  [9] = { cx = 0.15, cy = 0.66 },
+  [10] = { cx = 0.90, cy = 0.27 },
   [11] = { cx = 0.80, cy = 0.06 },
 }
 -- Each area is reached from another: the chart draws a trail between them once both are known
 local PARENTS = { [2] = 1, [3] = 2, [4] = 3, [5] = 3, [12] = 4, [13] = 5, [7] = 6, [9] = 8, [11] = 10 }
-local SURFACE_Y = 0.27
+-- Surface places that open onto an area: the shaft down to it is drawn once both are known
+local SHAFTS = { { place = "mine", area = 1 }, { place = "quarry", area = 6 }, { place = "lake", area = 8 } }
 
 -- Notes the places the hunter is near (called a few times a second with his position; only the surface counts)
 local timer = 0
@@ -81,6 +80,46 @@ function chart.progress()
     end
   end
   return n, total
+end
+
+-- The view: zoom and where the middle of the chart is shifted to (px), changed by the wheel, dragging and the buttons
+chart.view = { z = 1, ox = 0, oy = 0 }
+local box = { x = 0, y = 0, w = 1, h = 1 }
+
+function chart.inBox(mx, my)
+  return mx >= box.x and mx <= box.x + box.w and my >= box.y and my <= box.y + box.h
+end
+
+local function clampView()
+  local v = chart.view
+  v.z = math.max(0.8, math.min(3.2, v.z))
+  local lx, ly = box.w * 0.5 * v.z, box.h * 0.5 * v.z
+  v.ox = math.max(-lx, math.min(lx, v.ox))
+  v.oy = math.max(-ly, math.min(ly, v.oy))
+end
+
+-- Zoom by a factor about a screen point (the middle of the box if none)
+function chart.zoom(f, mx, my)
+  local v = chart.view
+  mx, my = mx or box.x + box.w / 2, my or box.y + box.h / 2
+  local before = v.z
+  v.z = math.max(0.8, math.min(3.2, v.z * f))
+  local k = v.z / before
+  -- keep the point under the mouse where it was
+  local cx, cy = box.x + box.w / 2, box.y + box.h / 2
+  v.ox = (mx - cx) - ((mx - cx) - v.ox) * k
+  v.oy = (my - cy) - ((my - cy) - v.oy) * k
+  clampView()
+end
+
+function chart.pan(dx, dy)
+  chart.view.ox = chart.view.ox + dx
+  chart.view.oy = chart.view.oy + dy
+  clampView()
+end
+
+function chart.resetView()
+  chart.view = { z = 1, ox = 0, oy = 0 }
 end
 
 local INK = { 0.24, 0.13, 0.06 }
@@ -145,6 +184,8 @@ end
 
 -- The page: x, y, w, h in screen px; u = px per game pixel; F the menu's fonts. Returns nothing.
 function chart.draw(x, y, w, h, u, F)
+  box.x, box.y, box.w, box.h = x, y, w, h
+  local v = chart.view
   local rng = love.math.newRandomGenerator(7)
   love.graphics.push("all")
   love.graphics.setScissor(x, y, w, h)
@@ -180,69 +221,96 @@ function chart.draw(x, y, w, h, u, F)
     love.graphics.rectangle("fill", x + w - t, y, t, h)
   end
 
+  -- (positions follow the zoom and pan; sizes grow only a little, so the drawing stays crisp)
   local function px(fx)
-    return x + fx * w
+    return x + w / 2 + v.ox + (fx - 0.5) * w * v.z
   end
   local function py(fy)
-    return y + fy * h
+    return y + h / 2 + v.oy + (0.04 + fy * 0.86 - 0.5) * h * v.z
   end
+  local grow = 0.7 + 0.3 * v.z
 
-  -- the ground line, wandering across the page with a hatching of earth under it
+  local function groundAt(fx)
+    return py(SURFACE_Y) + (math.sin(fx * 23 + 1) * 1.2 + math.sin(fx * 7) * 1.6) * u
+  end
+  -- the ground line, wandering across the page (and past it, for the zoom) with a hatching of earth under it
   love.graphics.setLineWidth(math.max(1, u * 0.7))
   ink(INK)
   local groundPts = {}
-  for i = 0, 40 do
+  for i = -20, 60 do
     local fx = i / 40
     groundPts[#groundPts + 1] = px(fx)
-    groundPts[#groundPts + 1] = py(SURFACE_Y) + math.sin(fx * 23 + 1) * 1.2 * u + math.sin(fx * 7) * 1.6 * u
+    groundPts[#groundPts + 1] = groundAt(fx)
   end
   love.graphics.line(groundPts)
   ink(INK_L, 0.5)
-  for i = 0, 60 do
+  for i = -30, 90 do
     local fx = i / 60
-    local gy = py(SURFACE_Y) + math.sin(fx * 23 + 1) * 1.2 * u + math.sin(fx * 7) * 1.6 * u
+    local gy = groundAt(fx)
     love.graphics.line(px(fx), gy + 2 * u, px(fx) - 2 * u, gy + 4.5 * u)
   end
 
-  -- surface places, drawn once found
   love.graphics.setFont(F.small)
-  local s = math.max(1, u * 0.6)
-  for _, p in ipairs(chart.PLACES) do
-    if placeKnown(p.id) then
-      local fx = p.cx
-      local gy = py(SURFACE_Y) + math.sin(fx * 23 + 1) * 1.2 * u + math.sin(fx * 7) * 1.6 * u
-      drawPlaceIcon(p.kind, px(fx), gy, s)
-      ink(INK)
-      local tw = F.small:getWidth(p.name)
-      love.graphics.print(p.name, math.floor(math.min(x + w - tw - 4 * u, math.max(x + 4 * u, px(fx) - tw / 2))), math.floor(gy - (p.kind == "mountain" and 21 or 17) * s - F.small:getHeight() * 0.4))
-    end
+  local s = math.max(1, u * 0.6) * grow
+  local function label(text, cx, ty)
+    local tw = F.small:getWidth(text)
+    love.graphics.print(text, math.floor(cx - tw / 2), math.floor(ty))
   end
 
-  -- trails between the areas that are known, then the areas
+  -- trails between the areas that are known: dotted lines, so it is plain what leads to what
+  local function trail(x0, y0, x1, y1)
+    local n = math.max(2, math.floor(math.sqrt((x1 - x0) ^ 2 + (y1 - y0) ^ 2) / (4 * u)))
+    for k = 0, n, 2 do
+      local t0, t1 = k / n, math.min(1, (k + 1) / n)
+      love.graphics.line(x0 + (x1 - x0) * t0, y0 + (y1 - y0) * t0, x0 + (x1 - x0) * t1, y0 + (y1 - y0) * t1)
+    end
+  end
   love.graphics.setLineWidth(math.max(1, u * 0.6))
   ink(INK, 0.7)
   for i, parent in pairs(PARENTS) do
     local a, b = chart.AREAS[i], chart.AREAS[parent]
     if a and b and areaKnown(i) and areaKnown(parent) then
-      local x0, y0, x1, y1 = px(b.cx), py(b.cy), px(a.cx), py(a.cy)
-      local n = math.floor(math.sqrt((x1 - x0) ^ 2 + (y1 - y0) ^ 2) / (4 * u))
-      for k = 0, n, 2 do
-        local t0, t1 = k / n, math.min(1, (k + 1) / n)
-        love.graphics.line(x0 + (x1 - x0) * t0, y0 + (y1 - y0) * t0, x0 + (x1 - x0) * t1, y0 + (y1 - y0) * t1)
-      end
+      trail(px(b.cx), py(b.cy), px(a.cx), py(a.cy))
     end
   end
-  -- the shaft down from the Old Mine's place on the surface
-  if areaKnown(1) then
-    local a = chart.AREAS[1]
-    ink(INK, 0.7)
-    love.graphics.line(px(0.53), py(SURFACE_Y) + 2 * u, px(a.cx), py(a.cy) - 5 * u)
+  -- the shafts down from the surface (the lake drains into the Flooded Caverns)
+  for _, sh in ipairs(SHAFTS) do
+    local place
+    for _, p in ipairs(chart.PLACES) do
+      if p.id == sh.place then
+        place = p
+      end
+    end
+    local a = chart.AREAS[sh.area]
+    if place and a and placeKnown(place.id) and areaKnown(sh.area) then
+      trail(px(place.cx), groundAt(place.cx) + 2 * u, px(a.cx), py(a.cy) - 5 * u)
+    end
   end
+
+  -- surface places, drawn once found (the mountain is also the Needle, once its way up has been climbed)
+  for _, p in ipairs(chart.PLACES) do
+    local needle = p.id == "mountain" and areaKnown(10)
+    if placeKnown(p.id) or needle then
+      local gy = groundAt(p.cx)
+      drawPlaceIcon(p.kind, px(p.cx), gy, s)
+      ink(INK)
+      label(needle and "The Needle" or p.name, math.min(x + w - F.small:getWidth(p.name) / 2 - 4 * u, math.max(x + F.small:getWidth(p.name) / 2 + 4 * u, px(p.cx))), gy - (p.kind == "mountain" and 21 or 17) * s - F.small:getHeight() * 0.4)
+    end
+  end
+  -- the sky above the mountain, once reached
+  if areaKnown(11) then
+    local a = chart.AREAS[11]
+    if areaKnown(10) then
+      trail(px(chart.AREAS[10].cx), groundAt(0.9) - 16 * s, px(a.cx), py(a.cy) + 6 * u)
+    end
+  end
+
+  -- the areas under the ground (the Needle is the mountain itself, above)
   for i, a in pairs(chart.AREAS) do
-    if areaKnown(i) then
+    if areaKnown(i) and i ~= 10 then
       local theme = require("src.scenes.catacombs").theme(i)
       local name = theme and theme.name or "Unknown"
-      local rx, ry = 22 * u, 8 * u
+      local rx, ry = 22 * u * grow, 8 * u * grow
       local pts = blob(px(a.cx), py(a.cy), rx, ry, 40 + i)
       local c = theme and theme.glow or { 0.6, 0.5, 0.3 }
       love.graphics.setColor(c[1] * 0.5 + 0.35, c[2] * 0.5 + 0.28, c[3] * 0.5 + 0.18, 0.55)
@@ -250,14 +318,12 @@ function chart.draw(x, y, w, h, u, F)
       ink(INK)
       love.graphics.setLineWidth(math.max(1, u * 0.7))
       love.graphics.polygon("line", pts)
-      -- a little hatching inside, like a cave drawn by hand
       ink(INK_L, 0.55)
       for k = -3, 3 do
-        love.graphics.line(px(a.cx) + k * 5 * u, py(a.cy) - 3 * u, px(a.cx) + k * 5 * u - 2 * u, py(a.cy) + 3 * u)
+        love.graphics.line(px(a.cx) + k * 5 * u * grow, py(a.cy) - 3 * u * grow, px(a.cx) + k * 5 * u * grow - 2 * u, py(a.cy) + 3 * u * grow)
       end
       ink(INK)
-      local tw = F.small:getWidth(name)
-      love.graphics.print(name, math.floor(px(a.cx) - tw / 2), math.floor(py(a.cy) + ry + u))
+      label(name, px(a.cx), py(a.cy) + ry + u)
     end
   end
 
@@ -277,7 +343,7 @@ function chart.draw(x, y, w, h, u, F)
   love.graphics.print(title, math.floor(x + 8 * u), math.floor(y + 6 * u))
   love.graphics.setFont(F.small)
   ink(INK_L)
-  love.graphics.print(n .. " of " .. total .. " places charted. Not to scale.", math.floor(x + 8 * u), math.floor(y + 6 * u + F.body:getHeight() + u))
+  love.graphics.print(n .. " of " .. total .. " places charted.", math.floor(x + 8 * u), math.floor(y + 6 * u + F.body:getHeight() + u))
   love.graphics.setScissor()
   -- a ragged border
   love.graphics.setColor(0.2, 0.1, 0.04, 0.9)

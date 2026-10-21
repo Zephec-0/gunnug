@@ -2195,7 +2195,7 @@ function catacombs.drawEmissive(view)
       -- (only inside the area's own box: the far scenery is not drawn outside it, nor the sky over it)
       local x0, y0, x1, y1 = math.max(view.x, lv.x0), math.max(view.y, lv.y0), math.min(view.x + view.w, lv.x1), math.min(view.y + view.h, lv.y1)
       if x1 > x0 and y1 > y0 then
-        parallax.drawLanternGlow(view.x, view.y, x0, y0, x1, y1, require("src.lighting").mask(), entities())
+        parallax.drawLanternGlow(view.x, view.y, x0, y0, x1, y1, require("src.lighting").mask()) -- (no creatures passed: the far lanterns' glow lies over them, instead of leaving a dark cut-out and rim round each one)
       end
     end
   end

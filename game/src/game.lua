@@ -1420,8 +1420,6 @@ function game.keypressed(key)
   elseif input.is("map", key) and not player.dead then
     if meta.tier("survey") > 0 then
       menu.open("map")
-    elseif meta.atCamp("cartographer") then
-      menu.open("chart")
     else
       local px, py = player:center()
       effects.popup(px, py - 14, "No survey map", { 0.8, 0.8, 0.85 })

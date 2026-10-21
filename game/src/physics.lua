@@ -230,7 +230,7 @@ function physics.init(world)
   terrain = world
   chunks = {}
   pendingChunks, pendingWake = {}, {}
-  bodies, cullTimer, live = {}, 0, {}
+  bodies, cullTimer, live, evictTimer = {}, 0, {}, 0
 end
 
 -- Traces any not-yet-traced chunks overlapping the pixel rectangle
@@ -304,20 +304,34 @@ end
 -- outlines traced. The list of bodies is refreshed a few times a second
 -- (asking Box2D for it every frame made a new table each time).
 local FAR_X, FAR_Y = 900, 700
+local EVICT_X, EVICT_Y = 1500, 1200
+local evictTimer = 0
+
+-- Registers a dynamic body for the cull above (every dynamic body must be, or it is never switched off)
+function physics.track(body)
+  bodies[#bodies + 1] = body
+  live[#live + 1] = body
+end
 
 function physics.update(dt, px, py)
   physics.flush()
   cullTimer = cullTimer - dt
   if cullTimer <= 0 or not px then
     cullTimer = 0.2
-    bodies = physics.world:getBodies()
     -- (the dynamic bodies left active are kept in `live`: every frame only they are looked at, not the
-    -- hundreds of resting crates and terrain outlines all over the world)
+    -- hundreds of resting crates; and only the dynamic bodies, kept in `bodies` by physics.track, are
+    -- walked here, not the terrain outlines, which pile up over a long run)
     for i = #live, 1, -1 do
       live[i] = nil
     end
-    for _, body in ipairs(bodies) do
-      if body:getType() == "dynamic" then
+    local i, n = 1, #bodies
+    while i <= n do
+      local body = bodies[i]
+      if body:isDestroyed() then
+        bodies[i] = bodies[n]
+        bodies[n] = nil
+        n = n - 1
+      else
         if px then
           local x, y = body:getPosition()
           local near = math.abs(x - px) < FAR_X and math.abs(y - py) < FAR_Y
@@ -330,6 +344,7 @@ function physics.update(dt, px, py)
         elseif body:isActive() then
           live[#live + 1] = body
         end
+        i = i + 1
       end
     end
   end
@@ -337,6 +352,23 @@ function physics.update(dt, px, py)
     if not body:isDestroyed() and body:isAwake() then
       local x, y = body:getPosition()
       ensureChunks(x - REACH, y - REACH, x + REACH, y + REACH)
+    end
+  end
+  -- Traced outlines far behind the hunter are dropped (they are traced again if anything comes near
+  -- them later): over a long run they piled up into thousands of static bodies. The distance is well
+  -- beyond FAR_X/FAR_Y, so nothing that is switched on ever loses its ground.
+  evictTimer = evictTimer - dt
+  if evictTimer <= 0 and px then
+    evictTimer = 3
+    for key, body in pairs(chunks) do
+      local cx = key % 65536
+      local cy = (key - cx) / 65536
+      if math.abs(cx * CHUNK + CHUNK / 2 - px) > EVICT_X or math.abs(cy * CHUNK + CHUNK / 2 - py) > EVICT_Y then
+        if body then
+          body:destroy()
+        end
+        chunks[key] = nil
+      end
     end
   end
   physics.world:update(dt)

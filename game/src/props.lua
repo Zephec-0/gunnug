@@ -656,6 +656,7 @@ local function newBody(def, x, y, angle)
   body:setGravityScale(def.gravityScale)
   body:setLinearDamping(def.linearDamping)
   body:setAngularDamping(def.angularDamping)
+  physics.track(body)
   return body
 end
 

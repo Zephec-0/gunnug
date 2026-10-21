@@ -246,6 +246,64 @@ local function planks(x, y, w, h, c)
   end
 end
 
+-- Little pictures for each building's front, 11 x 7: what each trade is about
+local EMBLEM_COLORS = {
+  k = { 0.14, 0.13, 0.16 }, g = { 0.62, 0.64, 0.70 }, w = { 0.50, 0.33, 0.17 }, r = { 0.80, 0.18, 0.16 },
+  b = { 0.30, 0.50, 0.85 }, y = { 0.95, 0.76, 0.28 }, l = { 0.35, 0.75, 0.42 }, c = { 0.92, 0.88, 0.74 },
+}
+local EMBLEMS = {
+  gunsmith = { "..kkkkkkkk.", "..kggggggkk", "..kkkkkkk..", ".....kk....", "....wkk....", "...wwk.....", "...ww......" },
+  apothecary = { "....kkk....", ".....l.....", "....lll....", "...lllll...", "..lllllll..", "..lyyyyyl..", "...lllll..." },
+  cartographer = { ".ccccccccc.", "cc.......cc", "c.k.kk.k..c", "c..kk..kk.c", "c.k..kk...c", "cc.......cc", ".ccccccccc." },
+  prospector = { "..kkkkkk...", ".kg.....k..", "k...w....k.", ".....w.....", ".....w.....", ".....w.....", ".....w....." },
+  bartender = { "..cccccc...", "..cyyyyc.cc", "..cyyyyc..c", "..cyyyyc..c", "..cyyyyc.cc", "..cccccc...", "..wwwwww..." },
+  taxidermist = { "k.k.....k.k", "kkk.....kkk", ".kkk...kkk.", "..kkkkkkk..", "....www....", "....www....", "..........." },
+  sawbone = { "....rrr....", "....rrr....", ".rrrrrrrrr.", ".rrrrrrrrr.", "....rrr....", "....rrr....", "..........." },
+}
+
+local function emblem(id, x, y)
+  local rows = EMBLEMS[id]
+  if not rows then
+    return
+  end
+  for ry, row in ipairs(rows) do
+    for rx = 1, #row do
+      local c = EMBLEM_COLORS[row:sub(rx, rx)]
+      if c then
+        R(c, x + rx - 1, y + ry - 1, 1, 1)
+      end
+    end
+  end
+end
+
+local function hash2(a, b)
+  local n = math.sin(a * 12.9898 + b * 78.233) * 43758.5453
+  return n - math.floor(n)
+end
+
+-- Shutters: a slatted board beside a window (x = left edge, y = top, h = height)
+local function shutter(x, y, h, c)
+  R(shade(c, 0.62), x, y, 3, h)
+  for sy = y + 1, y + h - 1, 2 do
+    R(shade(c, 0.45), x, sy, 3, 1)
+  end
+  R(shade(c, 0.85), x, y, 1, h)
+end
+
+-- A window box under a window at (x, y): a plank trough with flowers in the trade's colours
+local function flowerBox(x, y, w, id)
+  R(WOOD_D, x, y, w, 3)
+  R(WOOD, x, y, w, 1)
+  local cols = { gunsmith = { 0.9, 0.35, 0.25 }, apothecary = { 0.95, 0.9, 0.4 }, cartographer = { 0.4, 0.6, 0.95 }, prospector = { 0.95, 0.65, 0.25 }, bartender = { 0.95, 0.4, 0.6 }, taxidermist = { 0.8, 0.5, 0.95 }, sawbone = { 0.95, 0.95, 0.95 } }
+  local fc = cols[id] or { 0.95, 0.5, 0.5 }
+  for fx = x + 1, x + w - 2 do
+    R({ 0.22, 0.45, 0.2 }, fx, y - 1, 1, 1)
+    if hash2(fx, y) < 0.6 then
+      R(fc, fx, y - 2, 1, 1)
+    end
+  end
+end
+
 -- Stage 2: a plank shack with a shingle roof, porch posts, a sign over the ridge
 local function shack(l)
   local cx, P, a = l.x, l.top, l.accent
@@ -274,6 +332,27 @@ local function shack(l)
   sign(l.sign, cx, P - 54, a)
   lantern(cx - 28, P - 29)
   lantern(cx + 27, P - 29)
+  -- the detail: weathered shingles, a stone chimney, shutters, the trade's emblem
+  for row = 0, 3 do
+    for sx = cx - 28 + row, cx + 26 - row do
+      local hsh = hash2(sx, row + l.x)
+      if hsh < 0.3 then
+        R(SHINGLE_D, sx, P - 42 + row, 1, 1)
+      elseif hsh > 0.85 then
+        R({ 0.52, 0.38, 0.28 }, sx, P - 42 + row, 1, 1)
+      end
+    end
+  end
+  R({ 0.50, 0.46, 0.42 }, cx + 17, P - 50, 5, 9)
+  R({ 0.36, 0.33, 0.30 }, cx + 17, P - 50, 1, 9)
+  R({ 0.30, 0.27, 0.25 }, cx + 16, P - 51, 7, 2)
+  for _, wx in ipairs({ cx - 16, cx + 8 }) do
+    shutter(wx - 4, P - 38, 6, a)
+    shutter(wx + 9, P - 38, 6, a)
+    R({ 0.42, 0.37, 0.28 }, wx + 3, P - 37, 1, 4) -- the muntin
+  end
+  emblem(l.id, cx - 5, P - 39)
+  R(shade(a, 0.5), cx - 27, P - 33, 54, 1) -- (a shadow line under the eaves)
 end
 
 -- Stage 3: a false-front building: striped awning, clapboard facade with
@@ -321,6 +400,34 @@ local function facade(l)
   R(WOOD_D, cx + 28, P - 25, 2, 25)
   lantern(cx - 30, P - 25)
   lantern(cx + 29, P - 25)
+  -- the detail: corner quoins, cornice dentils, shutters, window boxes, an emblem between the windows,
+  -- tassels on the awning and a dotted frame round the sign
+  for qy = P - 51, P - 32, 4 do
+    R(CREAM, cx - 28, qy, 3, 2)
+    R(CREAM_D, cx - 28, qy + 2, 2, 2)
+    R(CREAM, cx + 25, qy, 3, 2)
+    R(CREAM_D, cx + 26, qy + 2, 2, 2)
+  end
+  for dx = cx - 29, cx + 28, 3 do
+    R(CREAM_D, dx, P - 54, 1, 1)
+  end
+  shutter(cx - 26, P - 48, 12, a)
+  shutter(cx + 21, P - 48, 12, a)
+  for _, wx in ipairs({ cx - 21, cx + 9 }) do
+    flowerBox(wx - 1, P - 35, 12, l.id)
+    R({ 0.62, 0.30, 0.30, 0.5 }, wx, P - 48, 3, 12) -- (a curtain drawn back)
+    R({ 0.62, 0.30, 0.30, 0.5 }, wx + 7, P - 48, 3, 12)
+  end
+  emblem(l.id, cx - 5, P - 46)
+  for fx = cx - 24, cx + 22, 6 do
+    R(CREAM, fx, P - 64, 1, 1)
+    R(CREAM, fx, P - 57, 1, 1)
+  end
+  for i = 0, 14 do
+    local sx = cx - 31 + i * 4
+    R(i % 2 == 0 and shade(a, 0.8) or CREAM_D, sx + 1, P - 25, 1, 1)
+  end
+  R({ 0, 0, 0, 0.18 }, cx - 27, P - 24, 54, 2) -- (the awning's shadow on the wall)
 end
 
 -- The hall's clock tells the computer's time. The hands (a few pixels, on the world's own pixel grid) are
@@ -354,9 +461,9 @@ local function clockHandsFor(stamp)
   local out = {}
   local ma = (t.min / 60) * math.pi * 2
   local ha = (((t.hour % 12) + t.min / 60) / 12) * math.pi * 2
-  line(0, 0, math.floor(math.sin(ha) * 2 + (math.sin(ha) >= 0 and 0.5 or -0.5)), math.floor(-math.cos(ha) * 2 + (-math.cos(ha) >= 0 and 0.5 or -0.5)), out)
+  line(0, 0, math.floor(math.sin(ha) * 3 + (math.sin(ha) >= 0 and 0.5 or -0.5)), math.floor(-math.cos(ha) * 3 + (-math.cos(ha) >= 0 and 0.5 or -0.5)), out)
   local hourN = #out
-  line(0, 0, math.floor(math.sin(ma) * 3 + (math.sin(ma) >= 0 and 0.5 or -0.5)), math.floor(-math.cos(ma) * 3 + (-math.cos(ma) >= 0 and 0.5 or -0.5)), out)
+  line(0, 0, math.floor(math.sin(ma) * 5 + (math.sin(ma) >= 0 and 0.5 or -0.5)), math.floor(-math.cos(ma) * 5 + (-math.cos(ma) >= 0 and 0.5 or -0.5)), out)
   return out, hourN
 end
 
@@ -416,12 +523,34 @@ local function hall(l)
   -- a tower with a clock
   R(a, cx - 9, P - 66, 18, 20)
   R(CREAM, cx - 10, P - 68, 20, 3)
-  R({ 0.92, 0.9, 0.82 }, cx - 4, P - 62, 8, 8)
-  R({ 0.2, 0.17, 0.14 }, cx - 4, P - 62, 8, 1)
-  R({ 0.2, 0.17, 0.14 }, cx - 4, P - 55, 8, 1)
-  R({ 0.2, 0.17, 0.14 }, cx - 4, P - 62, 1, 8)
-  R({ 0.2, 0.17, 0.14 }, cx + 3, P - 62, 1, 8)
-  drawClockHands(cx, P - 58) -- (the computer's time, redrawn when the minute changes)
+  -- the clock face: a round, bevelled dial in the hall's own pixels (a brass ring, cream face, twelve ticks)
+  local ccx, ccy = cx, P - 56
+  for dy = -7, 7 do
+    for dx = -7, 7 do
+      local d = math.sqrt(dx * dx + dy * dy)
+      if d <= 7.2 then
+        local col
+        if d > 6.1 then
+          col = (dx + dy < 0) and { 0.88, 0.72, 0.38 } or { 0.55, 0.40, 0.18 } -- ring, lit from the upper left
+        elseif d > 5.2 then
+          col = { 0.30, 0.22, 0.12 } -- the inner shadow line
+        else
+          col = (dx + dy < -2) and { 0.97, 0.95, 0.86 } or { 0.88, 0.85, 0.74 } -- the face, shaded lower right
+        end
+        R(col, ccx + dx, ccy + dy, 1, 1)
+      end
+    end
+  end
+  for k = 0, 11 do
+    local ang = k / 12 * math.pi * 2
+    local r1 = k % 3 == 0 and 4.4 or 4.9
+    R({ 0.2, 0.17, 0.14 }, ccx + math.floor(math.sin(ang) * r1 + 0.5), ccy + math.floor(-math.cos(ang) * r1 + 0.5), 1, 1)
+    if k % 3 == 0 then
+      R({ 0.2, 0.17, 0.14 }, ccx + math.floor(math.sin(ang) * (r1 - 1) + 0.5), ccy + math.floor(-math.cos(ang) * (r1 - 1) + 0.5), 1, 1)
+    end
+  end
+  drawClockHands(ccx, ccy) -- (the computer's time, redrawn when the minute changes)
+  R({ 0.75, 0.2, 0.18 }, ccx, ccy, 1, 1) -- the pin
   R(WOOD_D, cx, P - 76, 1, 8)
   R({ 0.75, 0.2, 0.18 }, cx + 1, P - 76, 6, 4)
   -- tall double doors, shut, and two shuttered windows

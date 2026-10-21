@@ -10,8 +10,8 @@ local chart = {}
 local REACH = 260
 chart.PLACES = {
   { id = "farwest", name = "Far Mesas", x = -2000, cx = 0.05, kind = "mesa" },
-  { id = "lake", name = "The Lake", x = -900, cx = 0.15, kind = "lake" },
-  { id = "camp", name = "Camp", x = 1000, cx = 0.40, kind = "camp" },
+  { id = "lake", name = "The Pond", x = -900, cx = 0.15, kind = "pond" },
+  { id = "camp", name = "Camp", x = 1000, cx = 0.35, kind = "camp" },
   { id = "mine", name = "Old Mine Shaft", x = 1659, cx = 0.50, kind = "derrick" },
   { id = "quarry", name = "Quarry Shaft", x = 4300, cx = 0.74, kind = "crevice" },
   { id = "mountain", name = "The Mountain", x = 6320, cx = 0.90, kind = "mountain" },
@@ -20,8 +20,8 @@ chart.PLACES = {
 -- Areas under the ground: where each sits on the chart (cx, cy as fractions of the page), by layout index
 local SURFACE_Y = 0.27
 chart.AREAS = {
-  [1] = { cx = 0.46, cy = 0.40 },
-  [2] = { cx = 0.46, cy = 0.54 },
+  [1] = { cx = 0.46, cy = 0.37 },
+  [2] = { cx = 0.46, cy = 0.53 },
   [3] = { cx = 0.46, cy = 0.68 },
   [4] = { cx = 0.34, cy = 0.82 },
   [5] = { cx = 0.58, cy = 0.82 },
@@ -253,7 +253,11 @@ function chart.draw(x, y, w, h, u, F)
   love.graphics.setFont(F.small)
   local s = math.max(1, u * 0.6) * grow
   local function label(text, cx, ty)
-    local tw = F.small:getWidth(text)
+    local tw, th = F.small:getWidth(text), F.small:getHeight()
+    -- (a patch of paper behind the words, so a trail or a picture passing under them never muddles the text)
+    love.graphics.setColor(0.80, 0.68, 0.45, 0.88)
+    love.graphics.rectangle("fill", math.floor(cx - tw / 2) - u, math.floor(ty), tw + 2 * u, th)
+    ink(INK)
     love.graphics.print(text, math.floor(cx - tw / 2), math.floor(ty))
   end
 
@@ -294,7 +298,7 @@ function chart.draw(x, y, w, h, u, F)
       local gy = groundAt(p.cx)
       drawPlaceIcon(p.kind, px(p.cx), gy, s)
       ink(INK)
-      label(needle and "The Needle" or p.name, math.min(x + w - F.small:getWidth(p.name) / 2 - 4 * u, math.max(x + F.small:getWidth(p.name) / 2 + 4 * u, px(p.cx))), gy - (p.kind == "mountain" and 21 or 17) * s - F.small:getHeight() * 0.4)
+      label(needle and "The Needle" or p.name, px(p.cx), gy - (p.kind == "mountain" and 21 or 17) * s - F.small:getHeight() * 0.4)
     end
   end
   -- the sky above the mountain, once reached
@@ -310,7 +314,7 @@ function chart.draw(x, y, w, h, u, F)
     if areaKnown(i) and i ~= 10 then
       local theme = require("src.scenes.catacombs").theme(i)
       local name = theme and theme.name or "Unknown"
-      local rx, ry = 22 * u * grow, 8 * u * grow
+      local rx, ry = 22 * u * grow, 6.5 * u * grow
       local pts = blob(px(a.cx), py(a.cy), rx, ry, 40 + i)
       local c = theme and theme.glow or { 0.6, 0.5, 0.3 }
       love.graphics.setColor(c[1] * 0.5 + 0.35, c[2] * 0.5 + 0.28, c[3] * 0.5 + 0.18, 0.55)

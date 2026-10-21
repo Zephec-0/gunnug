@@ -713,6 +713,7 @@ end
 function overworld.update(dt, player, game, effects)
   local px, py = player:center()
   town.sync() -- (a person has moved in, or the save file changed)
+  town.tick(dt) -- (the hall's bell, on the hour)
   smokeTimer = smokeTimer - dt
   if smokeTimer <= 0 then
     smokeTimer = 0.2

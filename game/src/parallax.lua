@@ -648,13 +648,20 @@ end
 
 -- (camX, camY: the camera; vx0..vy1: the part of the view to draw, the area's own box: the far scenery is drawn
 -- nowhere else, so neither are its lanterns)
+local clearImage -- a 1x1 image with nothing in it: "no creatures" for the glow shader
 function parallax.drawLanternGlow(camX, camY, vx0, vy0, vx1, vy1, mask, ents)
   if not mask or not getGlowShader() then
     return
   end
+  if not ents then
+    if not clearImage then
+      clearImage = love.graphics.newImage(love.image.newImageData(1, 1)) -- (transparent: no shadow cut round creatures)
+    end
+    ents = clearImage
+  end
   love.graphics.setShader(glowShader)
   glowShader:send("mask", mask)
-  glowShader:send("ents", ents or mask)
+  glowShader:send("ents", ents)
   glowShader:send("canvasSize", { mask:getDimensions() })
   local sprite = lanternSprite()
   mineLanterns(camX, camY, vx0, vy0, vx1, vy1, love.timer.getTime(), function(x, y, flick)

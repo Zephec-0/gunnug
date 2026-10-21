@@ -554,13 +554,17 @@ local function slotSummary(i)
 end
 
 -- "Sulfur Caves - 340 gold" for slot i's saved run
-local function runSummary(i)
+-- Where a saved run was left (the title shows just that; the save files page adds what was carried)
+local function runSummary(i, withGold)
   local r = save.peekRun(i)
   if not r then
     return nil
   end
   local name = (r.area or 0) > 0 and r.areaName or "The Barrens"
-  return string.format("%s - %d gold", name or "The caves", tonumber(r.inv.gold) or 0)
+  if withGold then
+    return string.format("%s - %d gold", name or "The caves", tonumber(r.inv.gold) or 0)
+  end
+  return name or "The caves"
 end
 
 local PAGES = {}
@@ -792,7 +796,7 @@ PAGES.slots = function()
   litBackdrop()
   pageTitle("Save Files", X(22), Y(14))
   shadowPrint("Each file keeps its own compendium and records. Quitting a run saves it.", X(22), Y(30), F.small, FAINT)
-  local x, w, h = X(22), math.floor(230 * u), math.floor(40 * u)
+  local x, w, h = X(22), math.floor(230 * u), math.floor(52 * u)
   local y = Y(42)
   for i = 1, save.SLOTS do
     local p = save.peek(i)
@@ -828,15 +832,15 @@ PAGES.slots = function()
       love.graphics.setColor(WARM)
       love.graphics.rectangle("fill", px, by, bw * pct, math.max(2, u * 1.2))
       local s = p.stats
-      local l1 = string.format("Playtime %s    Runs %d    Resets %d", save.formatTime(p.playtime), s.runs, s.resets or s.deaths or 0)
-      local l2 = string.format("Monsters slain %d    Bosses %d    Gold earned %d    Marks %d", s.kills, s.bosses, s.gold, p.marks or 0)
+      local l1 = string.format("Playtime %s    Runs %d    Resets %d    Monsters slain %d    Bosses %d    Gold earned %d    Marks %d", save.formatTime(p.playtime), s.runs, s.resets or s.deaths or 0, s.kills, s.bosses, s.gold, p.marks or 0)
       local l3 = "Deepest: " .. deepestName(p) .. "    Last played " .. os.date("%Y-%m-%d", p.lastPlayed)
       if save.peekRun(i) then
-        l3 = "Run saved: " .. runSummary(i) .. "    " .. l3
+        l3 = "Run saved: " .. runSummary(i, true) .. "    " .. l3
       end
-      shadowPrint(l1, px, by + 3.5 * u, F.small, DIM)
-      shadowPrint(l2, px, by + 3.5 * u + F.small:getHeight() * 1.3, F.small, DIM)
-      shadowPrint(l3, px, by + 3.5 * u + F.small:getHeight() * 2.6, F.small, FAINT)
+      -- (wrapped to the card, so nothing runs off its edge)
+      local ty = by + 3.5 * u
+      ty = ty + wrapped(l1, px, ty, bw, F.small, DIM) + u * 0.5
+      wrapped(l3, px, ty, bw, F.small, FAINT)
     else
       shadowPrint("Empty", px, py + F.body:getHeight() + 3 * u, F.body, FAINT)
       shadowPrint("Start a new hunter here", px, py + F.body:getHeight() * 2 + 4 * u, F.small, focused and WARM or FAINT)
@@ -1835,9 +1839,12 @@ PAGES.camp = function()
   -- Buying: the guns he knows, for gold, one per run, always B-grade (left, under his upgrades)
   do
     local gold = menu.runGold and menu.runGold() or 0
+    local bought = meta.gunBought()
+    local room = menu.gunRoom == nil or menu.gunRoom()
     local bx, by, bw = x, y + 2 * u, w
-    shadowPrint("Buy a gun", bx, by, F.body, WARM)
-    shadowPrint(meta.gunBought() and "(bought this run)" or "(one per run, B-grade)", bx + F.body:getWidth("Buy a gun ") + 2 * u, by + u * 0.8, F.small, FAINT)
+    shadowPrint("Buy a gun", bx, by, F.body, bought and FAINT or WARM)
+    local note = bought and "(bought this run)" or (room and "(one per run, B-grade)" or "(no room: free a weapon slot)")
+    shadowPrint(note, bx + F.body:getWidth("Buy a gun ") + 2 * u, by + u * 0.8, F.small, FAINT)
     by = by + F.body:getHeight() + 2 * u
     local cw, chh = math.floor((bw - 3 * u) / 2), math.floor(14 * u)
     local n = 0
@@ -1845,16 +1852,19 @@ PAGES.camp = function()
       if meta.isUnlocked("weapon", g[1]) then
         local gx2 = bx + (n % 2) * (cw + 3 * u)
         local gy2 = by + math.floor(n / 2) * (chh + 2 * u)
-        local can = not meta.gunBought() and gold >= g[2]
-        local focused = widget({ id = "camp:buygun:" .. g[1], x = gx2, y = gy2, w = cw, h = chh, activate = function()
-          if can then
-            act("buygun", g[1])
-            audio.play("buy")
-          else
-            audio.play("deny")
-          end
-        end })
-        panel(gx2, gy2, cw, chh, focused and 0.95 or 0.82)
+        local can = not bought and room and gold >= g[2]
+        local focused = false
+        if not bought then
+          focused = widget({ id = "camp:buygun:" .. g[1], x = gx2, y = gy2, w = cw, h = chh, activate = function()
+            if can then
+              act("buygun", g[1])
+              audio.play("buy")
+            else
+              audio.play("deny")
+            end
+          end })
+        end
+        panel(gx2, gy2, cw, chh, bought and 0.6 or (focused and 0.95 or 0.82))
         if focused then
           focusFrame(gx2, gy2, cw, chh)
         end
@@ -1862,8 +1872,10 @@ PAGES.camp = function()
         local entry = compendium.entry("weapon", g[1])
         local name = entry and entry.name or (g[1]:gsub("^%l", string.upper))
         shadowPrint(name, gx2 + 4 * u, ty, F.body, can and (focused and TEXT or DIM) or FAINT)
-        local price = g[2] .. "g"
-        shadowPrint(price, gx2 + cw - 4 * u - F.body:getWidth(price), ty, F.body, can and { 1, 0.85, 0.4 } or FAINT)
+        if not bought then
+          local price = g[2] .. "g"
+          shadowPrint(price, gx2 + cw - 4 * u - F.body:getWidth(price), ty, F.body, can and { 1, 0.85, 0.4 } or FAINT)
+        end
         n = n + 1
       end
     end

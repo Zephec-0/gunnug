@@ -526,6 +526,17 @@ local DEFS = {
     end,
     volume = 0.5,
   },
+  -- The town hall's bell: a struck bronze tone with a long ring
+  bell = {
+    gen = function()
+      return synth(2.4, function(t, p)
+        local f = 392
+        local v = math.sin(t * f * TAU) + 0.6 * math.sin(t * f * 2.01 * TAU) * math.exp(-t * 2) + 0.4 * math.sin(t * f * 2.76 * TAU) * math.exp(-t * 3.5) + 0.25 * math.sin(t * f * 5.4 * TAU) * math.exp(-t * 7)
+        return v * math.exp(-t * 1.7) * 0.5 * math.min(1, t * 400)
+      end)
+    end,
+    volume = 0.6,
+  },
   -- A small gulp: two quick throat clicks, each a short pitch dip
   gulp = {
     gen = function()

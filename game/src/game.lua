@@ -556,6 +556,9 @@ function game.load()
     end
   end
   -- The Prospector's strongbox, from his page
+  menu.gunRoom = function()
+    return inv ~= nil and inv:freeWeaponSlot() ~= nil
+  end
   menu.runGold = function()
     return inv and inv.gold or 0
   end
@@ -749,14 +752,14 @@ function game.menuAction(action, arg)
       audio.play("deny")
     end
   elseif action == "buygun" then
-    -- The Gunsmith's one gun a run: paid in gold, always a B-grade roll, handed over at the hunter's feet
+    -- The Gunsmith's one gun a run: paid in gold (only with a weapon slot free), always a B-grade roll
     local price
     for _, g in ipairs(meta.GUN_PRICES) do
       if g[1] == arg then
         price = g[2]
       end
     end
-    if price and inv and player and not meta.gunBought() and meta.isUnlocked("weapon", arg) and inv.gold >= price then
+    if price and inv and player and not meta.gunBought() and inv:freeWeaponSlot() and meta.isUnlocked("weapon", arg) and inv.gold >= price then
       local gunInfo = require("src.gunInfo")
       local gun
       for _ = 1, 300 do
@@ -768,8 +771,7 @@ function game.menuAction(action, arg)
       inv.gold = inv.gold - price
       lastGold = inv.gold -- (not counted as earned)
       meta.markGunBought()
-      local px, py = player:center()
-      pickups.dropWeapon(px, py - 6, gun, player.facing * 30, -60)
+      inv.weapons[inv:freeWeaponSlot()] = gun -- (straight into an open weapon slot)
     end
   elseif action == "passout" then
     -- Ten drinks: out cold, and the run resets

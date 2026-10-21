@@ -172,6 +172,7 @@ end
 
 -- Pixel text ---------------------------------------------------------------------------
 
+local drawClockHands -- (below)
 local textImages = {}
 
 -- A little signboard with the text in 3x5 letters; returns an image
@@ -322,6 +323,86 @@ local function facade(l)
   lantern(cx + 29, P - 25)
 end
 
+-- The hall's clock tells the computer's time. The hands (a few pixels, on the world's own pixel grid) are
+-- worked out again only when the minute changes; the face is drawn with the rest of the hall.
+local clockStamp, clockPixels = -1, {}
+
+local function line(x0, y0, x1, y1, out)
+  -- (Bresenham, from the middle of the face out to the tip)
+  local dx, dy = math.abs(x1 - x0), -math.abs(y1 - y0)
+  local sx, sy = x0 < x1 and 1 or -1, y0 < y1 and 1 or -1
+  local err = dx + dy
+  while true do
+    out[#out + 1] = { x0, y0 }
+    if x0 == x1 and y0 == y1 then
+      break
+    end
+    local e2 = 2 * err
+    if e2 >= dy then
+      err = err + dy
+      x0 = x0 + sx
+    end
+    if e2 <= dx then
+      err = err + dx
+      y0 = y0 + sy
+    end
+  end
+end
+
+local function clockHandsFor(stamp)
+  local t = os.date("*t", stamp * 60)
+  local out = {}
+  local ma = (t.min / 60) * math.pi * 2
+  local ha = (((t.hour % 12) + t.min / 60) / 12) * math.pi * 2
+  line(0, 0, math.floor(math.sin(ha) * 2 + (math.sin(ha) >= 0 and 0.5 or -0.5)), math.floor(-math.cos(ha) * 2 + (-math.cos(ha) >= 0 and 0.5 or -0.5)), out)
+  local hourN = #out
+  line(0, 0, math.floor(math.sin(ma) * 3 + (math.sin(ma) >= 0 and 0.5 or -0.5)), math.floor(-math.cos(ma) * 3 + (-math.cos(ma) >= 0 and 0.5 or -0.5)), out)
+  return out, hourN
+end
+
+local hourCount = 0
+function drawClockHands(cx, cy)
+  local stamp = math.floor(os.time() / 60)
+  if stamp ~= clockStamp then
+    clockStamp = stamp
+    clockPixels, hourCount = clockHandsFor(stamp)
+  end
+  for i, p in ipairs(clockPixels) do
+    -- (the short hour hand first, in a darker ink; the minute hand over it)
+    if i <= hourCount then
+      love.graphics.setColor(0.12, 0.10, 0.08)
+    else
+      love.graphics.setColor(0.2, 0.17, 0.14)
+    end
+    love.graphics.rectangle("fill", cx + p[1], cy + p[2], 1, 1)
+  end
+end
+
+-- Strikes the hour on the hall's bell: once for each hour on the clock, as the hour comes round
+local lastHour, chimesLeft, chimeTimer = nil, 0, 0
+function town.tick(dt, hearer)
+  local lot = byId.hall
+  if not lot or not lot.built or not lot.top then
+    return
+  end
+  local t = os.date("*t")
+  if lastHour == nil then
+    lastHour = t.hour -- (no chime for the hour already running when the world loads)
+  elseif t.min == 0 and t.hour ~= lastHour then
+    lastHour = t.hour
+    chimesLeft = t.hour % 12 == 0 and 12 or t.hour % 12
+    chimeTimer = 0
+  end
+  if chimesLeft > 0 then
+    chimeTimer = chimeTimer - dt
+    if chimeTimer <= 0 then
+      chimeTimer = 1.7
+      chimesLeft = chimesLeft - 1
+      require("src.audio").playAt("bell", lot.x, lot.top - 50, 0.9)
+    end
+  end
+end
+
 -- The town hall (the spare lot): a stone-coloured hall with a clock and a flag, closed for now
 local function hall(l)
   local cx, P, a = l.x, l.top, l.accent
@@ -340,8 +421,7 @@ local function hall(l)
   R({ 0.2, 0.17, 0.14 }, cx - 4, P - 55, 8, 1)
   R({ 0.2, 0.17, 0.14 }, cx - 4, P - 62, 1, 8)
   R({ 0.2, 0.17, 0.14 }, cx + 3, P - 62, 1, 8)
-  R({ 0.2, 0.17, 0.14 }, cx, P - 61, 1, 4)
-  R({ 0.2, 0.17, 0.14 }, cx, P - 58, 3, 1)
+  drawClockHands(cx, P - 58) -- (the computer's time, redrawn when the minute changes)
   R(WOOD_D, cx, P - 76, 1, 8)
   R({ 0.75, 0.2, 0.18 }, cx + 1, P - 76, 6, 4)
   -- tall double doors, shut, and two shuttered windows

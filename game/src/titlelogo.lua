@@ -188,4 +188,24 @@ function M.draw(x, y, scale)
   love.graphics.setColor(1, 1, 1)
 end
 
+-- The cylinder alone, as an app icon: size x size pixels, transparent around it, the click at rest
+function M.iconData(size)
+  local scale = math.max(1, math.floor(size * 0.92 / 27))
+  local canvas = love.graphics.newCanvas(size, size)
+  love.graphics.push("all")
+  love.graphics.setCanvas(canvas)
+  love.graphics.clear(0, 0, 0, 0)
+  love.graphics.origin()
+  local cw, ch = 28 * scale, 26 * scale -- (the cylinder's 27 x 25 pixels and its shadow)
+  local ox, oy = math.floor((size - cw) / 2), math.floor((size - ch) / 2)
+  love.graphics.setScissor(ox, oy, cw, ch)
+  local real = love.timer.getTime
+  love.timer.getTime = function() return 1 end
+  M.draw(ox - 33 * scale, oy, scale)
+  love.timer.getTime = real
+  love.graphics.setScissor()
+  love.graphics.pop()
+  return canvas:newImageData()
+end
+
 return M

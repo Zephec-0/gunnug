@@ -1333,7 +1333,7 @@ function cavegen.generate(world, area, seed, tick)
   end
 
   -- Swarms: colonies that hang together under a ceiling and wake as one
-  local SWARM_SIZE = { swarmbat = { 8, 12 }, wisp = { 4, 6 } }
+  local SWARM_SIZE = { swarmbat = { 5, 8 }, wisp = { 4, 6 } }
   local swarmId = 0
   for kind, count in pairs(area.swarms or {}) do
     for _, s in ipairs(findCeilingSpots(scaled(count), 40, avoidForEnemies)) do

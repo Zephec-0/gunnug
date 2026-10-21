@@ -508,6 +508,10 @@ local function track(area)
 end
 
 function game.load()
+  -- The window's icon is the title screen's revolver cylinder
+  pcall(function()
+    love.window.setIcon(require("src.titlelogo").iconData(64))
+  end)
   audio.load()
   render.load()
   lighting.load()
@@ -940,7 +944,9 @@ function game.update(dt)
   -- (with the weapon panel open the area's sound plays on, but muffled; under water too)
   local dlg = menu.state() == "dialog" and menu.dialogState()
   audio.setTable(dlg and dlg.music == "table")
-  audio.update(dt, underground, menu.isOpen(), area, inShop, itembar.isOpen() or (playing and player.submerged))
+  -- (a random event's menu is muffled like the weapon panel, not silent like the other menus)
+  local eventMenu = dlg and dlg.event
+  audio.update(dt, underground, menu.isOpen() and not eventMenu, area, inShop, itembar.isOpen() or (playing and player.submerged) or eventMenu)
   -- The weapon panel and the menus pause the game, like Noita's inventory
   love.mouse.setVisible(itembar.isOpen() or menu.isOpen() or compare.isOpen() or visuals.isOpen() or require("src.devpanel").isOpen())
   require("src.cursors").update() -- (tilts while the button is held)

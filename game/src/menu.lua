@@ -2055,6 +2055,7 @@ PAGES.settings = function()
   elseif settingsTab == 2 then
     local opts = {
       { "Fullscreen (F11)", "fullscreen" },
+      { "Windowed fullscreen", "borderless" },
       { "Vertical sync", "vsync" },
       { "Bloom and colour grading", "postfx" },
       { "Show FPS counter", "showFps" },

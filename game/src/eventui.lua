@@ -18,6 +18,7 @@ local gfx = love.graphics
 local floor, min, max, sin, cos, sqrt, abs = math.floor, math.min, math.max, math.sin, math.cos, math.sqrt, math.abs
 
 local function open(dlg)
+  dlg.event = true -- (the area's music plays on, muffled, behind an event's menu)
   require("src.menu").openDialog(dlg)
 end
 

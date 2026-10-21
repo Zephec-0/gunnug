@@ -373,28 +373,42 @@ function icons.drawHDAt(img, cx, cy, s, alpha, tint)
   love.graphics.draw(img, x, y, 0, s, s)
 end
 
--- A levelled item's "+N" (src.items): N light teal plus signs in a row along
--- the bottom of a box of `size` at (x, y), one per level. (The small square pip
--- in the top corner is something else: it means the item could be fused.)
-local PLUS = { { 1, 0 }, { 0, 1 }, { 1, 1 }, { 2, 1 }, { 1, 2 } }
+-- A levelled item's tier as a roman numeral (src.items), in light teal along the
+-- bottom of a box of `size` at (x, y), centred. (The small square pip in the top
+-- corner is something else: it means the item could be fused.)
+local NUMERAL = {
+  I = { "###", ".#.", ".#.", ".#.", "###" },
+  V = { "#.#", "#.#", "#.#", "#.#", ".#." },
+  X = { "#.#", "#.#", ".#.", "#.#", "#.#" },
+}
+local ROMAN = { "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X" }
 function icons.drawLevel(level, x, y, size, alpha)
   alpha = alpha or 1
-  local c = math.max(1, math.floor(size / 20)) -- one plus-sign pixel
-  local w = 3 * c
-  local gap = c
+  local text = ROMAN[level]
+  if not text then
+    return
+  end
+  local c = math.max(1, math.floor(size / 20)) -- one numeral pixel
+  local w = (#text * 3 + (#text - 1)) * c
   local shadow = math.max(1, math.floor(c / 2))
-  local x0 = math.floor(x + c * 1.5)
-  local y0 = math.floor(y + size - w - c * 1.5)
+  local x0 = math.floor(x + (size - w) / 2)
+  local y0 = math.floor(y + size - 5 * c - c * 2.5)
   for pass = 1, 2 do
-    for i = 1, level do
-      local px = x0 + (i - 1) * (w + gap)
-      for _, cell in ipairs(PLUS) do
-        if pass == 1 then
-          love.graphics.setColor(0.02, 0.06, 0.06, 0.9 * alpha)
-          love.graphics.rectangle("fill", px + cell[1] * c + shadow, y0 + cell[2] * c + shadow, c, c)
-        else
-          love.graphics.setColor(0.62, 1.0, 0.92, alpha)
-          love.graphics.rectangle("fill", px + cell[1] * c, y0 + cell[2] * c, c, c)
+    if pass == 1 then
+      love.graphics.setColor(0.02, 0.06, 0.06, 0.9 * alpha)
+    else
+      love.graphics.setColor(0.62, 1.0, 0.92, alpha)
+    end
+    for i = 1, #text do
+      local px = x0 + (i - 1) * 4 * c
+      local rows = NUMERAL[text:sub(i, i)]
+      for ry = 1, 5 do
+        local row = rows[ry]
+        for rx = 1, 3 do
+          if row:sub(rx, rx) == "#" then
+            local o = pass == 1 and shadow or 0
+            love.graphics.rectangle("fill", px + (rx - 1) * c + o, y0 + (ry - 1) * c + o, c, c)
+          end
         end
       end
     end

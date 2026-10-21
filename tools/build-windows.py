@@ -14,6 +14,7 @@ C:\\Program Files\\LOVE and must be version 11.5 (see LOVE_VERSION in product.en
 """
 import os
 import shutil
+import struct
 import sys
 import zipfile
 
@@ -43,6 +44,34 @@ def build_love(path):
                 z.write(full, os.path.relpath(full, GAME).replace(os.sep, "/"))
 
 
+def set_icon(exe, ico_path):
+    """Puts the .ico in the exe's resources (Windows only; this rewrites the file, so it is done before the game is attached)."""
+    import ctypes
+    from ctypes import wintypes
+
+    k32 = ctypes.windll.kernel32
+    k32.BeginUpdateResourceW.restype = wintypes.HANDLE
+    k32.BeginUpdateResourceW.argtypes = [wintypes.LPCWSTR, wintypes.BOOL]
+    k32.UpdateResourceW.argtypes = [wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p, wintypes.WORD, ctypes.c_void_p, wintypes.DWORD]
+    k32.EndUpdateResourceW.argtypes = [wintypes.HANDLE, wintypes.BOOL]
+    data = open(ico_path, "rb").read()
+    count = struct.unpack_from("<H", data, 4)[0]
+    h = k32.BeginUpdateResourceW(exe, False)
+    if not h:
+        raise SystemExit("Could not open %s to set its icon" % exe)
+    group = struct.pack("<HHH", 0, 1, count)
+    for i in range(count):
+        w, ht, cc, res, planes, bits, size, off = struct.unpack_from("<BBBBHHII", data, 6 + 16 * i)
+        image = data[off:off + size]
+        buf = ctypes.create_string_buffer(image, len(image))
+        k32.UpdateResourceW(h, 3, i + 1, 0, buf, len(image))  # RT_ICON
+        group += struct.pack("<BBBBHHIH", w, ht, cc, res, planes, bits, size, i + 1)
+    buf = ctypes.create_string_buffer(group, len(group))
+    k32.UpdateResourceW(h, 14, 1, 0, buf, len(group))  # RT_GROUP_ICON
+    if not k32.EndUpdateResourceW(h, False):
+        raise SystemExit("Could not write the icon into %s" % exe)
+
+
 def main():
     name = product_name()
     for needed in ["love.exe"] + DLLS + ["license.txt"]:
@@ -56,10 +85,13 @@ def main():
     if os.path.isdir(out):
         shutil.rmtree(out)
     os.makedirs(out)
-    # A fused executable: love.exe with the game package attached to its end
-    with open(os.path.join(out, name + ".exe"), "wb") as exe:
-        with open(os.path.join(LOVE, "love.exe"), "rb") as f:
-            shutil.copyfileobj(f, exe)
+    # A fused executable: love.exe (with the game's icon) and the game package attached to its end
+    exe_path = os.path.join(out, name + ".exe")
+    shutil.copy(os.path.join(LOVE, "love.exe"), exe_path)
+    ico = os.path.join(ROOT, "tools", "icon", "gunnug.ico")
+    if os.path.exists(ico) and os.name == "nt":
+        set_icon(exe_path, ico)
+    with open(exe_path, "ab") as exe:
         with open(love_file, "rb") as f:
             shutil.copyfileobj(f, exe)
     for dll in DLLS:

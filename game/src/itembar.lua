@@ -250,8 +250,9 @@ local function colorKey(col)
   return col[1] .. "," .. col[2] .. "," .. col[3] .. "," .. (col[4] or 1)
 end
 
-local function pxRound(x, y, w, h, c, border, fill, rad)
-  if not bake.enabled.itembar then
+-- (live: the colours change from frame to frame, a pulse: never baked, since every new colour would be a new canvas)
+local function pxRound(x, y, w, h, c, border, fill, rad, live)
+  if live or not bake.enabled.itembar then
     return pxRoundLive(x, y, w, h, c, border, fill, rad)
   end
   rad = rad or 1
@@ -292,7 +293,7 @@ local function drawGlow(x, y, size, ix, iy, box, col, alpha, u)
     side = math.floor(side / c) * c
     local fillc = glowColor
     fillc[1], fillc[2], fillc[3], fillc[4] = col[1], col[2], col[3], layer[2] * alpha
-    pxRound(cx - side / 2, cy - side / 2, side, side, c, fillc, fillc, 2)
+    pxRound(cx - side / 2, cy - side / 2, side, side, c, fillc, fillc, 2, true)
   end
 end
 
@@ -415,9 +416,9 @@ local function drawSlot(inv, ref, x, y, size, u, selected, tint)
   if tint and tint.border then
     border = tint.border
   end
-  pxRound(x, y, size, size, c, border, SLOT_FILL, rad)
+  pxRound(x, y, size, size, c, border, SLOT_FILL, rad, tint and tint.border ~= nil)
   if tint and tint.wash then
-    pxRound(x + c, y + c, size - 2 * c, size - 2 * c, c, tint.wash, tint.wash, 2)
+    pxRound(x + c, y + c, size - 2 * c, size - 2 * c, c, tint.wash, tint.wash, 2, true)
   end
   -- A bevel just inside: a light line along the top, a dark one along the bottom
   if size >= 12 * c then
@@ -535,7 +536,7 @@ local function drawFuser(inv, x, y, u, fusable, pip)
   local innerW = size * 2 + flaskW + 2 * gap
   -- The capsule
   local frameA = 0.35 + 0.4 * pulse * (f.locked and 1 or 0.5)
-  pxRound(x - pad, y - pad, innerW + 2 * pad, size + 2 * pad, c, { FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], frameA }, { 0.03, 0.08, 0.08, 0.75 }, 4)
+  pxRound(x - pad, y - pad, innerW + 2 * pad, size + 2 * pad, c, { FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], frameA }, { 0.03, 0.08, 0.08, 0.75 }, 4, true)
   local flaskX = x + size + gap
   local slotX = { x, flaskX + flaskW + gap }
   for i = 1, 2 do
@@ -552,7 +553,22 @@ local function drawFuser(inv, x, y, u, fusable, pip)
   fuseKnob = fuseKnob + ((f.locked and 1 or 0) - fuseKnob) * math.min(1, dt * 14)
   local k = fuser.progress(f)
   local level = f.locked and math.floor(1 + k * 7 + 0.5) or 2
-  drawFlask(math.floor(flaskX), math.floor(y + (size - 13 * fc) / 2), fc, fuseKnob, level, t)
+  -- Two items that can be fused, waiting to be locked in: the flask pulses to say so
+  local ready = not f.locked and fuser.result(f) ~= nil
+  local flaskY = math.floor(y + (size - 13 * fc) / 2)
+  if ready then
+    local lit = fuseKnob + (1 - fuseKnob) * (0.3 + 0.3 * math.sin(t * 5))
+    for i = 0, 1 do
+      local p = (t * 1.1 + i * 0.5) % 1 -- (two rings, half a beat apart, each swelling and fading)
+      local grow = math.floor(p * 4 * c)
+      love.graphics.setLineWidth(math.max(1, c))
+      love.graphics.setColor(FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], 0.7 * (1 - p))
+      love.graphics.rectangle("line", math.floor(flaskX) - c - grow, flaskY - c - grow, flaskW + 2 * c + 2 * grow, 13 * fc + 2 * c + 2 * grow, 2 * c, 2 * c)
+    end
+    drawFlask(math.floor(flaskX), flaskY, fc, lit, level, t)
+  else
+    drawFlask(math.floor(flaskX), flaskY, fc, fuseKnob, level, t)
+  end
   addHitbox(flaskX - gap / 2, y, flaskW + gap, size, FUSE_TOGGLE_REF)
 end
 

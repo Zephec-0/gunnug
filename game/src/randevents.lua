@@ -145,9 +145,35 @@ local function findSpot(px, py, flatHalf, minD, maxD)
   return nil
 end
 
+-- Clears a room for an event standing on the ground at (x, gy): everything breakable
+-- in the box above the floor goes (never anything unbreakable) and dents in the
+-- floor are filled, so the stage fits unobstructed
+local function carveRoom(x, gy, left, right, height)
+  local x0, x1, y0 = x - left, x + right, gy - height
+  for yy = y0, gy - 1 do
+    for xx = x0, x1 do
+      local id = world:get(xx, yy)
+      local def = materials.defs[id]
+      if id ~= materials.AIR and not (def and def.solid and def.hardness == math.huge) then
+        world:setRaw(xx, yy, materials.AIR)
+      end
+    end
+  end
+  for yy = gy, gy + 2 do
+    for xx = x0, x1 do
+      if world:get(xx, yy) == materials.AIR then
+        world:setRaw(xx, yy, materials.DIRT)
+      end
+    end
+  end
+  world:repaintRegion(x0 - 3, y0 - 3, x1 + 3, gy + 6)
+  require("src.physics").rebuildRegion(x0 - 3, y0 - 3, x1 + 3, gy + 6)
+end
+
 -- The dialog's buttons -------------------------------------------------------
 
 local function openDialog(dlg)
+  dlg.event = true -- (the area's music plays on, muffled, behind an event's menu)
   require("src.menu").openDialog(dlg)
 end
 
@@ -716,6 +742,10 @@ local function spawn(kind, player, areaIndex, fx, fy)
     return nil
   end
   o.x, o.y = x, gy
+  if not fx then
+    local half = kind == "gambler" and 48 or (kind == "carnival" and 28 or 20)
+    carveRoom(x, gy, half, half + (kind == "carnival" and CARNY_DX or 0), 56)
+  end
   if kind == "carnival" then
     o.state = "idle"
     o.title = "A carnival stall"

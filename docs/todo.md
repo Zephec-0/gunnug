@@ -292,3 +292,13 @@ Check items off as they land; append new ones at the bottom.
 - [x] Swarm bats: a shriek when the colony wakes, wing flutter and the odd chirp while they fly
 - [x] Boss pointers only appear once the boss has been on screen (split bosses share it)
 - [x] Bottle scratches and cracks subtler (the bullet hole and its web unchanged); still drawn once per damage stage
+
+## Batch 2026-10-21 d (headless-loaded; not played)
+- [x] Swarm bats per colony 8-12 -> 5-8 (wisps unchanged)
+- [x] Random events carve a clear room (breakable rock only) around their stage, not just in cramped caves
+- [x] Item bar lag: pulsing glows/fuser capsule/locked tints were baked into a new canvas per colour (bake churn); now drawn live. No steady per-frame cost found headless
+- [x] Windowed fullscreen: Settings > Display toggle (settings.borderless), a borderless window the size of the desktop; F11 still real fullscreen
+- [x] A random event's menu plays the area music muffled (dlg.event) instead of silent
+- [x] App icon = the title cylinder: window icon at runtime (titlelogo.iconData); exe icon via tools/build-windows.py from tools/icon/gunnug.ico (regenerate: `love tools/icon` then `python tools/make-icon.py`)
+- [x] Fuser flask pulses (rings + glow) when the two slotted items can fuse
+- [x] Item tier badge is a roman numeral (I-IV) centred along the slot's bottom instead of plus signs

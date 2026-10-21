@@ -14,6 +14,7 @@ local DEFAULTS = {
   musicVolume = 0.7,
   sfxVolume = 0.8,
   fullscreen = false,
+  borderless = false, -- windowed fullscreen: a borderless window the size of the desktop
   vsync = true,
   postfx = true, -- bloom, colour grading and the menu's warp
   dither = 0, -- anti-banding noise: 0 off ... 5 (see render.DITHER_NAMES)
@@ -40,6 +41,8 @@ local DEFAULTS = {
 }
 
 local values = {}
+local borderlessOn = false -- the window is borderless now
+local windowed -- { w, h, x, y } to go back to when windowed fullscreen ends
 
 local function apply()
   audio.setVolumes(values.masterVolume, values.musicVolume, values.sfxVolume)
@@ -57,6 +60,29 @@ local function apply()
   local fs = love.window.getFullscreen()
   if fs ~= values.fullscreen then
     love.window.setFullscreen(values.fullscreen, "desktop")
+  end
+  -- Windowed fullscreen: the window loses its border and covers the display (real fullscreen wins over it)
+  local wantBorderless = values.borderless and not values.fullscreen
+  if wantBorderless ~= borderlessOn then
+    local w, h, flags = love.window.getMode()
+    flags.vsync = values.vsync and 1 or 0
+    if wantBorderless then
+      local x, y = love.window.getPosition()
+      windowed = { w = w, h = h, x = x, y = y }
+      local dw, dh = love.window.getDesktopDimensions(flags.display)
+      flags.borderless, flags.fullscreen, flags.x, flags.y = true, false, nil, nil
+      love.window.setMode(dw, dh, flags)
+    elseif not love.window.getFullscreen() then
+      flags.borderless, flags.fullscreen = false, false
+      if windowed then
+        flags.x, flags.y = windowed.x, windowed.y
+        love.window.setMode(windowed.w, windowed.h, flags)
+      else
+        flags.x, flags.y = nil, nil
+        love.window.setMode(1280, 720, flags)
+      end
+    end
+    borderlessOn = wantBorderless
   end
   local vs = love.window.getVSync() ~= 0
   if vs ~= values.vsync then

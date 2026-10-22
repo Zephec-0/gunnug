@@ -7,6 +7,46 @@ local save = require("src.save")
 
 local settings = {}
 
+-- Remaking the window (updateMode) empties every canvas, and the game keeps drawn-once pictures in many
+-- (the item bar's slots, the bottle, sprites...). So every canvas made is remembered, and its picture is
+-- kept across the change (kept canvases that are redrawn every frame just come back too).
+local canvases = setmetatable({}, { __mode = "k" })
+local newCanvas = love.graphics.newCanvas
+love.graphics.newCanvas = function(...)
+  local cv = newCanvas(...)
+  canvases[cv] = true
+  return cv
+end
+
+local function keepingCanvases(change)
+  local kept = {}
+  for cv in pairs(canvases) do
+    -- (a canvas the game has released raises an error on any use: left out)
+    local ok, data = pcall(function()
+      if cv:getWidth() * cv:getHeight() <= 4096 * 4096 and cv:getMipmapMode() == "none" then
+        return cv:newImageData()
+      end
+    end)
+    if ok and data then
+      kept[#kept + 1] = { cv, data }
+    end
+  end
+  change()
+  love.graphics.push("all")
+  love.graphics.origin()
+  love.graphics.setShader()
+  love.graphics.setScissor()
+  love.graphics.setBlendMode("replace")
+  love.graphics.setColor(1, 1, 1, 1)
+  for _, k in ipairs(kept) do
+    local img = love.graphics.newImage(k[2])
+    img:setFilter("nearest", "nearest")
+    love.graphics.setCanvas(k[1])
+    love.graphics.draw(img)
+  end
+  love.graphics.pop()
+end
+
 local FILE = "settings.sav"
 
 local DEFAULTS = {
@@ -41,7 +81,7 @@ local DEFAULTS = {
 }
 
 local values = {}
-local borderlessOn = false -- the window is borderless now
+local lastMode -- the display mode the window was last put in
 local windowed -- { w, h, x, y } to go back to when windowed fullscreen ends
 
 local function apply()
@@ -61,28 +101,38 @@ local function apply()
   if fs ~= values.fullscreen then
     love.window.setFullscreen(values.fullscreen, "desktop")
   end
-  -- Windowed fullscreen: the window loses its border and covers the display (real fullscreen wins over it)
-  local wantBorderless = values.borderless and not values.fullscreen
-  if wantBorderless ~= borderlessOn then
-    local w, h, flags = love.window.getMode()
-    flags.vsync = values.vsync and 1 or 0
-    if wantBorderless then
-      local x, y = love.window.getPosition()
-      windowed = { w = w, h = h, x = x, y = y }
+  -- Windowed fullscreen: the window loses its border and covers the display (real fullscreen wins over it).
+  -- (Changing the window drops the canvases' pictures: see keepingCanvases.)
+  local mode = settings.displayMode()
+  if mode ~= lastMode then
+    lastMode = mode
+    if mode ~= "fullscreen" then
+      local w, h, flags = love.window.getMode()
+      flags.vsync = values.vsync and 1 or 0
+      flags.fullscreen = false
       local dw, dh = love.window.getDesktopDimensions(flags.display)
-      flags.borderless, flags.fullscreen, flags.x, flags.y = true, false, nil, nil
-      love.window.setMode(dw, dh, flags)
-    elseif not love.window.getFullscreen() then
-      flags.borderless, flags.fullscreen = false, false
-      if windowed then
-        flags.x, flags.y = windowed.x, windowed.y
-        love.window.setMode(windowed.w, windowed.h, flags)
+      if mode == "borderless" then
+        if not flags.borderless and w < dw and h < dh then
+          local x, y = love.window.getPosition()
+          windowed = { w = w, h = h, x = x, y = y }
+        end
+        flags.borderless, flags.x, flags.y = true, nil, nil
+        keepingCanvases(function() love.window.updateMode(dw, dh, flags) end)
       else
-        flags.x, flags.y = nil, nil
-        love.window.setMode(1280, 720, flags)
+        local wasBorderless = flags.borderless
+        flags.borderless = false
+        if windowed then
+          flags.x, flags.y = windowed.x, windowed.y
+          keepingCanvases(function() love.window.updateMode(windowed.w, windowed.h, flags) end)
+        elseif wasBorderless or w >= dw or h >= dh then
+          -- (a window as big as the screen is no window: a smaller one, centred)
+          flags.x, flags.y = nil, nil
+          keepingCanvases(function() love.window.updateMode(math.floor(dw * 0.67), math.floor(dh * 0.67), flags) end)
+        else
+          keepingCanvases(function() love.window.updateMode(w, h, flags) end)
+        end
       end
     end
-    borderlessOn = wantBorderless
   end
   local vs = love.window.getVSync() ~= 0
   if vs ~= values.vsync then
@@ -124,6 +174,26 @@ end
 -- Changes a setting, applies it and writes the file
 function settings.set(key, value)
   values[key] = value
+  apply()
+  settings.save()
+end
+
+-- The display mode as one of three: "windowed", "borderless" (windowed fullscreen) or "fullscreen".
+-- (Fullscreen keeps the other choice, so F11 goes back to it.)
+function settings.displayMode()
+  if values.fullscreen then
+    return "fullscreen"
+  end
+  return values.borderless and "borderless" or "windowed"
+end
+
+function settings.setDisplayMode(mode)
+  if mode == "fullscreen" then
+    values.fullscreen = true
+  else
+    values.fullscreen = false
+    values.borderless = mode == "borderless"
+  end
   apply()
   settings.save()
 end

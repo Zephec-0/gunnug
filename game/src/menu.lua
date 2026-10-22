@@ -2054,13 +2054,24 @@ PAGES.settings = function()
     love.graphics.pop()
   elseif settingsTab == 2 then
     local opts = {
-      { "Fullscreen (F11)", "fullscreen" },
-      { "Windowed fullscreen", "borderless" },
       { "Vertical sync", "vsync" },
       { "Bloom and colour grading", "postfx" },
       { "Show FPS counter", "showFps" },
       { "Pause when the window loses focus", "pauseOnFocusLoss" },
     }
+    row("Screen (F11)", y)
+    local modes = { "windowed", "borderless", "fullscreen" }
+    local cur = 1
+    for i, m in ipairs(modes) do
+      if m == settings.displayMode() then
+        cur = i
+      end
+    end
+    tabs("set:screen", { "Windowed", "Windowed fullscreen", "Fullscreen" }, cur, cx - math.floor(40 * u), y, cw + math.floor(40 * u), ch, function(i)
+      settings.setDisplayMode(modes[i])
+      audio.play("page")
+    end)
+    y = y + rh
     for _, s in ipairs(opts) do
       row(s[1], y)
       toggle("set:" .. s[2], cx + cw - math.floor(50 * u), y, math.floor(50 * u), ch, settings.get(s[2]), function(v)

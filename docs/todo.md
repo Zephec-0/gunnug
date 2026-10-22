@@ -302,3 +302,5 @@ Check items off as they land; append new ones at the bottom.
 - [x] App icon = the title cylinder: window icon at runtime (titlelogo.iconData); exe icon via tools/build-windows.py from tools/icon/gunnug.ico (regenerate: `love tools/icon` then `python tools/make-icon.py`)
 - [x] Fuser flask pulses (rings + glow) when the two slotted items can fuse
 - [x] Item tier badge is a roman numeral (I-IV) centred along the slot's bottom instead of plus signs
+- [x] Display settings: Screen is a 3-way choice (Windowed / Windowed fullscreen / Fullscreen) replacing the two toggles; F11 still toggles fullscreen
+- [x] Windowed mode is a real window (two thirds of the desktop, centred) when the saved size would fill the screen; changing the window mode keeps every canvas's picture (settings.keepingCanvases), which fixes missing UI after switching

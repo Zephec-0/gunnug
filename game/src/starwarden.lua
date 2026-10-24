@@ -1358,10 +1358,10 @@ enemies.afterUpdate = function(dt, world, player, px, py)
       local pcx, pcy = player:center()
       local dx, dy = hole.x - pcx, hole.y - pcy
       local d = hypot(dx, dy)
-      local R = 340
+      local R = 260
       if d < R and d > 1 then
         local k = (1 - d / R) ^ 1.4 * math.min(1, hole.t / 3)
-        local pull = 1500 * k
+        local pull = 800 * k
         player.body.vx = player.body.vx + dx / d * pull * dt
         player.body.vy = player.body.vy + dy / d * pull * dt
         player.jumping = false
@@ -1510,8 +1510,8 @@ enemies.afterEmissive = function(view)
     love.graphics.circle("fill", wl.x, wl.y, 9 * k)
     love.graphics.setBlendMode("add")
     -- the rim: a crowd of single pixels circling at their own speeds, flaring and dying out
-    for q = 0, 110 do
-      local ang = q / 111 * math.pi * 2 + t * (0.9 + (q % 5) * 0.28) * (q % 2 == 0 and 1 or -1)
+    for q = 0, 36 do
+      local ang = q / 37 * math.pi * 2 + t * (0.9 + (q % 5) * 0.28) * (q % 2 == 0 and 1 or -1)
       local rr = (9.5 + (q * 7 % 5) * 0.9 + math.sin(t * 5 + q * 1.3) * 1.1) * k
       local br = math.abs(math.sin(t * (3 + q % 4) + q * 1.7))
       love.graphics.setColor(1, 0.45 + 0.4 * br, 0.25 + 0.5 * br, (0.25 + 0.75 * br) * k)
@@ -1525,8 +1525,8 @@ enemies.afterEmissive = function(view)
       love.graphics.setColor(1, 0.7, 0.45, (1 - ph) * 0.9 * k)
       love.graphics.rectangle("fill", math.floor(wl.x + math.cos(ang) * rr), math.floor(wl.y + math.sin(ang) * rr * 0.8), 1, 1)
     end
-    for q = 0, 30 do
-      local ang = t * 2.2 + q * 0.21
+    for q = 0, 10 do
+      local ang = t * 2.2 + q * 0.5
       local rr = (12 + q * 0.7) * k
       love.graphics.setColor(1, 0.6, 0.5, 0.55 * (1 - q / 32) * k)
       love.graphics.points(wl.x + math.cos(ang) * rr * 1.5, wl.y + math.sin(ang) * rr * 0.34)
@@ -1535,7 +1535,7 @@ enemies.afterEmissive = function(view)
     -- the pull, as arms of light curling in
     for arm = 0, 3 do
       for q = 0, 14 do
-        local u = q / 14
+        local u = 0.35 + q / 14 * 0.65
         local ang = arm * 1.571 + t * 0.8 + u * 3.2
         local rr = wl.r * (1 - u) * 0.75
         love.graphics.setColor(0.7, 0.5, 1, 0.22 * u * k)

@@ -2320,16 +2320,16 @@ local pinchCanvas
 local function drawCollapsingPoster(cx, cy, w, h, noun, photo, scale, spin, alpha, tt)
   -- tt: seconds since the poster hit. The paper is pinched into the middle (0-2.6 s), drawn in whole (1.6-3.4 s), and
   -- the hole, which has grown while it fed, shrinks away to nothing (3-4.6 s)
-  local k = math.min(1, tt / 2.2) ^ 1.2
-  local gone = math.max(0, math.min(1, (tt - 1.6) / 1.8))
+  local k = math.min(1, tt / 1.2) ^ 1.1
+  local gone = math.max(0, math.min(1, (tt - 0.7) / 0.9))
   gone = gone * gone * (3 - 2 * gone)
   local holeK
-  if tt < 2.6 then
-    holeK = math.min(1, tt / 1.6)
+  if tt < 1.5 then
+    holeK = math.min(1, tt / 0.8)
   else
-    holeK = math.max(0, 1 - (tt - 2.6) / 2.0)
+    holeK = math.max(0, 1 - (tt - 1.5) / 0.8)
   end
-  if tt > 4.7 or holeK <= 0 and gone >= 1 then
+  if tt > 2.4 or holeK <= 0 and gone >= 1 then
     return
   end
   local m = math.floor(10 * u)

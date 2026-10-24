@@ -85,7 +85,7 @@ local WINCH_X = 1758 -- left edge of the winch house
 local SUN_X, SUN_Y = 440, 196 -- on screen, low over the horizon
 
 local background -- pre-rendered sky and parallax layers
-local backgrounds = {} -- [eclipsed?] -> the sky and layers drawn that way (made when first wanted)
+local backgroundEclipse -- whether its sky was painted with the sun a black hole
 local trees = {}
 
 -- Gently rolling ground of the open plain
@@ -230,7 +230,7 @@ local function skyColor(t)
   return SKY[#SKY][2][1], SKY[#SKY][2][2], SKY[#SKY][2][3]
 end
 
-local function buildBackground(eclipse)
+local function buildBackground(eclipse, keepLayers)
   local W, H = config.VIRTUAL_W, config.VIRTUAL_H
   local rng = love.math.newRandomGenerator(7)
   local sky = love.image.newImageData(W, H)
@@ -307,12 +307,29 @@ local function buildBackground(eclipse)
 
   return {
     sky = love.graphics.newImage(sky),
-    layers = {
+    -- (the far scenery is the same either way: when only the sun changes, it is kept)
+    layers = keepLayers or {
       layer(0.06, 268, { 0.50, 0.29, 0.36 }, 41, "mountains"),
       layer(0.15, 304, { 0.40, 0.22, 0.30 }, 11),
       layer(0.35, 344, { 0.26, 0.14, 0.20 }, 23, "towers"),
     },
   }
+end
+
+-- The background as the active save should see it: the sun is the black hole only once that save has beaten the sky's
+-- champion. A world built behind the title may have used another save, so this is checked as it is drawn, and the
+-- sky is repainted (once) the moment the answer changes; only one is ever held
+local function ensureBackground(eclipse)
+  if background and backgroundEclipse == eclipse then
+    return background
+  end
+  local old = background
+  background = buildBackground(eclipse, old and old.layers)
+  backgroundEclipse = eclipse
+  if old then
+    old.sky:release()
+  end
+  return background
 end
 
 local seed
@@ -450,11 +467,7 @@ function overworld.build(opts)
   require("src.airship").build(world) -- (a secret in the sky: nothing points to it)
 
   local eclipse = require("src.meta").isSkyBeaten()
-  background = backgrounds[eclipse]
-  if not background then
-    background = buildBackground(eclipse)
-    backgrounds[eclipse] = background
-  end
+  ensureBackground(eclipse)
   trees = {}
   for _, t in ipairs({ { 200, 1 }, { 1340, -1 }, { 2000, 1 }, { 2460, -1 }, { 2706, 1 }, { 3100, -1 }, { 3800, 1 }, { -2700, 1 }, { -2200, -1 }, { -1900, 1 }, { -1380, -1 }, { -460, -1 }, { -150, 1 }, { 4400, -1 }, { 5100, 1 }, { 5600, -1 } }) do
     trees[#trees + 1] = { x = t[1], y = world:findGround(t[1], 160), lean = t[2], height = 46 + (t[1] % 17) }
@@ -1033,11 +1046,7 @@ function overworld.drawBackground(camX, camY)
   end
   -- (asked every frame: a world built behind the title with another save's profile must not keep its sun)
   local black = require("src.meta").isSkyBeaten()
-  local background = backgrounds[black]
-  if not background then
-    background = buildBackground(black)
-    backgrounds[black] = background
-  end
+  local background = ensureBackground(black)
   love.graphics.setColor(1, 1, 1)
   -- (stretched across if the view has grown wider than when it was painted)
   local ssx, ssy = math.max(1, config.VIRTUAL_W / background.sky:getWidth()), math.max(1, config.VIRTUAL_H / background.sky:getHeight())

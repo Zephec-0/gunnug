@@ -9,6 +9,7 @@ local enemies = require("src.enemies")
 local Body = require("src.body")
 local audio = require("src.audio")
 local effects = require("src.effects")
+local glow = require("src.softglow")
 
 local H = enemies.helpers
 local center, collider = H.center, H.collider
@@ -255,8 +256,7 @@ end
 
 local function glowComet(e)
   local b = e.body
-  love.graphics.setColor(0.8, 0.92, 1, 0.5)
-  love.graphics.circle("fill", b.x + b.w / 2, b.y + b.h / 2, 7)
+  glow.disc(b.x + b.w / 2, b.y + b.h / 2, 13, { 0.8, 0.92, 1 }, 0.7)
 end
 
 -- The storm cloud --------------------------------------------------------------------------------------------------
@@ -328,8 +328,7 @@ end
 local function glowCloud(e)
   local b = e.body
   local mid, my = b.x + b.w / 2, b.y + b.h / 2
-  love.graphics.setColor(1, 0.9, 0.5, (e.flashT or 0) > 0 and 0.7 or 0.25)
-  love.graphics.circle("fill", mid, my, (e.flashT or 0) > 0 and 16 or 7)
+  glow.disc(mid, my, (e.flashT or 0) > 0 and 30 or 14, { 1, 0.9, 0.5 }, (e.flashT or 0) > 0 and 0.9 or 0.45)
 end
 
 -- The star guardian ------------------------------------------------------------------------------------------------
@@ -390,8 +389,7 @@ end
 local function glowGuardian(e)
   local b = e.body
   local mid, my = b.x + b.w / 2, b.y + b.h / 2
-  love.graphics.setColor(1, 0.9, 0.5, 0.2)
-  love.graphics.circle("fill", mid, my, 26)
+  glow.disc(mid, my, 40, { 1, 0.9, 0.5 }, 0.5)
   love.graphics.setColor(1, 1, 0.85, 0.8)
   love.graphics.circle("fill", mid, my, 3)
 end

@@ -9,6 +9,7 @@ local enemies = require("src.enemies")
 local Body = require("src.body")
 local audio = require("src.audio")
 local effects = require("src.effects")
+local glow = require("src.softglow")
 
 local H = enemies.helpers
 local center, collider = H.center, H.collider
@@ -644,8 +645,7 @@ enemies.afterEmissive = function(view)
     prevEmissive(view)
   end
   for _, s in ipairs(bolts) do
-    love.graphics.setColor(1, 0.7, 0.25, 0.4)
-    rect(s.x - 3, s.y - 3, 6, 6)
+    glow.disc(s.x, s.y, 9, { 1, 0.7, 0.25 }, 0.7)
     love.graphics.setColor(1, 0.95, 0.7)
     rect(s.x - 1, s.y - 1, 3, 3)
   end

@@ -20,6 +20,7 @@
 local enemies = require("src.enemies")
 local audio = require("src.audio")
 local effects = require("src.effects")
+local glow = require("src.softglow")
 
 local H = enemies.helpers
 local center = H.center
@@ -246,6 +247,7 @@ local function breakGate(e, sw)
   for _, nd in ipairs(sw.nodes) do
     effects.ring(nd.x, nd.y, 40, STAR[nd.kind].c)
   end
+  sw.nodes, sw.seq = nil, nil -- (the stars and their light are gone until the next gate)
   sw.swoopT, sw.rayT = 4, 3
 end
 
@@ -1177,8 +1179,7 @@ local function drawGate(e, sw, t, a)
     local S = STAR[nd.kind]
     local k = math.max(nd.lit, nd.solved, 0)
     local idle = 0.35 + 0.08 * math.sin(t * 3 + i)
-    love.graphics.setColor(S.c[1], S.c[2], S.c[3], (0.12 + 0.3 * k) * a)
-    love.graphics.circle("fill", nd.x, nd.y, 22 + 16 * k)
+    glow.disc(nd.x, nd.y, 40 + 30 * k, S.c, (0.2 + 0.5 * k) * a)
     starShape(S.shape, nd.x, nd.y, 7 + 3 * k, S.c, (idle + 0.65 * k) * a)
     starShape(S.shape, nd.x, nd.y, 3 + 1.5 * k, { 1, 1, 1 }, (0.4 + 0.6 * k) * a)
     if k > 0.5 then
@@ -1235,10 +1236,8 @@ local function drawStarGlow(e)
   love.graphics.setBlendMode("add")
   local pulse = 0.8 + 0.2 * math.sin(t * 2)
   -- a sun's glow, growing as he burns, and a corona of rays turning slowly
-  love.graphics.setColor(1, 0.9, 0.5, (0.2 + 0.25 * f) * pulse * a)
-  love.graphics.circle("fill", hx, hy, (26 + 20 * f) * size)
-  love.graphics.setColor(1, 0.95, 0.8, 0.35 * a + 0.4 * f)
-  love.graphics.circle("fill", hx, hy, (7 + 10 * f) * size)
+  glow.disc(hx, hy, (52 + 40 * f) * size, { 1, 0.9, 0.5 }, (0.4 + 0.3 * f) * pulse * a)
+  glow.disc(hx, hy, (15 + 18 * f) * size, { 1, 0.95, 0.8 }, math.min(1, 0.55 * a + 0.4 * f))
   if f > 0.25 or collapse > 0 then
     local n = 8 + math.floor(f * 16)
     for k = 0, n - 1 do
@@ -1279,8 +1278,7 @@ local function drawStarGlow(e)
   for i, o in ipairs(sw.orbs) do
     if o.vis > 0.03 and not sw.dying then
       local x, y = orbPos(e, sw, i)
-      love.graphics.setColor(1, 0.9, 0.5, 0.25 * o.vis * a)
-      love.graphics.circle("fill", x, y, 11)
+      glow.disc(x, y, 20, { 1, 0.9, 0.5 }, 0.5 * o.vis * a)
       if o.state == "charge" then
         local k = math.max(0, o.t / 0.95)
         love.graphics.setColor(1, 0.95, 0.7, 0.8)
@@ -1316,8 +1314,7 @@ local function drawStarGlow(e)
   if sw.dying and sw.dyT > 6.4 then
     local k = math.min(1, (sw.dyT - 6.4) / 0.6)
     local fade = sw.dyT > 7.1 and math.max(0, 1 - (sw.dyT - 7.1) / 0.9) or 1
-    love.graphics.setColor(1, 0.97, 0.85, 0.9 * k * fade)
-    love.graphics.circle("fill", hx, hy, 40 + 220 * k)
+    glow.disc(hx, hy, 80 + 360 * k, { 1, 0.97, 0.85 }, 0.95 * k * fade)
   end
   love.graphics.setBlendMode("alpha")
 end
@@ -1356,20 +1353,15 @@ enemies.afterUpdate = function(dt, world, player, px, py)
   fightK = fightK + ((engaged and 1 or (hole and 0.6 or 0)) - fightK) * math.min(1, dt * 1.2)
   if hole then
     hole.t = hole.t + dt
-    -- it settles, a jump above the floor (so the hunter can reach it, and fall in)
-    local fy = hole.floorY or hole.y
-    if hole.t > 1.5 and hole.y < fy - 100 then
-      hole.y = math.min(fy - 100, hole.y + (24 + (fy - 100 - hole.y) * 0.4) * dt)
-    end
     local r = 4 + 20 * math.min(1, hole.t / 4)
     if not player.dead then
       local pcx, pcy = player:center()
       local dx, dy = hole.x - pcx, hole.y - pcy
       local d = hypot(dx, dy)
-      local R = 300
+      local R = 340
       if d < R and d > 1 then
-        local k = (1 - d / R) ^ 1.5 * math.min(1, hole.t / 3)
-        local pull = 1300 * k
+        local k = (1 - d / R) ^ 1.4 * math.min(1, hole.t / 3)
+        local pull = 1500 * k
         player.body.vx = player.body.vx + dx / d * pull * dt
         player.body.vy = player.body.vy + dy / d * pull * dt
         player.jumping = false
@@ -1517,12 +1509,22 @@ enemies.afterEmissive = function(view)
     love.graphics.setColor(0, 0, 0, 1)
     love.graphics.circle("fill", wl.x, wl.y, 9 * k)
     love.graphics.setBlendMode("add")
-    for q = 0, 3 do
-      love.graphics.setColor(1 - 0.35 * q / 3, 0.5 - 0.1 * q, 0.35 + 0.2 * q, (0.65 - 0.14 * q) * k)
-      love.graphics.setLineWidth(1.5)
-      love.graphics.circle("line", wl.x, wl.y, (9 + q * 1.4) * k)
+    -- the rim: a crowd of single pixels circling at their own speeds, flaring and dying out
+    for q = 0, 110 do
+      local ang = q / 111 * math.pi * 2 + t * (0.9 + (q % 5) * 0.28) * (q % 2 == 0 and 1 or -1)
+      local rr = (9.5 + (q * 7 % 5) * 0.9 + math.sin(t * 5 + q * 1.3) * 1.1) * k
+      local br = math.abs(math.sin(t * (3 + q % 4) + q * 1.7))
+      love.graphics.setColor(1, 0.45 + 0.4 * br, 0.25 + 0.5 * br, (0.25 + 0.75 * br) * k)
+      love.graphics.rectangle("fill", math.floor(wl.x + math.cos(ang) * rr), math.floor(wl.y + math.sin(ang) * rr), 1, 1)
     end
-    love.graphics.setLineWidth(1)
+    -- flecks thrown off the rim, spiralling out
+    for q = 0, 16 do
+      local ph = (t * 0.9 + q * 0.37) % 1
+      local ang = q * 2.4 + t * 1.5 + ph * 3
+      local rr = (10 + ph * 22) * k
+      love.graphics.setColor(1, 0.7, 0.45, (1 - ph) * 0.9 * k)
+      love.graphics.rectangle("fill", math.floor(wl.x + math.cos(ang) * rr), math.floor(wl.y + math.sin(ang) * rr * 0.8), 1, 1)
+    end
     for q = 0, 30 do
       local ang = t * 2.2 + q * 0.21
       local rr = (12 + q * 0.7) * k
@@ -1566,8 +1568,7 @@ enemies.afterEmissive = function(view)
     if s.orb then
       love.graphics.setColor(1, 0.85, 0.4, 0.4)
       love.graphics.line(s.x - s.vx / d * 14, s.y - s.vy / d * 14, s.x, s.y)
-      love.graphics.setColor(1, 0.8, 0.3, 0.3)
-      love.graphics.circle("fill", s.x, s.y, 10)
+      glow.disc(s.x, s.y, 20, { 1, 0.8, 0.3 }, 0.7)
       love.graphics.setColor(1, 0.95, 0.7, 1)
       love.graphics.circle("fill", s.x, s.y, 4.5)
       love.graphics.setColor(1, 1, 1, 1)
@@ -1577,8 +1578,7 @@ enemies.afterEmissive = function(view)
       love.graphics.line(s.x - s.vx / d * 7, s.y - s.vy / d * 7, s.x, s.y)
       love.graphics.setColor(1, 0.97, 0.8, 1)
       love.graphics.circle("fill", s.x, s.y, 2)
-      love.graphics.setColor(1, 0.8, 0.3, 0.25)
-      love.graphics.circle("fill", s.x, s.y, 5)
+      glow.disc(s.x, s.y, 10, { 1, 0.8, 0.3 }, 0.5)
     end
   end
   -- the pillars: a faint column and sparks on the floor while they warn, then a white-gold blaze
@@ -1588,8 +1588,7 @@ enemies.afterEmissive = function(view)
       if r.age >= 0 then
         if r.age < r.warn then
           local k = r.age / r.warn
-          love.graphics.setColor(1, 0.9, 0.55, 0.05 + 0.1 * k)
-          love.graphics.rectangle("fill", r.x - r.w / 2, ceilY, r.w, floorY - ceilY)
+          glow.column(r.x, ceilY, floorY, r.w * 0.8, { 1, 0.9, 0.55 }, 0.1 + 0.2 * k)
           love.graphics.setColor(1, 0.95, 0.7, 0.3 + 0.5 * k)
           love.graphics.rectangle("fill", math.floor(r.x - r.w / 2 * k), floorY - 1, math.floor(r.w * k), 2)
           for s = 1, math.floor(k * 8) do
@@ -1600,14 +1599,10 @@ enemies.afterEmissive = function(view)
         else
           local k = 1 - (r.age - r.warn) / r.life
           local w = r.w * (0.6 + 0.4 * k)
-          love.graphics.setColor(1, 0.8, 0.35, 0.35 * k)
-          love.graphics.rectangle("fill", r.x - w, ceilY, w * 2, floorY - ceilY)
-          love.graphics.setColor(1, 0.95, 0.75, 0.85 * k)
-          love.graphics.rectangle("fill", r.x - w / 2, ceilY, w, floorY - ceilY)
-          love.graphics.setColor(1, 1, 1, k)
-          love.graphics.rectangle("fill", r.x - w / 6, ceilY, w / 3, floorY - ceilY)
-          love.graphics.setColor(1, 0.9, 0.5, 0.5 * k)
-          love.graphics.circle("fill", r.x, floorY, 22 * k + 6)
+          glow.column(r.x, ceilY, floorY, w * 2.4, { 1, 0.8, 0.35 }, 0.55 * k)
+          glow.column(r.x, ceilY, floorY, w * 1.1, { 1, 0.95, 0.75 }, 0.9 * k)
+          glow.column(r.x, ceilY, floorY, w * 0.4, { 1, 1, 1 }, k)
+          glow.disc(r.x, floorY, 40 * k + 18, { 1, 0.9, 0.5 }, 0.8 * k)
         end
       end
     end

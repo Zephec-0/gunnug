@@ -7,6 +7,7 @@
 -- (the wind spirits' gales are in src.skymobs)
 local audio = require("src.audio")
 local effects = require("src.effects")
+local glow = require("src.softglow")
 
 local skyhazards = {}
 
@@ -259,8 +260,7 @@ function skyhazards.drawEmissive(view)
         love.graphics.setColor(1, 1, 1, 0.1)
         love.graphics.rectangle("fill", math.floor(x) - 1, math.floor(y), 3, 12)
       end
-      love.graphics.setColor(0.6, 0.8, 1, 0.045)
-      love.graphics.rectangle("fill", v.x - v.half, v.y - h, v.half * 2, h)
+      glow.column(v.x, v.y - h, v.y, v.half * 1.3, { 0.6, 0.8, 1 }, 0.1)
     end
   end
   for _, s in ipairs(strikes) do
@@ -295,8 +295,7 @@ function skyhazards.drawEmissive(view)
         love.graphics.setLineWidth(1)
         love.graphics.setColor(1, 1, 1, a)
         love.graphics.line(s.pts)
-        love.graphics.setColor(0.8, 0.9, 1, 0.5 * a)
-        love.graphics.circle("fill", s.x, s.y, 22)
+        glow.disc(s.x, s.y, 46, { 0.8, 0.9, 1 }, 0.8 * a)
       end
     end
   end
@@ -304,8 +303,7 @@ function skyhazards.drawEmissive(view)
   if w and inView(view, w.x, w.mastTop, 80) then
     love.graphics.setColor(1, 0.8, 0.45, 0.6 + 0.2 * math.sin(t * 3))
     love.graphics.rectangle("fill", math.floor(w.lamp[1]) - 1, math.floor(w.lamp[2]) - 1, 3, 3)
-    love.graphics.setColor(1, 0.8, 0.45, 0.12)
-    love.graphics.circle("fill", w.lamp[1], w.lamp[2], 9)
+    glow.disc(w.lamp[1], w.lamp[2], 18, { 1, 0.8, 0.45 }, 0.3)
   end
   love.graphics.setBlendMode("alpha")
   love.graphics.setLineWidth(1)

@@ -2317,7 +2317,21 @@ end
 -- paper is pinched away to a point, with a burning black disc where it was
 local pinchMesh
 local pinchCanvas
-local function drawCollapsingPoster(cx, cy, w, h, noun, photo, scale, spin, alpha, k)
+local function drawCollapsingPoster(cx, cy, w, h, noun, photo, scale, spin, alpha, tt)
+  -- tt: seconds since the poster hit. The paper is pinched into the middle (0-2.6 s), drawn in whole (1.6-3.4 s), and
+  -- the hole, which has grown while it fed, shrinks away to nothing (3-4.6 s)
+  local k = math.min(1, tt / 2.2) ^ 1.2
+  local gone = math.max(0, math.min(1, (tt - 1.6) / 1.8))
+  gone = gone * gone * (3 - 2 * gone)
+  local holeK
+  if tt < 2.6 then
+    holeK = math.min(1, tt / 1.6)
+  else
+    holeK = math.max(0, 1 - (tt - 2.6) / 2.0)
+  end
+  if tt > 4.7 or holeK <= 0 and gone >= 1 then
+    return
+  end
   local m = math.floor(10 * u)
   local cw, ch = w + 2 * m, h + 2 * m
   if not pinchCanvas or pinchCanvas:getWidth() ~= cw or pinchCanvas:getHeight() ~= ch then
@@ -2337,7 +2351,7 @@ local function drawCollapsingPoster(cx, cy, w, h, noun, photo, scale, spin, alph
       local sx, sy = (fx - 0.5) * cw, (fy - 0.5) * ch
       local r = math.sqrt((sx / (w * 0.5)) ^ 2 + (sy / (h * 0.5)) ^ 2)
       -- (the middle samples from further out, so what is there shrinks to the centre; a spiral turn as it goes)
-      local pull = k * 1.9 * math.exp(-(r / 0.6) ^ 2)
+      local pull = k * 2.6 * math.exp(-(r / 0.75) ^ 2)
       local s = 1 + pull
       local ang = k * 1.1 * math.exp(-(r / 0.8) ^ 2)
       local ca, sa = math.cos(ang), math.sin(ang)
@@ -2366,9 +2380,14 @@ local function drawCollapsingPoster(cx, cy, w, h, noun, photo, scale, spin, alph
   love.graphics.rotate(0.025 + spin)
   love.graphics.scale(scale, scale)
   love.graphics.setColor(1, 1, 1, alpha)
-  love.graphics.draw(pinchMesh, 0, 0)
+  if gone < 1 then
+    love.graphics.push()
+    love.graphics.scale(1 - gone, 1 - gone) -- (the whole sheet runs down into the middle)
+    love.graphics.draw(pinchMesh, 0, 0)
+    love.graphics.pop()
+  end
   -- the hole: black, a burning rim, a thin bright disc across it
-  local R = (3 + 9 * k) * u
+  local R = (2 + 11 * holeK) * u
   love.graphics.setColor(0, 0, 0, alpha)
   love.graphics.circle("fill", 0, 0, R)
   love.graphics.setBlendMode("add")
@@ -2805,7 +2824,7 @@ PAGES.recap = function()
       scale = 1 - 0.05 * math.exp(-ti * 12) * math.cos(ti * 28) -- (a little rebound)
     end
     if d.hole then
-      drawCollapsingPoster(posterCx, posterCy, posterW, posterH, d.noun, d.photo, scale, spin, alpha, math.min(0.9, math.max(0, ti) * 0.2 + 0.04))
+      drawCollapsingPoster(posterCx, posterCy, posterW, posterH, d.noun, d.photo, scale, spin, alpha, math.max(0, ti) + 0.02)
     else
       drawPoster(posterCx, posterCy, posterW, posterH, d.noun, d.photo, scale, spin, alpha)
     end

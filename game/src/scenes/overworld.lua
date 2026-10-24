@@ -973,8 +973,7 @@ local function drawSpace(camX, camY)
   end
 end
 
--- The black sun bends the far scenery (sky, mountains, mesas) round it as they are drawn: part of the background, so
--- everything nearer than the mesas is drawn over it untouched
+-- The black sun bends only the sky behind it (its own surroundings), as it is drawn
 local bendShader
 local function bendBegin(x, y, w, h)
   if bendShader == nil then
@@ -1005,10 +1004,43 @@ local function bendBegin(x, y, w, h)
   end
   bendShader:send("lensPos", { SUN_X, SUN_Y })
   bendShader:send("lensR", 30)
-  bendShader:send("strength", 1.1)
+  bendShader:send("strength", 1.5)
   bendShader:send("imgPos", { x, y })
   bendShader:send("imgSize", { w, h })
   love.graphics.setShader(bendShader)
+end
+
+-- The black sun, alive: a thin disc turning round it, and pixels that drift in from the sky and spiral down
+local function drawBlackSun()
+  local t = love.timer.getTime()
+  love.graphics.setBlendMode("add")
+  -- the rim and the edge-on disc, flickering a pixel at a time
+  for q = 0, 150 do
+    local a = q / 151 * math.pi * 2 + t * (0.5 + (q % 4) * 0.2)
+    local rr = 31 + (q * 5 % 4) + math.sin(t * 3 + q) * 0.8
+    local br = math.abs(math.sin(t * (2 + q % 5) + q * 1.9))
+    love.graphics.setColor(1, 0.5 + 0.35 * br, 0.25 + 0.4 * br, 0.2 + 0.7 * br)
+    love.graphics.rectangle("fill", math.floor(SUN_X + math.cos(a) * rr), math.floor(SUN_Y + math.sin(a) * rr), 1, 1)
+  end
+  for q = 0, 90 do
+    local ph = (t * (0.12 + (q % 7) * 0.02) + q * 0.173) % 1
+    local side = q % 2 == 0 and 1 or -1
+    local rr = 34 + ph * 70
+    local ang = t * 0.9 * side / (0.4 + ph) + q
+    local x = SUN_X + math.cos(ang) * rr * 1.7
+    local y = SUN_Y + math.sin(ang) * rr * 0.16 + math.sin(t + q) * 0.6
+    love.graphics.setColor(1, 0.62, 0.34, (1 - ph) * 0.8)
+    love.graphics.rectangle("fill", math.floor(x), math.floor(y), 1, 1)
+  end
+  -- light falling in from the whole sky: pixels drifting down toward it
+  for q = 0, 70 do
+    local ph = (t * 0.07 + q * 0.0611) % 1
+    local ang = q * 2.399
+    local rr = 20 + (1 - ph) * (120 + (q % 9) * 14)
+    love.graphics.setColor(0.9, 0.7, 0.9, ph * 0.55)
+    love.graphics.rectangle("fill", math.floor(SUN_X + math.cos(ang + ph * 2.5) * rr), math.floor(SUN_Y + math.sin(ang + ph * 2.5) * rr * 0.75), 1, 1)
+  end
+  love.graphics.setBlendMode("alpha")
 end
 
 function overworld.drawBackground(camX, camY)
@@ -1024,15 +1056,14 @@ function overworld.drawBackground(camX, camY)
   end
   love.graphics.draw(background.sky, 0, 0, 0, ssx, ssy)
   love.graphics.setShader()
+  if black then
+    drawBlackSun() -- (alive: pixels drifting round it, in front of the sky and behind the far scenery)
+  end
   for i, l in ipairs(background.layers) do
     local oy = -math.floor(camY * l.parallax * 0.5)
     love.graphics.setColor(1, 1, 1)
     local lx = -math.floor((camX - LEFT) * l.parallax)
-    if black then
-      bendBegin(lx, oy, l.image:getWidth(), l.image:getHeight())
-    end
     love.graphics.draw(l.image, lx, oy)
-    love.graphics.setShader()
     -- When the camera is high the layer scrolls up; keep its base filled
     local bottom = oy + l.image:getHeight()
     if bottom < config.VIRTUAL_H then

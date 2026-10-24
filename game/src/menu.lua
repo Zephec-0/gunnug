@@ -2332,7 +2332,7 @@ local function drawCollapsingPoster(cx, cy, w, h, noun, photo, scale, spin, alph
   else
     holeK = 1 - ease((tt - 1.5) / 0.5)
   end
-  if tt > 2.05 or holeK <= 0 and gone >= 1 then
+  if tt > 2.2 then
     return
   end
   local m = math.floor(10 * u)
@@ -2390,14 +2390,15 @@ local function drawCollapsingPoster(cx, cy, w, h, noun, photo, scale, spin, alph
     love.graphics.pop()
   end
   -- the hole: black, a burning rim, a thin bright disc across it
-  local R = (2 + 11 * holeK) * u
+  local R = math.max(1, 13 * u * holeK) -- (down to a single pixel, which then goes out)
   love.graphics.setColor(0, 0, 0, alpha)
   love.graphics.circle("fill", 0, 0, R)
   love.graphics.setBlendMode("add")
-  love.graphics.setLineWidth(math.max(1, u * 0.6))
+  local spread = math.min(1, R / (5 * u)) -- (the rim closes up with the hole, to the last pixel)
+  love.graphics.setLineWidth(math.max(1, u * 0.6 * spread))
   for q = 0, 3 do
-    love.graphics.setColor(1, 0.55 + 0.08 * q, 0.2 + 0.1 * q, (0.55 - 0.1 * q) * alpha)
-    love.graphics.circle("line", 0, 0, R + q * u * 0.7)
+    love.graphics.setColor(1, 0.55 + 0.08 * q, 0.2 + 0.1 * q, (0.55 - 0.1 * q) * alpha * math.min(1, spread * 2))
+    love.graphics.circle("line", 0, 0, R + q * u * 0.7 * spread)
   end
   love.graphics.setColor(1, 0.7, 0.35, 0.5 * alpha)
   love.graphics.rectangle("fill", -R * 1.9, -math.max(1, u * 0.3), R * 3.8, math.max(1, u * 0.6))

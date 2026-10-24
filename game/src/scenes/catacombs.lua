@@ -22,7 +22,6 @@ local parallax = require("src.parallax")
 local bossbg = require("src.bossbg")
 local bake = require("src.bake")
 local pickups = require("src.pickups")
-local glyphs = require("src.glyphs")
 local hud = require("src.hud")
 local materials = require("src.materials")
 local minedecor = require("src.minedecor")
@@ -344,7 +343,7 @@ local THEMES = {
     arenaDecor = true, -- the Dark Hunter's hall: the shop's void behind the oval, violet crystals round it
     noBraziers = true, -- (no orange fires in it)
     arenaBanner = { "The Summit", "Something wearing your shape waits at the top. The way up lies beyond it" },
-    arenaWon = { "The Crow Rider Has Fallen", "The way up to the summit is open. Bring the proof of every boss: the sky waits there" },
+    arenaWon = { "The Crow Rider Has Fallen", "The way up to the summit is open" },
     glyph = "hunter", -- (src.glyphs: what a boss leaves behind; the Dark Hunter can fall before the others)
     boss = "darkhunter", -- the Dark Hunter, then the Crow Rider (src.darkhunter)
     bossReward = "akimbo", -- (and beating him unlocks it for good)
@@ -377,7 +376,6 @@ local THEMES = {
     gravity = 0.35, -- a third of the pull: high jumps, long recoil
     -- The Champion of the Heavens waits in a floating citadel of cloudstone (an oval hall entered from its lower corners)
     boss = "starwarden", -- (src.starwarden)
-    summit = true, -- the chamber on the mountain's top (src.summit)
     arena = true,
     arenaFrac = 0.22,
     arenaCx = 4100,
@@ -471,9 +469,9 @@ local LAYOUT = {
   -- (chamber: where the long passage in from the doorway opens up, about half
   -- the mountain's width in)
   { x = 5800, y = -7660, w = 2800, h = 8000, tier = 4, rank = 4, entry = { x = 6320, y = 380, walk = true, chamber = 7260 } },
-  -- The sky, over the mountain's summit and most of the desert, reached through the
-  -- gate above the summit boss's arena
-  { x = 0, y = -9060, w = 8600, h = 1400, tier = 5, rank = 5, parent = 10 },
+  -- The sky, high over the mountain's summit and most of the desert (a gap of open air between), reached by
+  -- the gust from the summit's pedestals (src.summit)
+  { x = 0, y = -9960, w = 8600, h = 1400, tier = 5, rank = 5, parent = 10 },
   -- The way on below each post-Queen path (their last shops get hatches)
   { x = 0, y = 4 * AREA_H, w = AREA_W / 2, h = AREA_H, tier = 5, parent = 4, gapRight = PATH_GAP },
   { x = AREA_W / 2 + PATH_GAP, y = 4 * AREA_H, w = AREA_W / 2, h = AREA_H, tier = 5, parent = 5, gapLeft = PATH_GAP },
@@ -737,11 +735,10 @@ local function areaFor(i)
         x1 = lv.x1,
         y0 = lv.y0,
         y1 = lv.y1,
-        entranceX = ex.cx,
+        entranceX = ex.cx + 220, -- (beside the hole in the cloud floor)
         entranceY = lv.y1 - 230,
-        shaftX0 = ex.x0,
-        shaftX1 = ex.x1,
-        summit = lv.theme.summit and { cx = ex.cx } or nil,
+        shaftX0 = ex.cx - 70, -- (the hole in the sky's cloud floor, over the top of the mountain: the gust comes up through it)
+        shaftX1 = ex.cx + 70,
       }
     else
     local hatch = parent.info.shops[lv.side == "right" and 2 or 1].hatch
@@ -1284,7 +1281,6 @@ local gravityScale = 1
 
 -- Banners as the hunter reaches each area, the shop-reached message, and gas
 local openGate -- (below)
-local glyphHint = 0 -- seconds until the sealed door may speak again
 
 local supportTimer = 0
 function catacombs.update(player, dt)
@@ -1314,22 +1310,6 @@ function catacombs.update(player, dt)
       end
     end
     chests.checkSupport(world, px, py)
-  end
-  -- The sky's door: opens once every glyph is in hand, and says what it wants when approached
-  glyphHint = math.max(0, glyphHint - dt)
-  for _, lv in ipairs(levels) do
-    local held = lv.info and lv.info.arena and lv.info.arena.held
-    if held then
-      if glyphs.complete() then
-        lv.info.arena.held = nil
-        openGate(held)
-        audio.play("hatch")
-        hud.showBanner("The Door Opens", "Every glyph is lit. The way up to the sky lies open")
-      elseif glyphHint <= 0 and math.abs(px - (held.x0 + held.x1) / 2) < 70 and math.abs(py - held.y1) < 70 then
-        glyphHint = 6
-        effects.popup((held.x0 + held.x1) / 2, held.y1 + 14, "Sealed: " .. glyphs.count() .. " / " .. glyphs.total() .. " glyphs", { 0.85, 0.8, 0.95 })
-      end
-    end
   end
   -- Gravity: lighter in the sky
   do
@@ -1490,16 +1470,9 @@ function catacombs.openGates(lv)
     a.seal = nil
   end
   for _, g in ipairs(a.gates) do
-    if g.glyph and not glyphs.complete() then
-      a.held = g -- (the sky's door stays shut until every glyph is in hand: see catacombs.update)
-    else
-      openGate(g)
-    end
+    openGate(g)
   end
   local won = lv.theme.arenaWon or { "The Queen Has Fallen", "The gates are open. Two shops lie below, left and right: choose one" }
-  if a.held then
-    won = { won[1], "The door to the sky is sealed by " .. glyphs.total() .. " glyphs. Bring the proof of every boss" }
-  end
   hud.showBanner(won[1], won[2])
 end
 
@@ -2224,17 +2197,6 @@ function catacombs.drawEmissive(view)
       local bx0, by0, bx1, by1 = catacombs.arenaBox(lv.index)
       if bx0 and view.x + view.w > bx0 and view.x < bx1 and view.y + view.h > by0 and view.y < by1 then
         bossbg.drawGlow(view, lv.theme.arenaParallax, { bx0, by0, bx1, by1 }, require("src.lighting").mask())
-      end
-    end
-  end
-  -- The sky's door: one rune for each glyph it wants, dark until the hunter has brought it, then lit
-  for _, lv in ipairs(levels) do
-    local held = lv.info and lv.info.arena and lv.info.arena.held
-    if held and view.x + view.w > held.x0 - 60 and view.x < held.x1 + 60 and view.y + view.h > held.y0 - 80 and view.y < held.y1 + 40 then
-      local n = #glyphs.order
-      local gx0 = math.floor((held.x0 + held.x1) / 2 - (n * 11 - 4) / 2)
-      for k, id in ipairs(glyphs.order) do
-        glyphs.draw(id, gx0 + (k - 1) * 11, held.y0 - 13, 1, glyphs.has(id) and 1 or 0.14)
       end
     end
   end

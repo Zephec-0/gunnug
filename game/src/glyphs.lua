@@ -1,6 +1,6 @@
 -- Glyphs: the proof of a slain boss. Each of the run's bosses leaves one behind
--- (a theme's `glyph`), and the hunter who carries them all can open the door to
--- the sky. They belong to the run (inv.glyphs), so they must be won again after
+-- (a theme's `glyph`), and the hunter who carries them all can light the pedestals
+-- on the mountain's top (src.summit) and be carried up to the sky. They belong to the run (inv.glyphs), so they must be won again after
 -- a death; unlike perks they have no effect of their own. Each is drawn glowing on the
 -- health bottle (src.hud), only once it has been taken.
 local glyphs = {}
@@ -63,11 +63,6 @@ end
 
 function glyphs.total()
   return #glyphs.order
-end
-
--- Every boss's glyph is in hand: the sky's door will open
-function glyphs.complete()
-  return glyphs.count() >= glyphs.total()
 end
 
 -- A glyph shaped like a pickup, for the pickup code (name, colour, rarity)

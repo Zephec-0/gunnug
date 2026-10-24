@@ -85,7 +85,7 @@ local WINCH_X = 1758 -- left edge of the winch house
 local SUN_X, SUN_Y = 440, 196 -- on screen, low over the horizon
 
 local background -- pre-rendered sky and parallax layers
-local backgroundEclipse -- whether it was drawn with the sun eclipsed
+local backgrounds = {} -- [eclipsed?] -> the sky and layers drawn that way (made when first wanted)
 local trees = {}
 
 -- Gently rolling ground of the open plain
@@ -450,8 +450,10 @@ function overworld.build(opts)
   require("src.airship").build(world) -- (a secret in the sky: nothing points to it)
 
   local eclipse = require("src.meta").isSkyBeaten()
-  if not background or backgroundEclipse ~= eclipse then
-    background, backgroundEclipse = buildBackground(eclipse), eclipse
+  background = backgrounds[eclipse]
+  if not background then
+    background = buildBackground(eclipse)
+    backgrounds[eclipse] = background
   end
   trees = {}
   for _, t in ipairs({ { 200, 1 }, { 1340, -1 }, { 2000, 1 }, { 2460, -1 }, { 2706, 1 }, { 3100, -1 }, { 3800, 1 }, { -2700, 1 }, { -2200, -1 }, { -1900, 1 }, { -1380, -1 }, { -460, -1 }, { -150, 1 }, { 4400, -1 }, { 5100, 1 }, { 5600, -1 } }) do
@@ -1029,7 +1031,13 @@ function overworld.drawBackground(camX, camY)
   if camY > CAVE_TOP - 200 then
     return -- the view is all underground; the backdrop (drawDecor) covers it
   end
+  -- (asked every frame: a world built behind the title with another save's profile must not keep its sun)
   local black = require("src.meta").isSkyBeaten()
+  local background = backgrounds[black]
+  if not background then
+    background = buildBackground(black)
+    backgrounds[black] = background
+  end
   love.graphics.setColor(1, 1, 1)
   -- (stretched across if the view has grown wider than when it was painted)
   local ssx, ssy = math.max(1, config.VIRTUAL_W / background.sky:getWidth()), math.max(1, config.VIRTUAL_H / background.sky:getHeight())

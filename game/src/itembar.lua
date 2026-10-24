@@ -524,7 +524,7 @@ local function drawFlask(fx, fy, c, lit, level, t)
   end
 end
 
-local function drawFuser(inv, x, y, u, fusable, pip)
+local function drawFuser(inv, x, y, u)
   local f = inv.fuse
   local size = ITEM_SIZE * u
   local c = cellOf(u)
@@ -543,10 +543,6 @@ local function drawFuser(inv, x, y, u, fusable, pip)
     local sx = slotX[i]
     local tint = f.locked and { border = { FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], pulse }, wash = { FUSE_TEAL[1], FUSE_TEAL[2], FUSE_TEAL[3], 0.14 * pulse } } or nil
     drawSlot(inv, { kind = "fuse", index = i }, sx, y, size, u, false, tint)
-    local item = f.slots[i]
-    if item and fusable and fusable[item] and pip then
-      pip(math.floor(sx + 1.5 * u), math.floor(y + 1.5 * u))
-    end
   end
   -- The flask between them is the toggle
   local dt = love.timer.getDelta()
@@ -603,53 +599,12 @@ local function drawBar(inv, u)
   end
   x = x + 5 * u
   local itemY = y + (WEAPON_SIZE - ITEM_SIZE) / 2 * u
-  -- Which loose items (and items waiting in an unlocked fuser) have a partner
-  -- they could be fused with: those get a small teal pip
-  local pool = {}
-  for i = 1, inventory.ITEM_SLOTS do
-    pool[#pool + 1] = inv.items[i]
-  end
-  if not inv.fuse.locked then
-    pool[#pool + 1] = inv.fuse.slots[1]
-    pool[#pool + 1] = inv.fuse.slots[2]
-  end
-  local fusable = {}
-  for a = 1, #pool do
-    for b = a + 1, #pool do
-      if pool[a] and pool[b] and fuser.combine(pool[a], pool[b]) then
-        fusable[pool[a]], fusable[pool[b]] = true, true
-      end
-    end
-  end
-  local t = love.timer.getTime()
-  -- The "can be fused" marker: a tiny glowing flask in the slot's corner, on a dark backing
-  local function pip(px, py)
-    local c = cellOf(u)
-    local glow = 0.7 + 0.3 * math.sin(t * 5)
-    love.graphics.setColor(0.02, 0.06, 0.06, 0.88)
-    love.graphics.rectangle("fill", px - c, py - c, 7 * c, 8 * c)
-    local function cell(col, row)
-      love.graphics.rectangle("fill", px + col * c, py + row * c, c, c)
-    end
-    love.graphics.setColor(0.62, 0.42, 0.24)
-    cell(2, 0)
-    love.graphics.setColor(FUSE_TEAL[1] * 0.8, FUSE_TEAL[2] * 0.8, FUSE_TEAL[3] * 0.8)
-    cell(1, 1) cell(3, 1) cell(0, 2) cell(4, 2) cell(0, 3) cell(4, 3) cell(0, 4) cell(4, 4)
-    cell(1, 5) cell(2, 5) cell(3, 5)
-    love.graphics.setColor(FUSE_TEAL[1] * glow, FUSE_TEAL[2] * glow, FUSE_TEAL[3] * glow)
-    cell(2, 1) cell(1, 2) cell(2, 2) cell(3, 2) cell(1, 3) cell(2, 3) cell(3, 3) cell(1, 4) cell(2, 4) cell(3, 4)
-    love.graphics.setColor(0.9, 1, 0.97, glow)
-    cell(1, 3)
-  end
   for i = 1, inventory.ITEM_SLOTS do
     local size = ITEM_SIZE * u
     drawSlot(inv, { kind = "item", index = i }, x, itemY, size, u, false)
-    if inv.items[i] and fusable[inv.items[i]] then
-      pip(math.floor(x + 1.5 * u), math.floor(itemY + 1.5 * u))
-    end
     x = x + size + 2 * u
   end
-  drawFuser(inv, x + 5 * u, itemY, u, fusable, pip)
+  drawFuser(inv, x + 5 * u, itemY, u)
   -- The perks taken this run, as small badges under the bar
   local list = perks.list()
   local px, py = margin, margin + WEAPON_SIZE * u + 3 * u

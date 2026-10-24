@@ -1081,12 +1081,15 @@ function cavegen.generate(world, area, seed, tick)
   end
   carveCrossings()
   if arena then
-    if open then
+    if open and not sky then
       -- The sky's hall: a floating citadel of cloudstone, hollowed into an oval (below)
       world:fillRect(arena.x0 - 90, arena.top - 80, arena.x1 + 90, arena.floorY + 90, ROCKID)
     end
     carveArena()
-    if open then
+    if sky then
+      require("src.skygen").buildDisc(world, arena, ROCKID, DIRTID, noiseSeed) -- (open air round it: no walls)
+      arena.open = true
+    elseif open then
       -- Two mouths into the lower corners of the oval, out through the citadel's sides to open sky,
       -- each with a slab of cloud to walk in from (the iron ring seals them when the boss wakes)
       local rx, ry = arena.w / 2, arena.h / 2
@@ -1171,8 +1174,10 @@ function cavegen.generate(world, area, seed, tick)
   if open then
     sideTop = world.top -- (the sky's walls go up to the world's invisible ceiling)
   end
-  world:fillRect(X0, sideTop, X0 + BORDER - 1, Y1, ROCKID)
-  world:fillRect(X1 - BORDER + 1, sideTop, X1, Y1, ROCKID)
+  if not sky then -- (the sky has no walls at its edges)
+    world:fillRect(X0, sideTop, X0 + BORDER - 1, Y1, ROCKID)
+    world:fillRect(X1 - BORDER + 1, sideTop, X1, Y1, ROCKID)
+  end
   -- A secret nobody points to: a motherlode of gold in the middle of the solid rock between the
   -- two paths, far from either one's caves. Only a long dig through the wall finds it. (Both
   -- paths fill the gap, and the second fill would wipe the first's lode: both place the same one,
@@ -1247,7 +1252,7 @@ function cavegen.generate(world, area, seed, tick)
   end
   -- A boss's arena is walled in with sealed rock (it breaks again once the boss
   -- is dead), so nobody can tunnel round the fight
-  if arena then
+  if arena and not sky then
     local T = 28
     local sx0, sy0, sx1, sy1 = arena.x0 - T, arena.top - T, arena.x1 + T, arena.floorY + T
     local solidNow = materials.solid

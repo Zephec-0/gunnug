@@ -368,6 +368,7 @@ local THEMES = {
     backDeep = { 0.30, 0.22, 0.28 },
     pillars = { { 0.2, 0.15, 0.2 }, { 0.5, 0.4, 0.45 }, { 0.35, 0.27, 0.32 } },
     space = true, -- the sky darkens into space toward the top (src.scenes.overworld)
+    toughMul = 1.3,
     monsters = {}, -- (none from the lists: its fliers are placed along the route, src.skygen and src.skymobs)
     breakables = { { "urn", 10 }, { "pouch", 12 }, { "lantern", 8 }, { "crate", 12 } },
     stalactites = 20,
@@ -1549,6 +1550,9 @@ end
 -- Seals the tunnels into the arena with iron until the boss is dead
 local function sealArena(lv)
   local a = lv.info.arena
+  if a.open then
+    return -- (an arena in open air has nothing to seal)
+  end
   a.plugs = {}
   for _, y in ipairs({ a.top - 12, a.top - 22 }) do
     local x = a.x0 - 4

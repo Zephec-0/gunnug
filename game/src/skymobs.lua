@@ -49,11 +49,11 @@ D.starmoth = {
 D.sentinel = {
   name = "Brass Sentinel",
   w = 16, h = 16, hp = 120, speed = 30, accel = 90,
-  sight = 380, forget = 700, damage = 10, boltSpeed = 92, boltDamage = 13,
+  sight = 400, forget = 700, damage = 10, boltSpeed = 125, boltDamage = 13,
   knockback = 0.08, gold = { 10, 20 }, weight = 8,
   spriteW = 16, spriteH = 16, scale = 1,
   blood = { 0.8, 0.62, 0.25 },
-  desc = "A brass sphere that the old builders left to keep their ruins. It hangs in the air, turns its one lens on you and draws a thin line to where you stand. Then it fires: slow, bright, and easy to step out of.",
+  desc = "A brass sphere that the old builders left to keep their ruins. It hangs in the air and turns its one lens on you; a ring closes round you when it has you. The bolt it fires bends after you, so do not stand still.",
 }
 D.windspirit = {
   name = "Wind Spirit",
@@ -347,7 +347,7 @@ local function fireBolt(e, px, py)
   bolts[#bolts + 1] = {
     x = cx + (px - cx) / d * 9, y = cy + (py - cy) / d * 9,
     vx = (px - cx) / d * sp, vy = (py - cy) / d * sp,
-    life = 6, dmg = math.max(1, math.floor(e.def.boltDamage * e.dmgMul + 0.5)),
+    life = 4.5, dmg = math.max(1, math.floor(e.def.boltDamage * e.dmgMul + 0.5)), home = 2.4,
   }
   audio.playAt("explosion", cx, cy, 0.25, 2.2)
   audio.playAt("clank", cx, cy, 0.6, 1.4)
@@ -370,20 +370,18 @@ local function updateSentinel(e, dt, world, player, px, py)
   elseif e.state == "watch" then
     e.aimX, e.aimY = px, py
     if e.seesPlayer and e.attackCd <= 0 and dist < def.sight and e.stun <= 0 then
-      e.state, e.timer = "charge", 1.0
+      e.state, e.timer = "charge", 0.65
       audio.playAt("tick", cx, cy, 0.7, 0.6)
     elseif dist > def.forget then
       e.state = "sleep"
     end
   elseif e.state == "charge" then
-    -- the line follows him until the last third of a second, then holds: he has time to move
+    -- the ring stays on him all the while it charges (the bolt tracks him too)
     e.timer = e.timer - dt
-    if e.timer > 0.3 then
-      e.aimX, e.aimY = px, py
-    end
+    e.aimX, e.aimY = px, py
     if e.timer <= 0 then
       fireBolt(e, e.aimX, e.aimY)
-      e.state, e.attackCd = "watch", 2.4 + love.math.random() * 1.2
+      e.state, e.attackCd = "watch", 1.2 + love.math.random() * 0.9
     end
   end
   e.facing = px >= cx and 1 or -1
@@ -422,12 +420,16 @@ local function drawSentinel(e)
   color(e.state == "charge" and { 1, 0.35, 0.2 } or BRASS.lens)
   rect(mid + ax - 1, my + ay - 1, 3, 3)
   if e.state == "charge" then
-    -- the aim: a thin dotted line out to where it will fire
-    love.graphics.setColor(1, 0.4, 0.25, e.timer > 0.3 and 0.35 or 0.8)
-    local d = math.max(1, hypot(e.aimX - mid, e.aimY - my))
-    local steps = math.min(40, math.floor(d / 6))
-    for i = 2, steps do
-      rect(mid + (e.aimX - mid) * i / steps, my + (e.aimY - my) * i / steps, 1, 1)
+    -- locked on: a ring closing round the hunter, with cross ticks, red when it is about to fire
+    local k = math.max(0, e.timer / 0.65)
+    local r = 6 + k * 12
+    local hot = e.timer < 0.22
+    love.graphics.setColor(1, hot and 0.2 or 0.55, hot and 0.15 or 0.3, 0.9)
+    love.graphics.setLineWidth(1)
+    love.graphics.circle("line", e.aimX, e.aimY, r)
+    for a = 0, 3 do
+      local dx, dy = math.cos(a * math.pi / 2), math.sin(a * math.pi / 2)
+      love.graphics.line(e.aimX + dx * (r - 3), e.aimY + dy * (r - 3), e.aimX + dx * (r + 4), e.aimY + dy * (r + 4))
     end
   end
 end
@@ -591,6 +593,16 @@ enemies.afterUpdate = function(dt, world, player, px, py)
   for i = #bolts, 1, -1 do
     local s = bolts[i]
     s.life = s.life - dt
+    if s.home and s.home > 0 and not player.dead then
+      -- it bends after him, for the first couple of seconds
+      s.home = s.home - dt
+      local sp = math.sqrt(s.vx * s.vx + s.vy * s.vy)
+      local cur = math.atan2(s.vy, s.vx)
+      local want = math.atan2(py - s.y, px - s.x)
+      local d = (want - cur + math.pi) % (math.pi * 2) - math.pi
+      cur = cur + math.max(-1.5 * dt, math.min(1.5 * dt, d))
+      s.vx, s.vy = math.cos(cur) * sp, math.sin(cur) * sp
+    end
     local gone = s.life <= 0
     local steps = math.max(1, math.ceil(math.max(math.abs(s.vx), math.abs(s.vy)) * dt / 2))
     for _ = 1, steps do

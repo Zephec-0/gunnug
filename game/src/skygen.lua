@@ -19,10 +19,22 @@ local WRECK_X = 5150
 
 -- Island parameters per band: radii, gaps between neighbours, and how much each step may rise
 local P = {
-  { rx = { 95, 150 }, ry = { 14, 26 }, gap = { 30, 80 } },
-  { rx = { 44, 86 }, ry = { 11, 20 }, gap = { 80, 135 } },
-  { rx = { 24, 46 }, ry = { 9, 16 }, gap = { 115, 180 } },
+  { rx = { 60, 170 }, ry = { 12, 32 }, gap = { 30, 85 } },
+  { rx = { 30, 100 }, ry = { 9, 24 }, gap = { 70, 140 } },
+  { rx = { 18, 56 }, ry = { 7, 18 }, gap = { 110, 185 } },
 }
+
+-- Some islands are stepping stones and some are great banks: sizes are rolled with these on top
+local function sizeRoll(rng, p, R)
+  local rx, ry = R(p.rx[1], p.rx[2]), R(p.ry[1], p.ry[2])
+  local r = rng:random()
+  if r < 0.16 then
+    return R(14, 24), R(6, 9), "stone"
+  elseif r < 0.30 then
+    return rx * R(1.5, 1.9), ry * R(1.2, 1.5), "bank"
+  end
+  return rx, ry, "plain"
+end
 
 local function bandOf(x)
   return x >= BAND_X1 and 1 or x >= BAND_X2 and 2 or 3
@@ -34,7 +46,7 @@ function skygen.build(c)
   local X0, Y0, X1, Y1 = c.X0, c.Y0, c.X1, c.Y1
   local ROCKID, DIRTID, AIR = c.ROCKID, c.DIRTID, materials.AIR
   local floorTop = Y1 - 200
-  local L = { islands = {}, vents = {}, bells = {}, chestSpots = {}, mobs = {}, floorTop = floorTop, gaps = {} }
+  local L = { islands = {}, vents = {}, bells = {}, chestSpots = {}, mobs = {}, floorTop = floorTop, gaps = {}, columns = {}, ruins = {} }
   local function R(lo, hi)
     return lo + rng:random() * (hi - lo)
   end
@@ -45,6 +57,27 @@ function skygen.build(c)
   for _, g in ipairs(gaps) do
     world:fillRect(math.floor(g[1]), floorTop - 40, math.floor(g[2]), Y1, AIR)
     L.gaps[#L.gaps + 1] = { x0 = g[1], x1 = g[2] }
+  end
+
+  -- West of the shop the sea floor is only patches of cloud, with drops between them (the wreck's patch is kept whole)
+  do
+    local x = hx0 - 900
+    while x > X0 + 200 do
+      local len = R(220, 620)
+      local gw = R(110, 260)
+      local g0, g1 = x - len - gw, x - len
+      if g1 > WRECK_X - 330 and g0 < WRECK_X + 330 then
+        x = g0 - 40 -- (never under the wreck)
+      else
+        for gx = math.floor(g0), math.floor(g1) do
+          local t = (gx - g0) / (g1 - g0)
+          local depth = 260 * math.min(1, math.sqrt(math.sin(math.pi * t)) * 1.4)
+          world:fillRect(gx, floorTop - 40, gx, math.min(Y1, math.floor(floorTop + depth)), AIR)
+        end
+        L.gaps[#L.gaps + 1] = { x0 = g0, x1 = g1 }
+        x = g0
+      end
+    end
   end
 
   -- Islands: a lens with a flattish crest (cloud heaped a little on top), tapering underneath
@@ -93,11 +126,11 @@ function skygen.build(c)
 
   -- The final slab at the Citadel's east mouth (src.cavegen carves it): where the chain has to end
   local arena = c.arena
-  local rxA, ryA = arena.w / 2, arena.h / 2
-  local mouthY = math.floor(arena.top + ryA + math.sqrt(1 - 0.66 ^ 2) * ryA)
-  local slabTop, slabRight = mouthY + 9, arena.cx + rxA + 240
+  -- (the boss's floor is an open floating disc, no walls: the chain ends at its east rim)
+  local rxA = arena.w / 2
+  local slabTop, slabRight = arena.floorY, arena.cx + rxA
   local aEnd = floorTop - slabTop
-  L.slab = { x0 = arena.cx + rxA + 90, x1 = slabRight, y = slabTop }
+  L.slab = { x0 = arena.cx, x1 = slabRight, y = slabTop }
 
   local function target(x)
     if x >= 7600 then
@@ -116,15 +149,16 @@ function skygen.build(c)
   do
     local p = P[1]
     local rx, ry = R(p.rx[1], p.rx[2]), R(p.ry[1], p.ry[2])
+    local kind = "plain"
     local x, a = hx0 - 100 - rx, 100
     while true do
       if math.abs(x - mouthX) < rx + 70 and a < 150 then
         a = 150 -- (clear of the shop's way up)
       end
-      chain[#chain + 1] = addIsland(x, a, rx, ry, { main = #chain + 1 })
+      chain[#chain + 1] = addIsland(x, a, rx, ry, { main = #chain + 1, size = kind })
       local isl = chain[#chain]
       local np = P[bandOf(x - rx - 120)]
-      local nrx, nry = R(np.rx[1], np.rx[2]), R(np.ry[1], np.ry[2])
+      local nrx, nry, nkind = sizeRoll(rng, np, R)
       local rise = math.max(-25, math.min(65, target(x) - a + R(-25, 25)))
       local gap = math.min(R(np.gap[1], np.gap[2]), 200 - math.max(0, rise) * 1.5)
       local nx = x - rx - gap - nrx
@@ -133,6 +167,7 @@ function skygen.build(c)
         -- the last island, a short hop from the slab
         nrx = math.min(nrx, 40)
         nx = slabRight + 100 + nrx
+        nkind = "plain"
         na = a + math.max(-30, math.min(60, aEnd - a))
         if x - rx - (nx + nrx) < 40 then
           break -- (this one is close enough already)
@@ -140,7 +175,7 @@ function skygen.build(c)
         chain[#chain + 1] = addIsland(nx, na, nrx, math.min(nry, 14), { main = #chain + 1 })
         break
       end
-      x, a, rx, ry = nx, na, nrx, nry
+      x, a, rx, ry, kind = nx, na, nrx, nry, nkind
     end
   end
   L.chain = chain
@@ -154,9 +189,7 @@ function skygen.build(c)
         local x = math.floor(isl.cx + R(-0.7, 0.7) * isl.rx)
         local gy = world:findGround(x, math.floor(isl.cy - isl.ry - 24))
         local h = rng:random() < 0.5 and rng:random(20, 34) or rng:random(44, 70)
-        world:fillRect(x - 2, gy - h, x + 2, gy + 1, STONE)
-        world:fillRect(x - 3, gy - h - 1, x + 3, gy - h - 1, STONE)
-        cols[#cols + 1] = { x = x, top = gy - h - 1, h = h }
+        cols[#cols + 1] = { x = x, top = gy - h - 1, h = h, base = gy } -- (scenery only: walked through, not solid)
         tick()
       end
       -- a lintel across the two tallest neighbours, with a bell under it
@@ -167,12 +200,15 @@ function skygen.build(c)
         local p, q = cols[k], cols[k + 1]
         if p.h >= 44 and q.h >= 44 and q.x - p.x <= 60 and q.x - p.x >= 22 then
           local y = math.min(p.top, q.top) - 1
-          world:fillRect(p.x - 4, y, q.x + 4, y + 2, STONE)
+          L.ruins[#L.ruins + 1] = { x0 = p.x - 4, x1 = q.x + 4, y = y }
           L.bells[#L.bells + 1] = { x = (p.x + q.x) / 2, y = y + 3 }
           break
         end
       end
       isl.cols = cols
+      for _, col in ipairs(cols) do
+        L.columns[#L.columns + 1] = col
+      end
     end
   end
   for i = 1, #chain - 1 do
@@ -345,38 +381,32 @@ function skygen.build(c)
     end
   end
   mob("starmoth", gaps[1][1] + 65, floorTop - 55) -- (over the first gap: the bait for a jump)
+  -- (chance per island of each kind, by band: rays, moths over the next drop, sentinels, spirits)
+  local W = { { 0.35, 0.35, 0.12, 0.08 }, { 0.35, 0.45, 0.55, 0.3 }, { 0.4, 0.55, 0.4, 0.65 } }
   for i, m in ipairs(chain) do
-    if m.band == 1 then
-      if m.cx < 7100 and i % 3 == 0 then
-        ray(i, 3)
-      elseif i % 4 == 1 and m.cx < 7000 then
-        gapOver(i, "starmoth")
+    local w = W[m.band]
+    local safe = m.cx > 7050 -- (the landing's islands stay quiet)
+    if not safe then
+      if rng:random() < w[1] then
+        ray(i, rng:random(2, 4))
       end
-    elseif m.band == 2 then
-      if i % 3 == 1 then
+      if rng:random() < w[2] then
+        gapOver(i, "starmoth")
+        if rng:random() < 0.4 then
+          gapOver(i, "starmoth")
+        end
+      end
+      if rng:random() < w[3] then
         over(i, "sentinel", 62)
+        if m.size == "bank" and rng:random() < 0.7 then
+          over(i, "sentinel", 80)
+        end
       end
-      if i % 4 == 2 then
-        gapOver(i, "starmoth")
-      end
-      if i % 7 == 3 then
-        ray(i, 3)
-      end
-      if i % 9 == 5 then
+      if rng:random() < w[4] then
         over(i, "windspirit", 44)
-      end
-    else
-      if i % 2 == 0 then
-        over(i, "windspirit", 44)
-      end
-      if i % 3 == 0 then
-        gapOver(i, "starmoth")
-      end
-      if i % 6 == 1 then
-        over(i, "sentinel", 70)
-      end
-      if i % 8 == 5 then
-        ray(i, 3)
+        if m.band == 3 and m.size ~= "stone" and rng:random() < 0.35 then
+          over(i, "windspirit", 44)
+        end
       end
     end
   end
@@ -386,6 +416,20 @@ function skygen.build(c)
   end
   L.bands = { x1 = BAND_X1, x2 = BAND_X2 }
   return L
+end
+
+-- The boss's floor: an open floating disc of cloudstone (flat on top, a bowl underneath), nothing round it
+function skygen.buildDisc(world, arena, ROCKID, DIRTID, noiseSeed)
+  local rx, depth = arena.w / 2, 130
+  for y = arena.floorY, arena.floorY + depth do
+    local t = (y - arena.floorY) / depth
+    local half = rx * math.sqrt(math.max(0, 1 - t * t))
+    for x = math.floor(arena.cx - half), math.ceil(arena.cx + half) do
+      local n = love.math.noise(x * 0.03, y * 0.03, noiseSeed + 9)
+      world:setRaw(x, y, (y < arena.floorY + 6 or n > 0.7) and DIRTID or ROCKID)
+    end
+  end
+  world:repaintRect(arena.cx - rx - 8, arena.floorY - 8, arena.cx + rx + 8, arena.floorY + depth + 8)
 end
 
 return skygen

@@ -70,6 +70,17 @@ local function jag(x, y0, y1, seed)
   return pts
 end
 
+-- How strong the sparks are before a strike (0-1): they build for two thirds of the warning, then die away to nothing
+function skyhazards.tellLevel(s)
+  local f = s.t / s.warn
+  if f < 0.68 then
+    return (f / 0.68) ^ 1.5
+  elseif f < 0.9 then
+    return 1 - (f - 0.68) / 0.22
+  end
+  return 0
+end
+
 local function updateLightning(dt, player)
   local px, py = player:center()
   if player.dead then
@@ -91,13 +102,14 @@ local function updateLightning(dt, player)
     local s = strikes[i]
     s.t = s.t + dt
     if not s.bolt then
-      -- the warning: crackling on the spot, quicker as it comes
-      if love.math.random() < dt * (6 + s.t * 20) then
-        effects.particle(s.x + (love.math.random() - 0.5) * 16, s.y - 2, (love.math.random() - 0.5) * 30, -20 - love.math.random() * 30, 0.35, { 0.8, 0.9, 1 }, 60, true)
+      -- the warning: sparks start at the spot, grow, die away, and then it strikes
+      local k = skyhazards.tellLevel(s)
+      if love.math.random() < dt * (k * 70) then
+        effects.particle(s.x + (love.math.random() - 0.5) * 10, s.y - 2, (love.math.random() - 0.5) * 70, -30 - love.math.random() * 70, 0.3 + love.math.random() * 0.2, { 0.8, 0.9, 1 }, 220, true)
       end
       if s.t > 0.3 and not s.ticked then
         s.ticked = true
-        audio.playAt("tick", s.x, s.y, 0.6, 0.5)
+        audio.playAt("wisp_crackle", s.x, s.y, 0.7, 1.6)
       end
       if s.t >= s.warn then
         s.bolt = 0.28
@@ -184,6 +196,21 @@ function skyhazards.draw(view)
       R({ 0.85, 0.9, 1 }, 1, v.x + v.half - 2, v.y - 2, 4, 1)
     end
   end
+  -- the ruins: columns and lintels to walk through (scenery only)
+  for _, col in ipairs(S.columns or {}) do
+    if inView(view, col.x, col.top, 80) then
+      R({ 0.30, 0.29, 0.36 }, 1, col.x - 2, col.top, 5, col.base - col.top)
+      R({ 0.42, 0.41, 0.50 }, 1, col.x - 2, col.top, 2, col.base - col.top)
+      R({ 0.17, 0.16, 0.21 }, 1, col.x + 2, col.top, 1, col.base - col.top)
+      R({ 0.42, 0.41, 0.50 }, 1, col.x - 3, col.top - 1, 7, 2)
+    end
+  end
+  for _, l in ipairs(S.ruins or {}) do
+    if inView(view, l.x0, l.y, 80) then
+      R({ 0.30, 0.29, 0.36 }, 1, l.x0, l.y, l.x1 - l.x0 + 1, 3)
+      R({ 0.42, 0.41, 0.50 }, 1, l.x0, l.y, l.x1 - l.x0 + 1, 1)
+    end
+  end
   for i, bell in ipairs(S.bells) do
     if inView(view, bell.x, bell.y, 20) then
       local sw = math.sin(t * 7 + i) * (bell.swing or 0) * 2.5
@@ -228,15 +255,24 @@ function skyhazards.drawEmissive(view)
   for _, s in ipairs(strikes) do
     if inView(view, s.x, s.y, 60) or (s.pts and s.x > view.x - 60 and s.x < view.x + view.w + 60) then
       if not s.bolt then
-        -- the warning: a pulsing glow on the ground and a faint thread of light from above
-        local k = s.t / s.warn
-        local flick = 0.5 + 0.5 * math.sin(s.t * (14 + k * 30))
-        love.graphics.setColor(0.7, 0.85, 1, (0.1 + 0.3 * k) * flick)
-        love.graphics.circle("fill", s.x, s.y - 2, 10 + k * 12)
-        love.graphics.setColor(1, 1, 1, 0.12 + 0.35 * k * flick)
-        love.graphics.rectangle("fill", math.floor(s.x), math.floor(s.y - 220), 1, 220)
-        love.graphics.setColor(0.8, 0.9, 1, 0.5 * k)
-        love.graphics.rectangle("fill", math.floor(s.x) - 8, math.floor(s.y) - 1, 17, 1)
+        -- the warning: sparks spitting from the spot, more of them as it builds, gone just before the strike
+        local k = skyhazards.tellLevel(s)
+        local n = math.floor(k * 22)
+        for i = 1, n do
+          local ph = (t * 3.1 + i * 0.37) % 1
+          local sd = math.sin(i * 12.9898) * 43758.5453
+          sd = sd - math.floor(sd)
+          local x = s.x + (sd - 0.5) * 16 * (0.3 + ph)
+          local y = s.y - 1 - ph * (10 + sd * 16) + ph * ph * 14
+          love.graphics.setColor(0.85, 0.93, 1, (1 - ph) * math.min(1, k * 1.5))
+          love.graphics.rectangle("fill", math.floor(x), math.floor(y), 1, 1)
+          if sd > 0.6 then
+            love.graphics.setColor(1, 1, 1, (1 - ph) * k)
+            love.graphics.rectangle("fill", math.floor(x), math.floor(y) - 1, 1, 2)
+          end
+        end
+        love.graphics.setColor(0.7, 0.85, 1, 0.25 * k)
+        love.graphics.rectangle("fill", math.floor(s.x) - 2, math.floor(s.y) - 2, 5, 2)
       else
         local a = math.min(1, s.bolt / 0.15)
         love.graphics.setLineWidth(5)
@@ -278,7 +314,7 @@ function skyhazards.addLights(lighting, view)
       if s.bolt then
         lighting.add(s.x, s.y - 40, 190, 0.75, 0.85, 1, 1.0 * math.min(1, s.bolt / 0.15))
       else
-        lighting.add(s.x, s.y - 6, 40, 0.7, 0.85, 1, 0.5 * s.t / s.warn)
+        lighting.add(s.x, s.y - 6, 34, 0.7, 0.85, 1, 0.5 * skyhazards.tellLevel(s))
       end
     end
   end

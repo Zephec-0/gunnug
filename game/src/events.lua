@@ -37,6 +37,7 @@ events.onGhost = nil
 function events.clear()
   randevents.clear()
   require("src.summit").clear()
+  require("src.skyhazards").clear()
   world = nil
   altars, vaults, keys, relics = {}, {}, {}, {}
   wounded, ghost = nil, nil
@@ -63,6 +64,9 @@ function events.spawnArea(w, info, index, tier, elites, chests)
   world = w
   if info.summit then
     require("src.summit").setup(w, info.summit) -- (the top of the mountain, with the glyph pedestals)
+  end
+  if info.sky then
+    require("src.skyhazards").setup(w, info.sky) -- (the Cloud Reaches: vents, lightning, bells, the wreck)
   end
   -- (the violet altars and the ghost are random events now: see randevents.external below)
   if info.vault then
@@ -154,6 +158,7 @@ function events.update(dt, player, areaIndex)
   end
   randevents.update(dt, player, areaIndex, world)
   require("src.summit").update(dt, player)
+  require("src.skyhazards").update(dt, player)
   local px, py = player:center()
   local inv = player.inventory
   -- keys fall and are picked up by walking over them
@@ -555,6 +560,7 @@ function events.draw(view)
   end
   randevents.draw(view)
   require("src.summit").draw(view)
+  require("src.skyhazards").draw(view)
 end
 
 function events.drawEmissive(view)
@@ -562,6 +568,7 @@ function events.drawEmissive(view)
     return
   end
   require("src.summit").drawEmissive(view)
+  require("src.skyhazards").drawEmissive(view)
   local t = love.timer.getTime()
   for _, a in ipairs(altars) do
     if inView(view, a.x, a.y, 40) and not a.used then
@@ -604,6 +611,7 @@ function events.addLights(lighting, view)
   end
   randevents.addLights(lighting, view)
   require("src.summit").addLights(lighting, view)
+  require("src.skyhazards").addLights(lighting, view)
   local t = love.timer.getTime()
   for _, a in ipairs(altars) do
     if inView(view, a.x, a.y, 120) and not a.used then

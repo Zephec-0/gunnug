@@ -368,17 +368,17 @@ local THEMES = {
     backDeep = { 0.30, 0.22, 0.28 },
     pillars = { { 0.2, 0.15, 0.2 }, { 0.5, 0.4, 0.45 }, { 0.35, 0.27, 0.32 } },
     space = true, -- the sky darkens into space toward the top (src.scenes.overworld)
-    monsters = { bat = 30, ghoul = 10, spitter = 14, wisp = 12 },
-    swarms = { swarmbat = 6, wisp = 3 },
+    monsters = {}, -- (none from the lists: its fliers are placed along the route, src.skygen and src.skymobs)
     breakables = { { "urn", 10 }, { "pouch", 12 }, { "lantern", 8 }, { "crate", 12 } },
     stalactites = 20,
     open = true, -- islands and spires, no caves (see src.cavegen)
+    skyRoute = true, -- a guided climb east to west, in three bands, with vents, lightning and a secret (src.skygen, src.skyhazards)
     gravity = 0.35, -- a third of the pull: high jumps, long recoil
     -- The Champion of the Heavens waits in a floating citadel of cloudstone (an oval hall entered from its lower corners)
     boss = "starwarden", -- (src.starwarden)
     arena = true,
-    arenaFrac = 0.22,
-    arenaCx = 4100,
+    arenaFrac = 0.107, -- (the far west, and high: the route climbs to it)
+    arenaCx = 1000,
     arenaWidth = 0.105,
     arenaH = 560,
     arenaShape = "round",
@@ -784,6 +784,7 @@ local function areaFor(i)
   base.prisoner = lv.theme.prisoner
   base.prisonerHeld = lv.theme.prisoner and require("src.meta").PEOPLE[lv.theme.prisoner].held or nil
   base.climb, base.open, base.profile, base.groundY, base.arenaCx = lv.theme.climb, lv.theme.open, lv.theme.profile, lv.theme.groundY, lv.theme.arenaCx
+  base.skyRoute = lv.theme.skyRoute
   if lv.theme.flood then
     -- (a lake entrance floods its whole width from the top, down into the area's own flood)
     local lake = lv.entry and lv.entry.lake and { x0 = lv.entry.x - lv.entry.half, x1 = lv.entry.x + lv.entry.half } or nil
@@ -1223,6 +1224,10 @@ function catacombs.spawnProps()
       for _, c in ipairs(info.chests) do
         local depth = math.min(1, (c[2] - a.y0) / (a.y1 - a.y0) + (lv.row - 1) * 0.35)
         chests.spawn(c[1], c[2], depth)
+      end
+      if info.sky and info.sky.wreck then
+        local c = chests.spawn(info.sky.wreck.chest[1], info.sky.wreck.chest[2], 1) -- (the wreck's: src.skyhazards)
+        c.onOpen = require("src.skyhazards").openWreckChest
       end
       local swarms = {}
       local spawned = {}

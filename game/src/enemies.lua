@@ -6443,6 +6443,7 @@ require("src.darkhunter")
 require("src.starwarden")
 require("src.needlemobs")
 require("src.quarrymobs")
+require("src.skymobs")
 require("src.ethercrawler")
 
 -- The bosses and creatures in the modules above add their drawing functions after the

@@ -34,6 +34,10 @@ local ADJECTIVES = {
   ethercrawler = { "Skittish", "Ether-Laden", "Wall-Walking" },
   darkhunter = { "Shadowed", "Twin-Gunned", "Uncanny" },
   starwarden = { "Heavenly", "Unforgiving", "Star-Crowned" },
+  cloudray = { "Soaring", "Stooping", "Pale-Winged" },
+  starmoth = { "Glittering", "Fluttering", "Lamp-Drawn" },
+  sentinel = { "Brass-Plated", "Unblinking", "Well-Aimed" },
+  windspirit = { "Gusty", "Breathless", "Bitter-Cold" },
 }
 local BOSS_ADJECTIVES = { "Mighty", "Merciless", "Terrible", "Dreaded" }
 local GENERAL_ADJECTIVES = { "Wicked", "Ornery", "Cussed" }
@@ -49,6 +53,7 @@ local OTHER = {
   lava = { "Molten Rock", { "Glowing", "Merciless", "Bubbling" } },
   acid = { "Acid", { "Hissing", "Biting", "Green" } },
   dark = { "Dark", { "Unforgiving", "Endless", "Silent" } },
+  lightning = { "Bolt of Lightning", { "Sky-Thrown", "Blinding", "Thundering" } },
   portal = { "Road Home", { "Costly", "Hasty", "Ill-Timed" } },
 }
 

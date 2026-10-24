@@ -54,6 +54,10 @@ local SIZES = {
   gargoyle = { 14, 16, false, true },
   wraith = { 12, 18, false, true }, -- the Quarry's: wraiths hang from the ceiling, crabs stand
   cairncrab = { 16, 10, true },
+  cloudray = { 26, 10 }, -- the Cloud Reaches' (src.skymobs): all of them fly
+  starmoth = { 9, 8 },
+  sentinel = { 16, 16 },
+  windspirit = { 14, 22 },
 }
 local ENTRANCE_GAP = 26 -- half-width of the opening down from the entrance chamber
 
@@ -147,7 +151,7 @@ function cavegen.generate(world, area, seed, tick)
   if climb then
     shopXs = {} -- (a climbing area has no shop: its arena's exit leads on)
   elseif open then
-    shopXs = { X0 + 700 } -- one shop, at the far end from the way in
+    shopXs = { area.shaftX0 and area.shaftX0 - 400 or X0 + 700 } -- one shop, beside the landing (else the far end)
   end
   if climb or open then
     funnel.top = math.huge
@@ -1037,8 +1041,16 @@ function cavegen.generate(world, area, seed, tick)
   carveCaves()
   placeOre()
   carveCaverns()
+  local sky -- the guided route through the Cloud Reaches (src.skygen), when the area has one
   if open then
-    carveIslands()
+    if area.skyRoute and arena then
+      sky = require("src.skygen").build({
+        world = world, rng = rng, tick = tick, X0 = X0, Y0 = Y0, X1 = X1, Y1 = Y1, BORDER = BORDER, ROCKID = ROCKID, DIRTID = DIRTID,
+        noiseSeed = noiseSeed, area = area, arena = arena, shopX = shopXs[1],
+      })
+    else
+      carveIslands()
+    end
   end
 
   local entranceX, entranceY = area.entranceX, area.entranceY
@@ -1128,6 +1140,12 @@ function cavegen.generate(world, area, seed, tick)
     shops[#shops + 1] = buildShop(sx, shopFloor)
   end
   local shop = shops[1]
+  if sky then
+    -- (the sea floor is lumpy: make sure the shop's way up through it is open)
+    for _, room in ipairs(shops) do
+      world:fillRect(room.cx - 40, Y1 - 250, room.cx + 40, room.y - 40, AIR)
+    end
+  end
   if arena and not open then
     -- A shaft from the arena floor down into each shop's ceiling, shut by an
     -- iron gate until the boss is dead (and rubble-filled later if the other
@@ -1279,7 +1297,7 @@ function cavegen.generate(world, area, seed, tick)
   end
   -- Tougher the deeper in an area, and a lot tougher with each area
   local function toughnessAt(y)
-    local depth = climb and (Y1 - y) / H or (y - Y0) / H -- (a climb gets tougher going up)
+    local depth = (climb or area.skyRoute) and (Y1 - y) / H or (y - Y0) / H -- (a climb gets tougher going up)
     return (1 + depth * 0.6 + (level - 1) * 0.55) * (area.toughMul or 1) -- (armour, src.enemies, carries the rest)
   end
   local function place(kind, spots)
@@ -1376,6 +1394,16 @@ function cavegen.generate(world, area, seed, tick)
       if buried and rng:random() < 0.35 + 0.65 * ((y - Y0) / H) then
         found = found + 1
         enemies[#enemies + 1] = { kind = "worm", x = x, y = y, toughness = toughnessAt(y) }
+      end
+    end
+  end
+
+  -- The Cloud Reaches: the layout says where each monster goes (packs of rays share a swarm, so they wake together)
+  if sky then
+    for _, m in ipairs(sky.mobs) do
+      local x, y = math.floor(m.x), math.floor(m.y)
+      if fits(m.kind, x, y) and not avoidForEnemies(x, y) then
+        enemies[#enemies + 1] = { kind = m.kind, x = x, y = y, toughness = toughnessAt(y), swarm = m.pack and (1000 + m.pack) or nil }
       end
     end
   end
@@ -1543,7 +1571,7 @@ function cavegen.generate(world, area, seed, tick)
     arena = arena, -- { x0, x1, top, floorY, cx, braziers = { {x, y} }, gates = { {x0, y0, x1, y1} } }
     crates = findFloorSpots(scaled(40), 16, avoid),
     ironCrates = findFloorSpots(scaled(12), 19, avoid),
-    chests = findFloorSpots(scaled(9), 22, avoidForEnemies), -- weapon chests, away from the entrance and shop
+    chests = sky and sky.chestSpots or findFloorSpots(scaled(9), 22, avoidForEnemies), -- weapon chests, away from the entrance and shop (the sky's are on its side branches)
     glows = findFloorSpots(scaled(area.glowCount or 150), 6, avoid), -- glowing fungus clusters
     level = level,
     enemies = enemies, -- { kind, x, y, toughness, boss }: ground monsters stand at y, the others hang from it
@@ -1552,6 +1580,7 @@ function cavegen.generate(world, area, seed, tick)
     flood = flood, -- { top, runs }: the area's flooded part (runs of 2-px cells { gy, gx0, gx1 })
     platforms = ladders, -- one-way platforms to climb by: { x0, x1, y }
     summit = summit, -- a climbing area's top: { cx, floorY, pedestals } (src.summit)
+    sky = sky, -- the Cloud Reaches' route: { vents, bells, wreck, gaps, chain, bands, floorTop } (src.skyhazards)
     exit = exit, -- a climbing area's way on: { cx, x0, x1 } (the shaft up from its arena)
     story = require("src.story").generate(world, findFloorSpots(scaled(16), 22, avoidForEnemies), level, rng, area.name), -- (src.story: signs, camps, the fallen)
     lava = lava, -- pools of molten rock (src.fluids): they don't flow

@@ -112,11 +112,13 @@ end
 -- How fast each kind's animation clock runs while it hangs about (the wing and bell beats of the game)
 local RATES = {
   bat = 18, swarmbat = 20, dreadbat = 11, wisp = 6, crow = 14, dustdevil = 8, gargoyle = 8, wraith = 5, ethercrawler = 14,
+  cloudray = 8, starmoth = 22, sentinel = 3, windspirit = 6,
   bloater = 2, queen = 2, jellyfish = 2, angler = 1, urchin = 1.5, spitter = 1, worm = 2,
 }
 -- How far the flyers bob up and down
 local BOB = {
   bat = 2, swarmbat = 2, dreadbat = 3, wisp = 3, crow = 2, dustdevil = 2, gargoyle = 2, wraith = 2,
+  cloudray = 3, starmoth = 3, sentinel = 2, windspirit = 3,
   jellyfish = 3, starwarden = 3, urchin = 2, piranha = 1, bigfish_1 = 1, bigfish_2 = 1,
 }
 
@@ -167,7 +169,7 @@ local EXTRA = {
 -- then the bosses (anything not named here is listed after, by name)
 local ENEMY_ORDER = {
   "ghoul", "bat", "swarmbat", "spitter", "hopper", "bloater", "wisp", "worm", "miner", "roller", "piranha",
-  "jellyfish", "angler", "urchin", "crow", "cragram", "dustdevil", "gargoyle", "wraith", "cairncrab", "ethercrawler", "minigolem",
+  "jellyfish", "angler", "urchin", "crow", "cragram", "dustdevil", "gargoyle", "wraith", "cairncrab", "ethercrawler", "minigolem", "cloudray", "starmoth", "sentinel", "windspirit",
   "warden", "dreadbat", "matron", "behemoth", "queen", "golem", "darkhunter", "crowrider", "starwarden",
   "bigfish_1", "bigfish_2", "bigfish_3", "bigfish",
 }

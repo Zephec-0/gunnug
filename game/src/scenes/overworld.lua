@@ -853,8 +853,8 @@ local function drawSpace(camX, camY)
     return
   end
   local W, H = config.VIRTUAL_W, config.VIRTUAL_H
-  -- 0 at the cloud floor's height, 1 at the area's top
-  local lo, hi = band.y1 - 520, band.y0 + 120
+  -- 0 a little below the cloud floor, 1 near the area's top: a long, gradual overlap of dusk and space
+  local lo, hi = band.y1 + 150, band.y0 + 250
   local function depth(wy)
     local d = math.max(0, math.min(1, (lo - wy) / (lo - hi)))
     return d * d * (3 - 2 * d)
@@ -886,8 +886,7 @@ local function drawSpace(camX, camY)
   for sy = 0, H - 1, 3 do
     local d = depth(camY + sy)
     if d > 0 then
-      local k = math.min(1, d * 1.4)
-      love.graphics.setColor(SPACE_MID[1] + (SPACE_DEEP[1] - SPACE_MID[1]) * d, SPACE_MID[2] + (SPACE_DEEP[2] - SPACE_MID[2]) * d, SPACE_MID[3] + (SPACE_DEEP[3] - SPACE_MID[3]) * d, math.min(1, k * 1.1))
+      love.graphics.setColor(SPACE_MID[1] + (SPACE_DEEP[1] - SPACE_MID[1]) * d, SPACE_MID[2] + (SPACE_DEEP[2] - SPACE_MID[2]) * d, SPACE_MID[3] + (SPACE_DEEP[3] - SPACE_MID[3]) * d, d * 0.95)
       love.graphics.rectangle("fill", 0, sy, W, 3)
     end
   end
@@ -1302,7 +1301,7 @@ local function drawMountainDepth(camX, camY, vx0, vy0, vx1, vy1)
           runX0 = nil
         end
       end
-      local y = math.floor(top / NEEDLE_BAND) * NEEDLE_BAND
+      local y = m.y0 + math.floor((top - m.y0) / NEEDLE_BAND) * NEEDLE_BAND -- (the bands start at the mountain's top, so none reaches above the summit)
       while y < bottom do
         local xa, xb = m.theme.profile(math.max(y, m.y0))
         if xa then

@@ -167,14 +167,12 @@ local function buildShape(rune)
   local function has(c, r)
     return at[r * 10 + c] == true
   end
-  local edges, degree, dirs = {}, {}, {}
+  local edges, degree = {}, {}
   local function link(c0, r0, c1, r1)
     edges[#edges + 1] = { c0, r0, c1, r1 }
-    for _, p in ipairs({ { c0, r0, c1 - c0, r1 - r0 }, { c1, r1, c0 - c1, r0 - r1 } }) do
+    for _, p in ipairs({ { c0, r0 }, { c1, r1 } }) do
       local k = p[2] * 10 + p[1]
       degree[k] = (degree[k] or 0) + 1
-      dirs[k] = dirs[k] or {}
-      dirs[k][#dirs[k] + 1] = { p[3], p[4] }
     end
   end
   for r = 1, 7 do
@@ -202,13 +200,16 @@ local function buildShape(rune)
       local k = r * 10 + c
       if has(c, r) then
         local d = degree[k] or 0
-        local keep = d ~= 2
-        if d == 2 then
-          local a, b = dirs[k][1], dirs[k][2]
-          keep = not (a[1] == -b[1] and a[2] == -b[2]) -- a bend, not a straight run
-        end
-        if keep then
-          stars[#stars + 1] = { (c - 4) * CELL, (r - 4) * CELL }
+        -- (only ends and crossings: a bend is just a turn in a line)
+        if d ~= 2 then
+          local x, y = (c - 4) * CELL, (r - 4) * CELL
+          local crowded = false
+          for _, s in ipairs(stars) do
+            crowded = crowded or (s[1] - x) ^ 2 + (s[2] - y) ^ 2 < (CELL * 1.6) ^ 2
+          end
+          if not crowded then
+            stars[#stars + 1] = { x, y }
+          end
         end
       end
     end
@@ -227,9 +228,10 @@ local function shape(i)
   return shapes[i]
 end
 
--- Where each constellation hangs: over its pedestal
+-- Where each constellation hangs: well apart, wider than the pedestals below them
+local SKY_GAP = 200
 local function skyPos(i)
-  return S.pedestals[i], S.floorY - 100
+  return S.cx + (i - 2.5) * SKY_GAP, S.floorY - 100
 end
 
 function summit.drawEmissive(view)
@@ -302,7 +304,7 @@ function summit.addLights(lighting, view)
       local cx, cy = skyPos(i)
       for n, p in ipairs(shape(i).stars) do
         local tw = 0.75 + 0.25 * math.sin(t * 2.6 + n * 1.9 + i * 0.7)
-        lighting.add(cx + p[1], cy + p[2], 62, c[1], c[2], c[3], 0.5 * k * tw * (phase ~= "idle" and 1.3 or 1), true)
+        lighting.add(cx + p[1], cy + p[2], 44, c[1], c[2], c[3], 0.22 * k * tw * (phase ~= "idle" and 1.3 or 1), true)
       end
       lighting.add(S.pedestals[i], S.floorY - 24, 56, c[1], c[2], c[3], 0.55 * k)
     end

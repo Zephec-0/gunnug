@@ -420,13 +420,21 @@ end
 
 -- The boss's floor: an open floating disc of cloudstone (flat on top, a bowl underneath), nothing round it
 function skygen.buildDisc(world, arena, ROCKID, DIRTID, noiseSeed)
-  local rx, depth = arena.w / 2, 130
+  -- (a flat slab of cloud, flat on top and underneath, with rounded ends; it cannot be dug or shot away: the fight
+  -- must not be lost to the floor)
+  local rx, depth, corner = arena.w / 2, 60, 26
   for y = arena.floorY, arena.floorY + depth do
-    local t = (y - arena.floorY) / depth
-    local half = rx * math.sqrt(math.max(0, 1 - t * t))
-    for x = math.floor(arena.cx - half), math.ceil(arena.cx + half) do
-      local n = love.math.noise(x * 0.03, y * 0.03, noiseSeed + 9)
-      world:setRaw(x, y, (y < arena.floorY + 6 or n > 0.7) and DIRTID or ROCKID)
+    local inset = 0
+    local fromTop, fromBottom = y - arena.floorY, arena.floorY + depth - y
+    local edge = math.min(fromTop, fromBottom)
+    if edge < corner then
+      inset = corner - math.sqrt(math.max(0, corner * corner - (corner - edge) ^ 2))
+    end
+    if fromTop > 0 and fromTop < corner then
+      inset = math.max(inset, corner - math.sqrt(math.max(0, corner * corner - (corner - fromTop) ^ 2)) * 0.6)
+    end
+    for x = math.floor(arena.cx - rx + inset), math.ceil(arena.cx + rx - inset) do
+      world:setRaw(x, y, materials.CLOUDSTONE)
     end
   end
   world:repaintRect(arena.cx - rx - 8, arena.floorY - 8, arena.cx + rx + 8, arena.floorY + depth + 8)

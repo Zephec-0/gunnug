@@ -58,6 +58,7 @@ local OTHER = {
   acid = { "Acid", { "Hissing", "Biting", "Green" } },
   dark = { "Dark", { "Unforgiving", "Endless", "Silent" } },
   lightning = { "Bolt of Lightning", { "Sky-Thrown", "Blinding", "Thundering" } },
+  blackhole = { "Unknown", { "Collapsing", "Unfathomable", "Light-Eating" } },
   portal = { "Road Home", { "Costly", "Hasty", "Ill-Timed" } },
 }
 

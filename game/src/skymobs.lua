@@ -66,6 +66,7 @@ D.windspirit = {
 }
 for _, k in ipairs({ "cloudray", "starmoth", "sentinel", "windspirit" }) do
   enemies.order[#enemies.order + 1] = k
+  D[k].knockMul = 0.1 -- (they hardly stagger or lift when shot: only a tenth of the shove)
 end
 
 enemies.VOICES.cloudray = { "bat_flutter", 4, 9, 0.7 }
@@ -230,6 +231,12 @@ local function drawRay(e)
   for side = -1, 1, 2 do
     color(side == f and RAY.top or RAY.dark)
     love.graphics.polygon("fill", mid + f * 3, my - 1, mid + side * wing + f * 0, my + lift, mid + side * (wing - 3) - f * 5, my + 2 + lift * 0.4, mid - f * 4, my + 2)
+  end
+  -- (gold along the wings' edges: a servant of the same house as the Champion)
+  love.graphics.setColor(0.93, 0.7, 0.22, white and 1 or 0.9)
+  love.graphics.setLineWidth(1)
+  for side = -1, 1, 2 do
+    love.graphics.line(mid + f * 3, my - 1, mid + side * wing, my + lift, mid + side * (wing - 3) - f * 5, my + 2 + lift * 0.4)
   end
   color(RAY.top)
   love.graphics.polygon("fill", mid + f * 7, my, mid, my - 3, mid - f * 5, my, mid, my + 3)

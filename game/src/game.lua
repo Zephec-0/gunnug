@@ -986,6 +986,7 @@ function game.update(dt)
         local profile = save.profile()
         local recap = deaths.recap(profile and profile.name, player.lastSource)
         recap.discoveries = discoveries
+        recap.hole = player.lastSource == "blackhole" or nil -- (the poster collapses inward)
         recap.photo = deathPhoto or nil
         recap.slot = save.activeSlot()
         toasts.clear()

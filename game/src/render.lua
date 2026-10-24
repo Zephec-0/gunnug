@@ -128,7 +128,7 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
     float disp = lens.z * lensR * lensR / (r * r + lensR * lensR * 0.12) * smoothstep(lensR * 6.0, lensR * 0.4, r);
     vec2 n = d / r;
     n.x /= aspect;
-    uv -= n * disp * 0.35;
+    uv -= n * min(disp * 0.35, r * 0.92 / max(aspect, 1.0) * 1.0);
   }
   vec2 q = uv - 0.5;
   vec3 c = Texel(tex, uv).rgb;
@@ -137,7 +137,7 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
     vec2 d2 = uv - lens.xy;
     d2.x *= aspect;
     float r2 = length(d2);
-    c *= smoothstep(lensR * 0.55, lensR * 0.8, r2);
+    c *= smoothstep(lensR * 0.6, lensR * 0.7, r2);
   }
 
   // Sun shafts: the bright parts smeared toward the sun

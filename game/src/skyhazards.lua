@@ -97,7 +97,7 @@ local function updateLightning(dt, player)
   if player.dead then
     return
   end
-  local onRoute = py < S.floorTop - 90 -- (not down on the sea floor, nor in the wreck)
+  local onRoute = py < S.floorTop - 90 and require("src.enemies").skyFight() < 0.3 -- (not down on the sea floor, nor in the wreck, nor during the Champion's fight)
   local wait = onRoute and interval(px)
   strikeTimer = strikeTimer - dt
   if strikeTimer <= 0 then

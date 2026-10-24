@@ -43,7 +43,7 @@ end
 function weather.update(dt, surface)
   stateTimer = stateTimer - dt
   if stateTimer <= 0 then
-    if state == "clear" and love.math.random() < 0.5 then
+    if false then -- (no dust storms any more: the surface only has its wind)
       state, stateTimer = "dust", 25 + love.math.random() * 25
     else
       state, stateTimer = "clear", 40 + love.math.random() * 50

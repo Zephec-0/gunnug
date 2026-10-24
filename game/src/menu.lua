@@ -2312,6 +2312,77 @@ local function drawPoster(cx, cy, w, h, noun, photo, scale, spin, alpha)
   love.graphics.pop()
 end
 
+-- A poster whose middle is being drawn into a black hole (what the hole took the hunter): the poster is drawn on
+-- a canvas, and the canvas is drawn through a mesh whose centre samples from further out, so the middle of the
+-- paper is pinched away to a point, with a burning black disc where it was
+local pinchMesh
+local pinchCanvas
+local function drawCollapsingPoster(cx, cy, w, h, noun, photo, scale, spin, alpha, k)
+  local m = math.floor(10 * u)
+  local cw, ch = w + 2 * m, h + 2 * m
+  if not pinchCanvas or pinchCanvas:getWidth() ~= cw or pinchCanvas:getHeight() ~= ch then
+    pinchCanvas = love.graphics.newCanvas(cw, ch)
+  end
+  love.graphics.push("all")
+  love.graphics.setCanvas(pinchCanvas)
+  love.graphics.clear(0, 0, 0, 0)
+  love.graphics.origin()
+  drawPoster(cw / 2, ch / 2, w, h, noun, photo, 1, 0, 1)
+  love.graphics.pop()
+  local NX, NY = 30, 36
+  local verts = {}
+  for gy = 0, NY do
+    for gx = 0, NX do
+      local fx, fy = gx / NX, gy / NY
+      local sx, sy = (fx - 0.5) * cw, (fy - 0.5) * ch
+      local r = math.sqrt((sx / (w * 0.5)) ^ 2 + (sy / (h * 0.5)) ^ 2)
+      -- (the middle samples from further out, so what is there shrinks to the centre; a spiral turn as it goes)
+      local pull = k * 1.9 * math.exp(-(r / 0.6) ^ 2)
+      local s = 1 + pull
+      local ang = k * 1.1 * math.exp(-(r / 0.8) ^ 2)
+      local ca, sa = math.cos(ang), math.sin(ang)
+      local tx, ty = sx * s, sy * s
+      tx, ty = tx * ca - ty * sa, tx * sa + ty * ca
+      verts[#verts + 1] = { sx, sy, 0.5 + tx / cw, 0.5 + ty / ch, 1, 1, 1, alpha }
+    end
+  end
+  if not pinchMesh then
+    local idx = {}
+    for gy = 0, NY - 1 do
+      for gx = 0, NX - 1 do
+        local a = gy * (NX + 1) + gx + 1
+        idx[#idx + 1], idx[#idx + 2], idx[#idx + 3] = a, a + 1, a + NX + 2
+        idx[#idx + 1], idx[#idx + 2], idx[#idx + 3] = a, a + NX + 2, a + NX + 1
+      end
+    end
+    pinchMesh = love.graphics.newMesh((NX + 1) * (NY + 1), "triangles", "dynamic")
+    pinchMesh:setVertexMap(idx)
+  end
+  pinchMesh:setVertices(verts)
+  pinchMesh:setTexture(pinchCanvas)
+  pinchCanvas:setWrap("clampzero", "clampzero")
+  love.graphics.push()
+  love.graphics.translate(cx, cy)
+  love.graphics.rotate(0.025 + spin)
+  love.graphics.scale(scale, scale)
+  love.graphics.setColor(1, 1, 1, alpha)
+  love.graphics.draw(pinchMesh, 0, 0)
+  -- the hole: black, a burning rim, a thin bright disc across it
+  local R = (3 + 9 * k) * u
+  love.graphics.setColor(0, 0, 0, alpha)
+  love.graphics.circle("fill", 0, 0, R)
+  love.graphics.setBlendMode("add")
+  love.graphics.setLineWidth(math.max(1, u * 0.6))
+  for q = 0, 3 do
+    love.graphics.setColor(1, 0.55 + 0.08 * q, 0.2 + 0.1 * q, (0.55 - 0.1 * q) * alpha)
+    love.graphics.circle("line", 0, 0, R + q * u * 0.7)
+  end
+  love.graphics.setColor(1, 0.7, 0.35, 0.5 * alpha)
+  love.graphics.rectangle("fill", -R * 1.9, -math.max(1, u * 0.3), R * 3.8, math.max(1, u * 0.6))
+  love.graphics.setBlendMode("alpha")
+  love.graphics.pop()
+end
+
 -- The ghost merchant (src.events) --------------------------------------------------------
 
 PAGES.ghost = function()
@@ -2733,7 +2804,11 @@ PAGES.recap = function()
     else
       scale = 1 - 0.05 * math.exp(-ti * 12) * math.cos(ti * 28) -- (a little rebound)
     end
-    drawPoster(posterCx, posterCy, posterW, posterH, d.noun, d.photo, scale, spin, alpha)
+    if d.hole then
+      drawCollapsingPoster(posterCx, posterCy, posterW, posterH, d.noun, d.photo, scale, spin, alpha, math.min(0.9, math.max(0, ti) * 0.2 + 0.04))
+    else
+      drawPoster(posterCx, posterCy, posterW, posterH, d.noun, d.photo, scale, spin, alpha)
+    end
     -- Dust thrown out from its edges as it hits
     if ti >= 0 and ti < 0.45 then
       for i = 1, 18 do

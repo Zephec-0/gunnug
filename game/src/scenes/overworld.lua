@@ -240,19 +240,21 @@ local function buildBackground(eclipse)
       local dx, dy = x - SUN_X, y - SUN_Y
       local d = math.sqrt(dx * dx + dy * dy)
       if d < 30 and eclipse then
-        sky:setPixel(x, y, 0.012, 0.008, 0.025, 1) -- the sun swallowed: a black disc (the sky champion's fall, see src.starwarden)
+        sky:setPixel(x, y, 0, 0, 0, 1) -- the sun swallowed: the black hole the sky champion left (src.starwarden)
       elseif d < 30 then
         local core = 1 - d / 30 * 0.12
         sky:setPixel(x, y, 1, 0.74 * core, 0.44 * core, 1) -- the setting sun
       else
-        local glow = math.max(0, 1 - d / 220) ^ 2 * (eclipse and 0.14 or 0.45)
-        if eclipse and d < 52 then
-          -- ...with a white-gold corona hugging it, and a thin bright ring of falling light just outside
-          local corona = math.max(0, 1 - (d - 30) / 22) ^ 2
-          local ring = math.max(0, 1 - math.abs(d - 37) / 2.2)
-          glow = glow + corona * 0.85 + ring * 0.6
+        local glow = math.max(0, 1 - d / 220) ^ 2 * (eclipse and 0.05 or 0.45)
+        if eclipse then
+          -- ...a burning orange rim hugging it, and a thin disc of falling light seen edge-on across it
+          local rim = math.max(0, 1 - (d - 30) / 5) ^ 2
+          local ring = math.max(0, 1 - math.abs(d - 36) / 2.4)
+          local disc = (math.abs(dy) < 2.6 and d > 30 and d < 95) and (1 - math.abs(dy) / 2.6) * math.max(0, 1 - (d - 30) / 65) or 0
+          glow = glow + rim * 0.9 + ring * 0.35 + disc * 0.8
         end
-        local cr, cg, cb = math.min(1, r + glow), math.min(1, g + glow * 0.6), math.min(1, b + glow * 0.3)
+        local dk = eclipse and 0.42 or 1 -- (the whole sky is darker now)
+        local cr, cg, cb = math.min(1, r * dk + glow), math.min(1, g * dk + glow * (eclipse and 0.55 or 0.6)), math.min(1, b * dk * (eclipse and 1.1 or 1) + glow * (eclipse and 0.25 or 0.3))
         -- Long thin clouds, lit from below by the sun
         if y > 50 and y < 190 then
           local c = love.math.noise(x * 0.004, y * 0.05, 3.3)
@@ -769,6 +771,13 @@ function overworld.update(dt, player, game, effects)
   end
   render.mixFx(overworld.fx, SURFACE_FX, catacombs.theme(catacombs.levelAt(py, px) or 1).fx, t)
   weather.apply(overworld.fx, overworld.ambient, 1 - t)
+  if require("src.meta").isSkyBeaten() then
+    -- (the sun is gone: the surface is darker for good)
+    for i = 1, 3 do
+      overworld.ambient[i] = overworld.ambient[i] * (1 - 0.3 * (1 - t))
+    end
+    overworld.fx.vig = (overworld.fx.vig or 0.34) + 0.12 * (1 - t)
+  end
 end
 
 local function flicker(seed)
@@ -859,16 +868,24 @@ local function drawSpace(camX, camY)
     local d = math.max(0, math.min(1, (lo - wy) / (lo - hi)))
     return d * d * (3 - 2 * d)
   end
-  if depth(camY + H) <= 0 then
+  local fight = require("src.enemies").skyFight() -- (1 while the Champion fights: the sky around the hall is only space)
+  if depth(camY + H) <= 0 and fight <= 0.01 then
     return
   end
   local t = love.timer.getTime()
+  if fight > 0.01 then
+    love.graphics.setColor(SPACE_DEEP[1], SPACE_DEEP[2], SPACE_DEEP[3], math.min(1, fight * 1.15))
+    love.graphics.rectangle("fill", 0, 0, W, H)
+  end
   -- Far cloud banks drifting, lit from the dusk below
   for layer = 1, 3 do
+    if fight > 0.8 then
+      break
+    end
     local p = 0.1 + layer * 0.08
     local baseY = math.floor((band.y1 - 340 + layer * 60 - camY) * p + H * (1 - p) * 0.6)
     local drift = t * (3 + layer * 2)
-    local a = 0.16 + layer * 0.06
+    local a = (0.16 + layer * 0.06) * (1 - fight)
     local shade = 0.5 + layer * 0.12
     for sx = 0, W, 4 do
       local wx = sx + camX * p + drift
@@ -912,7 +929,7 @@ local function drawSpace(camX, camY)
     local sx = (hx * (W + 400) - ox) % (W + 400) - 200
     local sy = math.floor(hy * 900 - oy)
     if sx >= 0 and sx < W and sy >= 0 and sy < H then
-      local d = depth(camY + sy)
+      local d = math.max(depth(camY + sy), fight)
       if d > 0.05 then
         local tw = 0.6 + 0.4 * math.sin(t * (1 + hx * 2) + i)
         local big = i % 17 == 0
@@ -931,9 +948,9 @@ local function drawSpace(camX, camY)
   if hole then
     local k = math.min(1, hole.t / 8)
     for sy = 0, H - 1, 3 do
-      local d = depth(camY + sy)
+      local d = math.max(depth(camY + sy), fight)
       if d > 0 then
-        love.graphics.setColor(0.2, 0.02, 0.3, d * 0.3 * k)
+        love.graphics.setColor(0.02, 0.0, 0.05, d * 0.5 * k) -- (darker, with only a trace of violet)
         love.graphics.rectangle("fill", 0, sy, W, 3)
       end
     end
@@ -959,6 +976,9 @@ end
 function overworld.drawBackground(camX, camY)
   if camY > CAVE_TOP - 200 then
     return -- the view is all underground; the backdrop (drawDecor) covers it
+  end
+  if require("src.meta").isSkyBeaten() then
+    require("src.render").setLens(SUN_X, SUN_Y, 30 / 0.7, 0.4) -- (the sun is a black hole: the light bends round it)
   end
   love.graphics.setColor(1, 1, 1)
   -- (stretched across if the view has grown wider than when it was painted)

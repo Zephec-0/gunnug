@@ -171,11 +171,7 @@ local function newSequence(sw, n, len)
   end
 end
 
-local TURN_BANNERS = {
-  { "The Divine Orbs", "His orbs break away and hunt. Gravity wells open, and Star Guardians shield him" },
-  { "The Celestial Rays", "Pillars of light fall where you stand. Do not stay still" },
-  { "The Sun", "All of it, at once. He burns" },
-}
+local TURN_NAMES = { "The Divine Orbs", "The Celestial Rays", "The Sun" }
 
 -- A turn begins at its gate
 local function startTurn(e, sw, ph)
@@ -192,8 +188,9 @@ local function startTurn(e, sw, ph)
   sw.mode = "gate"
   sw.nodes = nodePositions(sw, e.arena, T.stars[ph])
   newSequence(sw, T.stars[ph], T.order[ph])
-  local n = TURN_BANNERS[ph - 1]
-  require("src.hud").showBanner(n and n[1] or "Ascension", n and n[2] or "He cannot be hurt. Shoot the stars in the order they light")
+  if TURN_NAMES[ph - 1] then
+    require("src.hud").showBanner(TURN_NAMES[ph - 1], nil) -- (the only words: which turn it is)
+  end
   audio.playAt("sw_hum", sw.home[1], sw.home[2], 0.8, 1)
 end
 
@@ -249,7 +246,6 @@ local function breakGate(e, sw)
   for _, nd in ipairs(sw.nodes) do
     effects.ring(nd.x, nd.y, 40, STAR[nd.kind].c)
   end
-  require("src.hud").showBanner("The Gate Breaks", "He can be hurt")
   sw.swoopT, sw.rayT = 4, 3
 end
 
@@ -318,7 +314,6 @@ local function startDying(e, sw)
   audio.playAt("sw_grow", cx, cy, 1, 0.5)
   audio.playAt("dh_voice", cx, cy, 1, 0.45)
   shake(0.8)
-  require("src.hud").showBanner("It Falls", "A sun, dying")
 end
 
 def.filter = function(e, amount)
@@ -353,7 +348,6 @@ def.filter = function(e, amount)
     e.hp = math.ceil(e.maxHp * (T.lines[1] + T.lines[2]) / 2)
     sw.g2 = true
     summonGuardian(e, sw, 1.3)
-    require("src.hud").showBanner("Another Star Answers", "Break it")
     return 0
   end
   if sw.ph == 4 then
@@ -609,7 +603,6 @@ local function beginInterlude(e, sw)
   audio.playAt("sw_vanish", cx, cy, 1, 1)
   shake(0.6)
   effects.ring(cx, cy, 90, { 1, 0.95, 0.7 })
-  require("src.hud").showBanner("The Heavens Call", "He slips out of the world. His servants come in his stead")
   local at = a and a.cx or cx
   local w = a and a.w or 700
   local ground = a and a.floorY or cy + 200
@@ -848,6 +841,17 @@ local function updateStar(e, dt, world, player, px, py)
   cx, cy = ncx, ncy
 
   updateOrbs(e, sw, dt, player, px, py)
+
+  -- A sun sheds light: motes drift off him, slowly, more of them as he burns
+  if sw.alpha > 0.3 then
+    local rate = 3 + 26 * sw.form
+    if love.math.random() < dt * rate then
+      local ang = love.math.random() * math.pi * 2
+      local r = (22 + love.math.random() * 36) * sw.size
+      local ox, oy = origin(e, sw)
+      effects.particle(ox + math.cos(ang) * r, oy + math.sin(ang) * r * 0.8, math.cos(ang) * (8 + love.math.random() * 14), math.sin(ang) * 8 - 10 - love.math.random() * 12, 2.2 + love.math.random() * 1.6, { 1, 0.9 - 0.2 * love.math.random(), 0.55 }, 0, true)
+    end
+  end
 
   if sw.intro > 0 then
     sw.intro = sw.intro - dt
@@ -1233,8 +1237,6 @@ local function drawStarGlow(e)
   -- a sun's glow, growing as he burns, and a corona of rays turning slowly
   love.graphics.setColor(1, 0.9, 0.5, (0.2 + 0.25 * f) * pulse * a)
   love.graphics.circle("fill", hx, hy, (26 + 20 * f) * size)
-  love.graphics.setColor(1, 0.85, 0.5, (0.07 + 0.12 * f) * a)
-  love.graphics.circle("fill", hx, hy, (80 + 90 * f) * size)
   love.graphics.setColor(1, 0.95, 0.8, 0.35 * a + 0.4 * f)
   love.graphics.circle("fill", hx, hy, (7 + 10 * f) * size)
   if f > 0.25 or collapse > 0 then
@@ -1260,8 +1262,6 @@ local function drawStarGlow(e)
   end
   -- a shield of light while a guardian burns (and a flash on it when a shot rings off)
   if guardUp(sw) then
-    love.graphics.setColor(1, 0.92, 0.6, 0.12 + 0.5 * (sw.shieldFlash or 0))
-    love.graphics.circle("fill", hx, hy, 58 * size)
     love.graphics.setColor(1, 0.95, 0.7, 0.55 + 0.4 * (sw.shieldFlash or 0))
     love.graphics.setLineWidth(2)
     love.graphics.circle("line", hx, hy, 58 * size)
@@ -1272,9 +1272,7 @@ local function drawStarGlow(e)
   end
   -- a gate's veil: the same shield, softer and bluer, while the stars are shot
   if sw.mode == "gate" and not sw.dying then
-    love.graphics.setColor(0.7, 0.8, 1, 0.1 + 0.05 * math.sin(t * 4))
-    love.graphics.circle("fill", hx, hy, 54 * size)
-    love.graphics.setColor(0.8, 0.88, 1, 0.5)
+    love.graphics.setColor(0.8, 0.88, 1, 0.35 + 0.15 * math.sin(t * 4))
     love.graphics.circle("line", hx, hy, 54 * size)
   end
   -- The orbs' glow, and a ring closing on one that charges
@@ -1326,6 +1324,13 @@ end
 
 -- Bolts, orbs, rays and wells, every frame --------------------------------------------------------------------
 
+local fightK = 0 -- how much of the sky's background has dropped away for the fight (0-1)
+
+-- Called by the sky's background: 0 normally, 1 while he fights, and a darkness that stays once he has fallen
+function enemies.skyFight()
+  return fightK
+end
+
 local function arenaOf()
   for _, e in ipairs(enemies.all()) do
     if e.kind == "starwarden" and e.arena then
@@ -1340,14 +1345,46 @@ enemies.afterUpdate = function(dt, world, player, px, py)
     prevUpdate(dt, world, player, px, py)
   end
   local floorY
+  local engaged = false
   for _, e in ipairs(enemies.all()) do
     if e.kind == "starwarden" then
       e.beamWorld = world
       floorY = e.arena and e.arena.floorY
+      engaged = e.sw ~= nil and not e.dead
     end
   end
+  fightK = fightK + ((engaged and 1 or (hole and 0.6 or 0)) - fightK) * math.min(1, dt * 1.2)
   if hole then
     hole.t = hole.t + dt
+    -- it settles, a jump above the floor (so the hunter can reach it, and fall in)
+    local fy = hole.floorY or hole.y
+    if hole.t > 1.5 and hole.y < fy - 100 then
+      hole.y = math.min(fy - 100, hole.y + (24 + (fy - 100 - hole.y) * 0.4) * dt)
+    end
+    local r = 4 + 20 * math.min(1, hole.t / 4)
+    if not player.dead then
+      local pcx, pcy = player:center()
+      local dx, dy = hole.x - pcx, hole.y - pcy
+      local d = hypot(dx, dy)
+      local R = 300
+      if d < R and d > 1 then
+        local k = (1 - d / R) ^ 1.5 * math.min(1, hole.t / 3)
+        local pull = 1300 * k
+        player.body.vx = player.body.vx + dx / d * pull * dt
+        player.body.vy = player.body.vy + dy / d * pull * dt
+        player.jumping = false
+      end
+      if d < r * 0.8 + 3 and hole.t > 2.5 then
+        -- it takes him: no second wind, no health to spend
+        player.lastSource, player.lastEnemy = "blackhole", nil
+        player.hp = 0
+        player.dead = true
+        audio.play("death")
+        audio.playAt("sw_grow", hole.x, hole.y, 0.8, 0.35)
+        require("src.playeranim").onDeath(player, dx >= 0 and 1 or -1)
+        effects.ring(hole.x, hole.y, 60, { 1, 0.6, 0.3 }, true)
+      end
+    end
     -- (a faint pull on loose light: sparks fall toward it)
     if love.math.random() < dt * 14 then
       local a = love.math.random() * math.pi * 2
@@ -1408,6 +1445,19 @@ enemies.afterUpdate = function(dt, world, player, px, py)
         for _ = 1, 10 do
           effects.particle(r.x + (love.math.random() - 0.5) * r.w, floorY - 2, (love.math.random() - 0.5) * 140, -40 - love.math.random() * 120, 0.5, { 1, 0.9, 0.5 }, 240, true)
         end
+        -- a burst of cloud-dust along the floor, sparks and slow motes of light, and rings of shock
+        for _ = 1, 22 do
+          local dir = love.math.random() < 0.5 and -1 or 1
+          effects.particle(r.x + dir * love.math.random() * 8, floorY - 2, dir * (60 + love.math.random() * 220), -10 - love.math.random() * 70, 0.7 + love.math.random() * 0.6, { 0.92, 0.88, 0.78 }, 160)
+        end
+        for _ = 1, 26 do
+          effects.particle(r.x + (love.math.random() - 0.5) * 30, floorY - 4, (love.math.random() - 0.5) * 60, -30 - love.math.random() * 110, 1.2 + love.math.random() * 1.2, { 1, 0.92, 0.6 }, -40, true)
+        end
+        for _ = 1, 8 do
+          effects.particle(r.x, floorY - 6, (love.math.random() - 0.5) * 380, -60 - love.math.random() * 160, 0.45, { 1, 1, 0.9 }, 520, true)
+        end
+        effects.ring(r.x, floorY - 4, 46, { 1, 0.92, 0.65 })
+        effects.ring(r.x, floorY - 4, 90, { 1, 0.85, 0.5 })
       end
     end
     if r.age >= r.warn and r.age < r.warn + r.life and not r.hit and not player.dead then
@@ -1459,22 +1509,56 @@ enemies.afterEmissive = function(view)
     prevEmissive(view)
   end
   local t = love.timer.getTime()
+  local camX, camY = require("src.camera").offset()
+  local nearWell, nearD
   for _, wl in ipairs(enemies.wells) do
     local k = math.min(1, wl.life / 1.2, (wl.max - wl.life) / 0.8 + 0.1)
-    -- a black heart, a violet rim, and rings falling in
-    love.graphics.setColor(0.02, 0.01, 0.05, 0.95 * k)
+    -- a black heart with a burning violet-orange rim, a thin disc turning round it, light streaming in
+    love.graphics.setColor(0, 0, 0, 1)
     love.graphics.circle("fill", wl.x, wl.y, 9 * k)
     love.graphics.setBlendMode("add")
-    love.graphics.setColor(0.6, 0.35, 1, 0.55 * k)
-    love.graphics.circle("line", wl.x, wl.y, 10 * k)
+    for q = 0, 3 do
+      love.graphics.setColor(1 - 0.35 * q / 3, 0.5 - 0.1 * q, 0.35 + 0.2 * q, (0.65 - 0.14 * q) * k)
+      love.graphics.setLineWidth(1.5)
+      love.graphics.circle("line", wl.x, wl.y, (9 + q * 1.4) * k)
+    end
+    love.graphics.setLineWidth(1)
+    for q = 0, 30 do
+      local ang = t * 2.2 + q * 0.21
+      local rr = (12 + q * 0.7) * k
+      love.graphics.setColor(1, 0.6, 0.5, 0.55 * (1 - q / 32) * k)
+      love.graphics.points(wl.x + math.cos(ang) * rr * 1.5, wl.y + math.sin(ang) * rr * 0.34)
+      love.graphics.points(wl.x + math.cos(ang + 3.14) * rr * 1.5, wl.y + math.sin(ang + 3.14) * rr * 0.34)
+    end
+    -- the pull, as arms of light curling in
+    for arm = 0, 3 do
+      for q = 0, 14 do
+        local u = q / 14
+        local ang = arm * 1.571 + t * 0.8 + u * 3.2
+        local rr = wl.r * (1 - u) * 0.75
+        love.graphics.setColor(0.7, 0.5, 1, 0.22 * u * k)
+        love.graphics.points(wl.x + math.cos(ang) * rr, wl.y + math.sin(ang) * rr)
+      end
+    end
     for r = 0, 2 do
       local f = ((t * 0.6 + r / 3) % 1)
-      love.graphics.setColor(0.55, 0.4, 1, 0.3 * (1 - f) * k)
+      love.graphics.setColor(0.55, 0.4, 1, 0.22 * (1 - f) * k)
       love.graphics.circle("line", wl.x, wl.y, wl.r * (1 - f))
     end
-    love.graphics.setColor(0.5, 0.3, 0.9, 0.12 * k)
-    love.graphics.circle("fill", wl.x, wl.y, 26)
     love.graphics.setBlendMode("alpha")
+    local d = hypot(wl.x - camX - 320, wl.y - camY - 180)
+    if not nearD or d < nearD then
+      nearWell, nearD = wl, d
+    end
+    if love.math.random() < 0.5 then
+      local ang = love.math.random() * math.pi * 2
+      local r0 = 30 + love.math.random() * 60
+      effects.particle(wl.x + math.cos(ang) * r0, wl.y + math.sin(ang) * r0, -math.cos(ang) * r0 * 1.1 - math.sin(ang) * 30, -math.sin(ang) * r0 * 1.1 + math.cos(ang) * 30, 0.55, { 0.85, 0.6, 1 }, 0, true)
+    end
+  end
+  if nearWell and not hole then
+    local k = math.min(1, nearWell.life / 1.2, (nearWell.max - nearWell.life) / 0.8 + 0.1)
+    require("src.render").setLens(nearWell.x - camX, nearWell.y - camY, 11 / 0.7, 0.7 * k) -- (the light bends round the nearest one)
   end
   love.graphics.setBlendMode("add")
   for _, s in ipairs(bolts) do
@@ -1612,7 +1696,11 @@ enemies.afterLights = function(lighting, view)
   end
   for _, wl in ipairs(enemies.wells) do
     local k = math.min(1, wl.life / 1.2, (wl.max - wl.life) / 0.8 + 0.1)
-    lighting.add(wl.x, wl.y, 70, 0.55, 0.3, 1, 0.6 * k)
+    lighting.add(wl.x, wl.y, 90, 0.5, 0.3, 1, 0.45 * k)
+    for q = 0, 2 do
+      local a = t * 2.4 + q * 2.094
+      lighting.add(wl.x + math.cos(a) * 14, wl.y + math.sin(a) * 7, 46, 1, 0.55, 0.3, 0.55 * k)
+    end
   end
   if arena then
     for _, r in ipairs(rays) do
@@ -1673,7 +1761,7 @@ def.onDeath = function(e)
     vanishMinions(e.sw)
   end
   local cx, cy = origin(e, e.sw)
-  hole = { x = cx, y = cy, t = 0 }
+  hole = { x = cx, y = cy, t = 0, floorY = e.arena and e.arena.floorY or nil }
   audio.playAt("sw_grow", cx, cy, 1, 0.4)
   audio.setBoss(false)
 end

@@ -1929,7 +1929,7 @@ function cavegen.generate(world, area, seed, tick)
   -- Dressing for the areas without grass (src.decor): moss, roots, drips, rubble, coral and the like, baked in last
   -- so it follows the finished terrain
   if area.decor then
-    require("src.decor").bake(world, area.decor, seed, X0 + BORDER, Y0 + 40, X1 - BORDER, Y1 - BORDER, { [ROCKID] = true, [DIRTID] = true }, { water, lava, acid }, POOL_CELL, flood, function(x, y)
+    require("src.decor").bake(world, area.decor, seed, X0 + BORDER, Y0 + 40, X1 - BORDER, Y1 - BORDER, { [ROCKID] = true, [DIRTID] = true, [materials.CLOUDSTONE] = true }, { water, lava, acid }, POOL_CELL, flood, function(x, y)
       return inProfile(x, y, 2)
     end, tick)
   end

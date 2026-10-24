@@ -60,6 +60,7 @@ D.starguardian = {
 }
 for _, k in ipairs({ "gildedlens", "cometling", "stormcloud", "starguardian" }) do
   enemies.order[#enemies.order + 1] = k
+  D[k].knockMul = 0.1 -- (they hardly stagger or lift when shot: only a tenth of the shove)
 end
 enemies.VOICES.gildedlens = { "clank", 5, 10, 0.5 }
 enemies.VOICES.cometling = { "wisp_crackle", 3, 8, 0.5 }
@@ -290,36 +291,45 @@ local function updateCloud(e, dt, world, player, px, py)
 end
 
 local function drawCloud(e)
+  -- a thundercloud of the Champion's own make: cream puffs like his arms, gold-rimmed, with a star for a heart
   local b = e.body
   local white = e.flash > 0
   local mid, my = b.x + b.w / 2, b.y + b.h / 2
   local lit = (e.flashT or 0) > 0
-  local function color(r, g, bl, a)
-    love.graphics.setColor(white and 1 or r, white and 1 or g, white and 1 or bl, a or 1)
+  local function color(c, a)
+    love.graphics.setColor(white and 1 or c[1], white and 1 or c[2], white and 1 or c[3], a or 1)
   end
-  for i, p in ipairs({ { -11, 2, 7 }, { -4, -3, 9 }, { 5, -2, 8 }, { 12, 3, 6 }, { 0, 3, 10 } }) do
-    color(0.25, 0.27, 0.42)
-    love.graphics.circle("fill", mid + p[1], my + p[2] + 2 + math.sin(e.phase + i) * 0.6, p[3])
+  local puffs = { { -12, 3, 6.5 }, { -6, -3, 7.5 }, { 3, -4, 7.5 }, { 11, 1, 7 }, { 0, 4, 8.5 }, { 7, 5, 6 }, { -9, 6, 5.5 } }
+  for i, p in ipairs(puffs) do
+    local bob = math.sin(e.phase + i * 1.3) * 0.7
+    color({ 0.62, 0.68, 0.9 })
+    love.graphics.circle("fill", mid + p[1] + 1, my + p[2] + 1.5 + bob, p[3])
+    color(lit and { 1, 1, 0.95 } or { 0.97, 0.94, 0.86 })
+    love.graphics.circle("fill", mid + p[1], my + p[2] + bob, p[3] - 0.5)
+    color({ 1, 1, 0.97 }, 0.9)
+    love.graphics.circle("fill", mid + p[1] - p[3] * 0.3, my + p[2] + bob - p[3] * 0.35, p[3] * 0.4)
   end
-  for i, p in ipairs({ { -11, 2, 7 }, { -4, -3, 9 }, { 5, -2, 8 }, { 12, 3, 6 }, { 0, 3, 10 } }) do
-    color(lit and 0.9 or 0.46, lit and 0.92 or 0.5, lit and 1 or 0.7)
-    love.graphics.circle("fill", mid + p[1] - 1, my + p[2] + math.sin(e.phase + i) * 0.6, p[3] - 1.5)
-  end
-  color(1, 0.95, 0.6)
-  rect(mid - 4, my + 1, 2, 2)
-  rect(mid + 3, my + 1, 2, 2)
+  -- the gold rim along its lower edge, and a four-point star in the middle
+  color({ 0.93, 0.7, 0.22 })
+  love.graphics.setLineWidth(1)
+  love.graphics.arc("line", "open", mid, my + 3, 15, 0.25, math.pi - 0.25)
+  local r = 5 + (lit and 2 or 0)
+  color({ 0.55, 0.38, 0.12 })
+  love.graphics.polygon("fill", mid, my - r - 3, mid + 2, my - 2, mid + r + 3, my, mid + 2, my + 2, mid, my + r + 3, mid - 2, my + 2, mid - r - 3, my, mid - 2, my - 2)
+  color(lit and { 1, 1, 1 } or { 1, 0.9, 0.5 })
+  love.graphics.polygon("fill", mid, my - r - 1, mid + 1.5, my - 1.5, mid + r + 1, my, mid + 1.5, my + 1.5, mid, my + r + 1, mid - 1.5, my + 1.5, mid - r - 1, my, mid - 1.5, my - 1.5)
   if lit then
-    color(1, 1, 1)
-    love.graphics.line(mid, my + 8, mid - 3, my + 13, mid + 2, my + 16)
+    -- a bolt jumps from it
+    color({ 1, 1, 1 })
+    love.graphics.line(mid, my + 8, mid - 3, my + 14, mid + 2, my + 18, mid - 1, my + 24)
   end
 end
 
 local function glowCloud(e)
-  if (e.flashT or 0) > 0 then
-    local b = e.body
-    love.graphics.setColor(0.7, 0.8, 1, 0.5)
-    love.graphics.circle("fill", b.x + b.w / 2, b.y + b.h / 2, 22)
-  end
+  local b = e.body
+  local mid, my = b.x + b.w / 2, b.y + b.h / 2
+  love.graphics.setColor(1, 0.9, 0.5, (e.flashT or 0) > 0 and 0.7 or 0.25)
+  love.graphics.circle("fill", mid, my, (e.flashT or 0) > 0 and 16 or 7)
 end
 
 -- The star guardian ------------------------------------------------------------------------------------------------

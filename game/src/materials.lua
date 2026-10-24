@@ -283,6 +283,20 @@ materials.defs[24] = {
   cloud = true,
 }
 
+-- The Champion's floor: looks as the clouds do, but nothing breaks it
+materials.CLOUDSTONE = 26
+materials.defs[26] = {
+  name = "cloudstone",
+  solid = true,
+  hardness = math.huge,
+  density = 0.9,
+  color = { 0.79, 0.85, 0.97 },
+  topColor = { 0.96, 0.97, 1.0 },
+  shadow = { 0.45, 0.55, 0.80 },
+  variation = 0.02,
+  cloud = true,
+}
+
 -- Bone buried in the desert's sandstone: skeletons you can see in the cut of the ground
 materials.defs[25] = {
   name = "fossil",

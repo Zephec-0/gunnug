@@ -295,6 +295,73 @@ end
 
 -- Unlocks ----------------------------------------------------------------------------
 
+-- Feats: some things stay out of the pool until the profile has done something
+-- (lifetime stats). Common and uncommon ones join the pool by themselves once the
+-- feat is done; rare and epic ones then still have to be taught as usual.
+--   { stat, n }  stat = elites | kills | bosses | bought (shop purchases) | gold
+meta.FEATS = {
+  vampiric = { "elites", 6 },
+  explosive = { "elites", 4 },
+  cluster = { "elites", 8 },
+  executioner = { "elites", 10 },
+  singularity = { "elites", 14 },
+  siphon = { "elites", 12 },
+  napalm = { "elites", 6 },
+  stormround = { "elites", 8 },
+  killswitch = { "elites", 16 },
+  fang = { "elites", 10 },
+  piercing = { "kills", 150 },
+  grapeshot = { "kills", 300 },
+  longrifle = { "kills", 500 },
+  hemorrhage = { "kills", 250 },
+  gambler = { "kills", 400 },
+  spectral = { "kills", 200 },
+  rampant = { "kills", 350 },
+  quadburst = { "kills", 300 },
+  reloadengine = { "kills", 450 },
+  tempest = { "bosses", 2 },
+  phoenix = { "bosses", 3 },
+  voidround = { "bosses", 4 },
+  omen = { "bosses", 5 },
+  warlord = { "bosses", 3 },
+  pick = { "bought", 4 },
+  treasurebarrel = { "bought", 12 },
+  gilded = { "bought", 8 },
+  holsterloader = { "bought", 10 },
+  magnet = { "gold", 1500 },
+  huntersscope = { "gold", 3000 },
+  demosleeve = { "kills", 600 }
+}
+local FEAT_TEXT = {
+  elites = "Slay %d elites", kills = "Defeat %d monsters", bosses = "Defeat %d bosses",
+  bought = "Buy %d things from shops", gold = "Gather %d gold",
+}
+
+local function featProgress(stat, p)
+  if stat == "elites" then
+    return meta.trophyTotal()
+  end
+  return p and p.stats[stat] or 0
+end
+
+-- Whether the feat for an item is done (true if it has none)
+function meta.featMet(id, p)
+  local f = meta.FEATS[baseId(id)]
+  if not f then
+    return true
+  end
+  return featProgress(f[1], p or profile()) >= f[2]
+end
+
+-- "Slay 6 elites (2/6)", or nil if it has no feat
+function meta.featText(id)
+  local f = meta.FEATS[baseId(id)]
+  if not f then
+    return nil
+  end
+  return string.format(FEAT_TEXT[f[1]], f[2]) .. " (" .. math.min(f[2], math.floor(featProgress(f[1], profile()))) .. "/" .. f[2] .. ")"
+end
+
 -- Whether something can drop, sit in a shop or come out of a chest
 function meta.isUnlocked(category, id, p)
   p = p or profile()
@@ -309,7 +376,7 @@ function meta.isUnlocked(category, id, p)
     return meta.STARTER_WEAPONS[id] == true
   end
   local def = items.defs[id]
-  return not def or def.rarity == "common" or def.rarity == "fused"
+  return not def or ((def.rarity == "common" or def.rarity == "uncommon" or def.rarity == "fused") and meta.featMet(id, p))
 end
 
 -- Whether the hunter has met it (collected, or seen lying about)
@@ -354,7 +421,7 @@ function meta.teach(category, id)
     return false
   end
   local cost = meta.teachCost(category, id)
-  if p.marks < cost then
+  if p.marks < cost or not meta.featMet(id, p) then
     return false
   end
   p.marks = p.marks - cost
@@ -454,6 +521,31 @@ end
 function meta.marks()
   local p = profile()
   return p and p.marks or 0
+end
+
+-- The sky's champion has fallen (src.starwarden): the sun is eclipsed for good, and the epic items join the pool
+function meta.isSkyBeaten()
+  local p = profile()
+  return p ~= nil and (p.stats.skyBeaten or 0) > 0
+end
+
+function meta.skyBeaten()
+  local p = profile()
+  if not p then
+    return
+  end
+  if (p.stats.skyBeaten or 0) == 0 then
+    for _, id in ipairs(items.order) do
+      local def = items.defs[id]
+      if def.rarity == "epic" then
+        p.unlocked[def.kind] = p.unlocked[def.kind] or {}
+        p.unlocked[def.kind][id] = true
+      end
+    end
+  end
+  p.stats.skyBeaten = (p.stats.skyBeaten or 0) + 1
+  save.touch()
+  save.flush()
 end
 
 -- Banks marks at once (they survive a death a second later)

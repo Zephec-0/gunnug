@@ -54,6 +54,7 @@ local BORDER = { 0.55, 0.48, 0.42 }
 local DANGER = { 0.95, 0.38, 0.32 }
 local RARITY = {
   common = { 0.72, 0.70, 0.68 },
+  uncommon = { 0.50, 0.85, 0.50 },
   rare = { 0.45, 0.72, 1.0 },
   cursed = { 0.95, 0.30, 0.32 },
   fused = { 0.25, 1.0, 0.82 },
@@ -1101,7 +1102,9 @@ local function drawDetail(entry, profile, cat, x, y, w, h)
   if locked then
     -- Locked: it never drops or sits in a shop until the Gunsmith learns it
     local text
-    if not (profile.camp and profile.camp.gunsmith) then
+    if entry.id and cat.id ~= "weapon" and not meta.featMet(entry.id, profile) then
+      text = "Locked. It joins the pool once you: " .. meta.featText(entry.id) .. "."
+    elseif not (profile.camp and profile.camp.gunsmith) then
       text = "Locked. It won't turn up in shops or chests until someone who knows guns learns to make it."
     elseif seen then
       text = "Locked. Teach the Gunsmith at camp to make it: " .. meta.teachCost(cat.id, entry.id) .. " marks."
@@ -1901,7 +1904,7 @@ PAGES.camp = function()
     local seen = meta.isSeen(e.category, e.id)
     local cost = meta.teachCost(e.category, e.id)
     local focused = widget({ id = "camp:teach:" .. e.category .. ":" .. e.id, x = cx, y = cy, w = cell, h = cell, activate = function()
-      if not seen or marks < cost then
+      if not seen or marks < cost or not meta.featMet(e.id) then
         audio.play("deny")
         return
       end
@@ -1932,8 +1935,11 @@ PAGES.camp = function()
   if e then
     local seen = meta.isSeen(e.category, e.id)
     local cost = meta.teachCost(e.category, e.id)
-    shadowPrint(seen and e.name or "???", gx, dy, F.body, seen and TEXT or FAINT)
-    if seen then
+    local feat = e.category ~= "weapon" and not meta.featMet(e.id) and meta.featText(e.id) or nil
+    shadowPrint((seen or feat) and e.name or "???", gx, dy, F.body, (seen or feat) and TEXT or FAINT)
+    if feat then
+      wrapped((e.desc or "") .. "  Unlocks once you: " .. feat .. ".", gx, dy + F.body:getHeight() + u, gw, F.small, DANGER)
+    elseif seen then
       markPrice(tostring(cost), gx + gw, dy, F.body, marks >= cost and meta.SIGIL_COLOR or DANGER)
       local text = (e.desc or "") .. (marks >= cost and "" or "  (Not enough marks.)")
       wrapped(text, gx, dy + F.body:getHeight() + u, gw, F.small, DIM)

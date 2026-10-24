@@ -823,7 +823,7 @@ local function breakProp(p)
     pickups.dropGold(x, y, love.math.random(gold[1], gold[2]))
   end
   if p.def.itemChance then
-    pickups.maybeDropItem(x, y, p.def.itemChance * 0.5) -- (half what the props list)
+    pickups.maybeDropItem(x, y, p.def.itemChance * 0.3) -- (under a third of what the props list)
   end
 end
 

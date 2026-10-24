@@ -375,6 +375,19 @@ local THEMES = {
     stalactites = 20,
     open = true, -- islands and spires, no caves (see src.cavegen)
     gravity = 0.35, -- a third of the pull: high jumps, long recoil
+    -- The Champion of the Heavens waits in a floating citadel of cloudstone (an oval hall entered from its lower corners)
+    boss = "starwarden", -- (src.starwarden)
+    arena = true,
+    arenaFrac = 0.22,
+    arenaCx = 4100,
+    arenaWidth = 0.105,
+    arenaH = 560,
+    arenaShape = "round",
+    platformStyle = "edges",
+    noBraziers = true,
+    defy = "Heavens",
+    arenaBanner = { "The Citadel of Stars", "The Champion of the Heavens guards the way. The gods do not like to be defied" },
+    arenaWon = { "The Champion Has Fallen", "The heavens are silent. Something in the sky has changed" },
     parallax = 2,
     track = 2,
   },
@@ -516,7 +529,7 @@ local firstArea, baseSeed
 local deadline = 0 -- os.clock() time the current slice of work must stop at
 local announced = {} -- the areas whose banner has been shown
 -- The bosses whose fights have a theme of their own (src.audio); the Dark Hunter's is played by src.darkhunter
-local BOSS_MUSIC = { queen = true, golem = true, bigfish = true }
+local BOSS_MUSIC = { queen = true, golem = true, bigfish = true } -- (the Dark Hunter and the Champion play their own through src.audio.setBoss)
 
 function catacombs.count()
   return #levels
@@ -647,6 +660,22 @@ function catacombs.start(w, first, seed, tiers)
           require("src.pickups").dropGlyph(e.body.x + e.body.w / 2 - 14, e.body.y + e.body.h / 2 - 6, lv.theme.glyph, -30, -80)
         end
         catacombs.openGates(lv)
+        if lv.theme.boss == "starwarden" then
+          -- The champion of the heavens is down: the world changes (the sun is eclipsed, the epic items turn up)
+          require("src.meta").skyBeaten()
+          local items = require("src.items")
+          local epics = {}
+          for _, id in ipairs(items.order) do
+            if items.defs[id].rarity == "epic" then
+              epics[#epics + 1] = id
+            end
+          end
+          for k = 1, 2 do
+            if #epics > 0 then
+              require("src.pickups").dropItem(e.body.x + e.body.w / 2 + (k - 1.5) * 14, e.body.y + e.body.h / 2, items.new(epics[love.math.random(#epics)]), (k - 1.5) * 50, -110)
+            end
+          end
+        end
       end
     end
   end
@@ -2168,25 +2197,12 @@ end
 
 function catacombs.drawEmissive(view)
   fluids.drawEmissive(view)
-  -- (the far scenery's glow is cut out round the creatures and the hunter, so they stay readable against it)
-  local ents
-  local function entities()
-    if ents == nil then
-      ents = require("src.lighting").entityMask(function()
-        require("src.enemies").draw(view)
-        local p = require("src.game").player()
-        if p then
-          p:draw()
-        end
-      end) or false
-    end
-    return ents or nil
-  end
+  -- (no creatures are passed to the far glows below: like the old mine's lanterns they lie over them, instead of leaving a dark cut-out and rim round each one)
   for _, lv in ipairs(levels) do
     if lv.theme.parallax == 9 and lv.theme.profile and inArea(lv, view) then
       local a = lv.info and lv.info.arena
       parallax.drawSkyGlow(view.x, view.y, view.x + view.w, view.y + view.h, require("src.lighting").mask(), lv.theme.profile,
-        a and lv.theme.arenaDecor and { a.x0 - 4, a.top - 4, a.x1 + 4, a.floorY + 4 } or nil, entities())
+        a and lv.theme.arenaDecor and { a.x0 - 4, a.top - 4, a.x1 + 4, a.floorY + 4 } or nil)
     end
   end
   -- The old mine's far lanterns (their flames and glow, bright over the lit scene, hidden behind rock)
@@ -2205,7 +2221,18 @@ function catacombs.drawEmissive(view)
     if lv.theme.arenaParallax and inArea(lv, view) then
       local bx0, by0, bx1, by1 = catacombs.arenaBox(lv.index)
       if bx0 and view.x + view.w > bx0 and view.x < bx1 and view.y + view.h > by0 and view.y < by1 then
-        bossbg.drawGlow(view, lv.theme.arenaParallax, { bx0, by0, bx1, by1 }, require("src.lighting").mask(), entities())
+        bossbg.drawGlow(view, lv.theme.arenaParallax, { bx0, by0, bx1, by1 }, require("src.lighting").mask())
+      end
+    end
+  end
+  -- The sky's door: one rune for each glyph it wants, dark until the hunter has brought it, then lit
+  for _, lv in ipairs(levels) do
+    local held = lv.info and lv.info.arena and lv.info.arena.held
+    if held and view.x + view.w > held.x0 - 60 and view.x < held.x1 + 60 and view.y + view.h > held.y0 - 80 and view.y < held.y1 + 40 then
+      local n = #glyphs.order
+      local gx0 = math.floor((held.x0 + held.x1) / 2 - (n * 11 - 4) / 2)
+      for k, id in ipairs(glyphs.order) do
+        glyphs.draw(id, gx0 + (k - 1) * 11, held.y0 - 13, 1, glyphs.has(id) and 1 or 0.14)
       end
     end
   end

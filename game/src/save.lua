@@ -120,7 +120,7 @@ local function fresh()
     created = os.time(),
     lastPlayed = os.time(),
     playtime = 0, -- seconds in a run (menus and pauses don't count)
-    stats = { runs = 0, deaths = 0, gold = 0, kills = 0, bosses = 0, deepest = 0, marksEarned = 0 },
+    stats = { runs = 0, deaths = 0, gold = 0, kills = 0, bosses = 0, deepest = 0, marksEarned = 0, skyBeaten = 0 },
     found = {},
     -- What carries over between runs (design doc §11a-iv, -v; src.meta):
     marks = 0, -- the permanent currency, spent at camp

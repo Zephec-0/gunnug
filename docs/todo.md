@@ -304,3 +304,48 @@ Check items off as they land; append new ones at the bottom.
 - [x] Item tier badge is a roman numeral (I-IV) centred along the slot's bottom instead of plus signs
 - [x] Display settings: Screen is a 3-way choice (Windowed / Windowed fullscreen / Fullscreen) replacing the two toggles; F11 still toggles fullscreen
 - [x] Windowed mode is a real window (two thirds of the desktop, centred) when the saved size would fill the screen; changing the window mode keeps every canvas's picture (settings.keepingCanvases), which fixes missing UI after switching
+
+## Next up (2026-10-23, from a full playthrough; not started)
+Priority order roughly as listed. Items 1 and 7 are the biggest.
+
+1. [~] **Lag: distance-based simulation limit.** (done: pickups and gas beyond three screens; not found: a single culprit, see notes below) Lag came from keeping everything on screen/active: enemy info, items, fluid sims. Only simulate within about 3 screens of the player; beyond that reduce to a cheap form or despawn (enemies, drops, fluids, gas, lights). Seen while finishing the main dungeon: the water + golem dungeons lagged badly and it only stopped after climbing the mountain dungeon. Profile those two first (see perf-profiling notes).
+2. [x] **Drops and rarity rebalance.** (headless-tested: roll distribution; not played)
+   - Fewer item and attachment drops overall (first dungeon was trivially cleared by drops).
+   - Rare/epic rarity scaled way down (about half of drops were rares). Ties into the open per-tier weighting item in Batch 4 (2026-10-18).
+   - Split some tiers up for more variety and challenge.
+   - Nerf self-heal / life-steal items; nerf multiplicative damage items.
+3. [x] **DPS check / scarecrow target:** no life steal (or any heal-on-hit) from hitting it.
+4. [~] **Background light fix everywhere.** (Queen arena, Big Fish arena and mountain sky-hole glows no longer cut out round creatures, like the mine's lanterns; the other parallax lights (fungus caps, lava falls, crystal spires, Drowned Halls light) are still dim: they are drawn under the lighting, not emissive. Not played.) The main-cave lighting fix needs applying to all background light sources: the Queen arena gas at the bottom, the water/fish-fight lights, and others (audit every scenery/ambient light).
+5. [x] **Unlock gates for ammo/attachments:** lock some behind kill-X-elites, buying certain items, performing N in-game actions, etc. (see docs/unlocks.md for current rules).
+6. [x] **Enemy scaling by areas completed:** currently looks like only health scales. Add native armor to enemies and scale armor more than health, so life steal stays weak later.
+7. [~] **Sky dungeon (second biggest).** (first pass built, see notes below; polish later) Discuss first, in full: the concept, entrance, look of the area, final boss. Then build the boss and game adjustments after the discussion. Best done after the rest of this list.
+8. [~] **Hidden secrets (found, not told):** (motherlode done; airship waits for the sky design)
+   - A large gold deposit between dungeons, reachable only by a lot of digging.
+   - An airship in the sky with a special unlock, reachable only with a good gun to jump up to it.
+9. [x] **Random events fixes:**
+   - Spawn bug: one spawned inside the walls at the end of a dungeon. Spawn them near the horizontal middle of the dungeon so they are easy to reach and not missed.
+   - Fold the ghost and perk/curse events into the random event pool (they predate it and live outside it).
+
+### Notes on the 2026-10-23 batch (items 2-6; headless-loaded, rarity roll distribution and armour numbers checked, Queen/Fish/Summit arenas drawn; not played)
+- Rarity: new Uncommon tier (green) between Common and Rare: 35 uncommon (most from rare/common), 30 common, 25 rare, 4 cursed, 5 epic. Weights common 100 / uncommon 36 / rare 7 / cursed 4 / epic 0.8 (about 68 / 24 / 5 / 2.6 / 0.5 % with everything unlocked). Uncommon is free from the start like common and can be fused up.
+- Drops: monster item drop 5% -> 2.5%, props 0.5x -> 0.3x of their listed chance, weapon chests per area 12 -> 9.
+- Damage: item damage bonuses now add (slug +50% and hollow point +25% = +75%); fused +N is additive for damage (slug +4: x3.5, was x7.6).
+- Life steal: scarecrow gives none; leech 0.25 hp per hit, at most 1 hp / 4 s (2 hp burst), vamp kills heal 1 less (Vampiric 3 -> 2), both weaker by 20% per area of the enemy's depth.
+- Armour: monsters get flat armour = (toughness - 1) x 1.6 per direct hit (min 30% of the hit goes through; fire, poison, bleed ignore it; bosses and the dummy have none). Area health growth cut from 0.9 to 0.55 per area. Knobs: enemies.ARMOR_PER_TOUGHNESS / ARMOR_FLOOR, cavegen toughnessAt.
+- Feats (meta.FEATS, docs/unlocks.md): ~30 items need a lifetime stat first (elites slain, monsters killed, bosses, shop purchases, gold); shown in the compendium and the Gunsmith's page. New stat: bought.
+
+### Notes on the second 2026-10-23 batch (items 1, 8, 9; headless-tested, not played)
+- Random events: every kind now looks for its spot in the middle half of the dungeon's width, on a floor near the hunter's depth, out of sight and never in a boss arena or shop (tested: 0.67-0.72 of the width in the Hollows); the cramped-cave nook fallback is held to the same band. Events stay up 240 s for the stage kinds. The violet altar (perk + curse) and the ghost merchant are now ordinary random events (src.randevents `external`, their logic still in src.events): altars are no longer placed in every dungeon, the ghost no longer has its own timer.
+- Lag: config.FAR_X/FAR_Y = 3 screens. Loose gold further than that is dropped, other pickups freeze, gas further than that is let go (every 2 s). Enemies already slept beyond 760 px, water and gas are only stepped round the camera. Headless timing found no distance-related cost: empty areas run 7-9 ms a frame whether or not the rest of the world is generated, so the lag in the water and golem dungeons probably comes from the fights themselves (water cells, golemlings, debris, lights). Needs a profile from a real run there (F3 overlay or a saved timing log).
+- Secret: a motherlode of gold (~35 px radius, about 300 gold) is buried in the middle of the rock between the two post-Queen paths, in both pairs (areas 4/5 and the two below). No sign of it above ground.
+- [x] Airship: built, see the sky dungeon notes
+- [ ] Item 4 remainder: the other parallax lights (fungus caps, lava falls, crystal spires, Drowned Halls light) are drawn under the lighting and look dim; give them emissive glow like the mine's lanterns
+
+### Sky dungeon, first pass (2026-10-23; headless-tested with screenshots of every turn, the eclipse and the airship; not played)
+Design decisions: the premise is that the hunter is defying the gods, and the last boss is the gods' champion. Beating him does not end the game: it changes the world a little and unlocks things. The airship is a secret over the desert between the hub and the sky, in the middle of nothing.
+- Door: the Needle summit's sky door now shows one rune per glyph above it, dark until you hold that glyph, lit when you do (catacombs.drawEmissive).
+- Arena: the Cloud Reaches get a floating citadel of cloudstone (src.cavegen: block, oval hall, two mouths with cloud slabs; iron ring seals them in the fight) with a pedestal at its middle. Entered like the Needle's hall; theme fields boss/arena/arenaCx in catacombs.lua. Dev panel F2 > Boss arenas > 11 teleports there.
+- Boss, src/starwarden.lua: The Champion of the Heavens (hp 420 x toughness, about 1260). Turn 1 The Clock Turns: a hand of light sweeps round him, star bolts fan out. Turn 2 The Heavens Bend: two hands, gravity wells (enemies.wells) that bend every shot (src.bullets steer) and pull the hunter. Turn 3 The Stars Align: untouchable; three stars light in an order to shoot back (3, 4, 5 long rounds), a wrong one repeats it and sends bolts, each round done is a blow (the last kills). Placeholder pixel art and sounds, hunter's boss theme.
+- Victory (meta.skyBeaten, stats.skyBeaten): the overworld sun becomes a black eclipse with a corona (the sky and sunlight go cold), all epic items join the pool, two epics drop. The title screen is unchanged.
+- Airship (src/airship.lua): at x 2300, deck y -90 (about 600 px over the desert, out of normal jump reach: only recoil jumps get up), solid planks and cabin, striped balloon drawn behind, lanterns. A chest in the cabin holds the Skybound perk (new Epic: two air jumps, +10% jump) once, then gold and two rare/epic items.
+- [ ] Polish: boss pixel art and animation (wings, halo), real sounds and music, sky monsters with an identity (cloud rays, star-moths, brass sentinels), the three-band sky (golden cloud sea, ruins, star-dark), a door updraft, the title-screen eclipse, the ending banner, tune hp and hand speed in play; check the hand is dodgeable and the airship reachable with each gun

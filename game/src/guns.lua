@@ -366,17 +366,26 @@ function Gun:stats()
       st[k] = st[k] * (self.rolls[k] or 1)
     end
   end
+  -- Damage from fitted items adds up (+50% and +25% make +75%, not +87%);
+  -- the other stats still multiply
+  local damageBonus = 0
   for i = 1, self.slotCount do
     local item = self.slots[i]
     if item then
       for _, k in ipairs(MULTIPLIED) do
-        st[k] = st[k] * (item.mods[k] or 1)
+        if k == "damage" then
+          local m = item.mods.damage or 1
+          damageBonus = damageBonus + (m > 1 and (m - 1) or (m - 1) * 0.8)
+        else
+          st[k] = st[k] * (item.mods[k] or 1)
+        end
       end
       for _, k in ipairs(ADDED) do
         st[k] = st[k] + (item.mods[k] or 0)
       end
     end
   end
+  st.damage = st.damage * math.max(0.3, 1 + damageBonus)
   -- Order of operations: where in the slots each order-sensitive effect sits
   -- (first slot that carries it), so src.bullets can tell which happens first
   local order = {}

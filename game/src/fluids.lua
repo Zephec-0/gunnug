@@ -1672,6 +1672,15 @@ function fluids.update(dt, player, enemies)
   accPurge = accPurge + dt
   if accPurge > 2 then
     accPurge = 0
+    -- Gas beyond three screens is let go (the vents and the Queen make more when the hunter is back)
+    local fx, fy = floor(config.FAR_X / C), floor(config.FAR_Y / C)
+    local cx0, cy0 = floor(px / C), floor(py / C)
+    for k in pairs(gas) do
+      local x, y = coords(k)
+      if x < cx0 - fx or x > cx0 + fx or y < cy0 - fy or y > cy0 + fy then
+        setGas(k, nil)
+      end
+    end
     for k in pairs(smoke) do
       local x, y = coords(k)
       if x < gx0 - 20 or x > gx1 + 20 or y < gy0 - 20 or y > gy1 + 20 then

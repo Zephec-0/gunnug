@@ -27,11 +27,13 @@
 local items = {}
 
 items.rarities = {
-  common = { name = "Common", weight = 70, price = { 20, 35 }, border = { 0.55, 0.52, 0.50 } },
-  rare = { name = "Rare", weight = 24, price = { 45, 70 }, border = { 0.35, 0.65, 1.0 } },
-  cursed = { name = "Cursed", weight = 6, price = { 35, 55 }, border = { 0.85, 0.15, 0.20 } },
+  common = { name = "Common", weight = 100, price = { 20, 35 }, border = { 0.55, 0.52, 0.50 } },
+  -- Between common and rare: situational or sturdier effects, free from the start like common ones
+  uncommon = { name = "Uncommon", weight = 36, price = { 32, 52 }, border = { 0.45, 0.78, 0.45 } },
+  rare = { name = "Rare", weight = 7, price = { 55, 85 }, border = { 0.35, 0.65, 1.0 } },
+  cursed = { name = "Cursed", weight = 4, price = { 35, 55 }, border = { 0.85, 0.15, 0.20 } },
   -- The rarest of all, above rare: so far only the Akimbo perk
-  epic = { name = "Epic", weight = 2, price = { 90, 130 }, border = { 0.72, 0.42, 1.0 } },
+  epic = { name = "Epic", weight = 0.8, price = { 90, 130 }, border = { 0.72, 0.42, 1.0 } },
   -- Made only in the fuser (src.fuser), never found: weight 0
   fused = { name = "Fused", weight = 0, price = { 80, 110 }, border = { 0.25, 1.0, 0.82 } },
 }
@@ -127,8 +129,8 @@ items.defs = {
     short = "VA",
     color = { 0.75, 0.15, 0.30 },
     rarity = "rare",
-    desc = "Killing an enemy with these heals you 3 HP. -10% damage.",
-    mods = { vamp = 3, damage = 0.9 },
+    desc = "Killing an enemy with these heals you 2 HP (less against deep monsters). -10% damage.",
+    mods = { vamp = 2, damage = 0.9 },
   },
   gilded = {
     kind = "ammo",
@@ -708,6 +710,11 @@ for _, id in ipairs(batch2.order) do
   items.order[#items.order + 1] = id
 end
 
+-- Uncommon, the middle tier (some moved down from rare, some up from common)
+for _, id in ipairs({ "incendiary", "frost", "poison", "splitting", "boomerang", "acid", "concussive", "burst", "backblast", "charge", "laser", "bayonet", "scavenger", "quickdraw", "hollowpoint", "leechround", "lucky", "brass", "rangefinder", "sawnstock", "pick", "rubber", "dumdum", "piercing", "shock", "sticky", "spectral", "jets", "scope", "stormround", "marked", "napalm", "hemorrhage", "grapeshot", "rebound" }) do
+  items.defs[id].rarity = "uncommon"
+end
+
 -- Levels (design doc §5.7c): two of the same common item fuse into one a
 -- level up, "+1" to "+4". An item at +N works as N+1 copies fitted together
 -- (fusing a +a with a +b makes +(a+b+1)), so its multiplied stats are raised
@@ -722,7 +729,7 @@ end
 -- Whether an item can be levelled up by fusing it with itself
 function items.levelable(id)
   local def = items.defs[id]
-  return def ~= nil and def.rarity == "common"
+  return def ~= nil and (def.rarity == "common" or def.rarity == "uncommon")
 end
 
 -- The id a levelled item is recorded under ("slug+2"); plain ids for level 0
@@ -736,7 +743,11 @@ end
 local function levelMods(mods, copies)
   local out = {}
   for k, v in pairs(mods) do
-    out[k] = isMultiplied[k] and v ^ copies or v * copies
+    if k == "damage" and v > 1 then
+      out[k] = 1 + (v - 1) * copies -- (a damage bonus adds up; it doesn't compound to the Nth power)
+    else
+      out[k] = isMultiplied[k] and v ^ copies or v * copies
+    end
   end
   return out
 end
@@ -792,7 +803,7 @@ function items.random(random)
   end
   local roll = random() * total
   local chosen
-  for _, r in ipairs({ "common", "rare", "cursed", "epic", "fused" }) do
+  for _, r in ipairs({ "common", "uncommon", "rare", "cursed", "epic", "fused" }) do
     if byRarity[r] then
       chosen = chosen or byRarity[r]
       roll = roll - items.rarities[r].weight

@@ -675,9 +675,15 @@ bossbg.styles = { deep = deepStyle, quarryhall = quarryHallStyle, acid = acidSty
 -- What glows in the arena's far layers, drawn bright over the lit scene in the emissive pass, with
 -- the terrain mask hiding it wherever rock is in front. view = { x, y, w, h }, box = the arena's
 -- box, mask = the frame's terrain mask (nil: draw nothing).
+local clearImage -- a 1x1 image with nothing in it: "no creatures" for the glow shader
 function bossbg.drawGlow(view, kind, box, mask, ents)
   if not mask then
     return
+  end
+  if not ents then
+    -- (like the old mine's far lanterns: the glow lies over the creatures, with no dark cut-out or rim round them)
+    clearImage = clearImage or love.graphics.newImage(love.image.newImageData(1, 1))
+    ents = clearImage
   end
   if glowShader == nil then
     local ok, sh = pcall(love.graphics.newShader, [[
@@ -704,7 +710,7 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
   love.graphics.push("all")
   love.graphics.setShader(glowShader)
   glowShader:send("mask", mask)
-  glowShader:send("ents", ents or mask)
+  glowShader:send("ents", ents)
   glowShader:send("canvasSize", { mask:getDimensions() })
   love.graphics.setBlendMode("add")
   if kind == "deep" then

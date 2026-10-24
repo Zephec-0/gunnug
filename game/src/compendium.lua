@@ -117,7 +117,7 @@ local RATES = {
 -- How far the flyers bob up and down
 local BOB = {
   bat = 2, swarmbat = 2, dreadbat = 3, wisp = 3, crow = 2, dustdevil = 2, gargoyle = 2, wraith = 2,
-  jellyfish = 3, urchin = 2, piranha = 1, bigfish_1 = 1, bigfish_2 = 1,
+  jellyfish = 3, starwarden = 3, urchin = 2, piranha = 1, bigfish_1 = 1, bigfish_2 = 1,
 }
 
 -- What each kind does while it waits, on top of its animation clock (e is the specimen, t the time).
@@ -133,6 +133,7 @@ local IDLE = {
     e.fpose = { nf = { -2, 0 }, ff = { 10, 0 }, t = t, bob = math.floor(math.sin(t * 1.6) + 0.5) }
   end,
   queen = false,
+  starwarden = false,
   spitter = false,
   bloater = false,
   behemoth = false,
@@ -167,7 +168,7 @@ local EXTRA = {
 local ENEMY_ORDER = {
   "ghoul", "bat", "swarmbat", "spitter", "hopper", "bloater", "wisp", "worm", "miner", "roller", "piranha",
   "jellyfish", "angler", "urchin", "crow", "cragram", "dustdevil", "gargoyle", "wraith", "cairncrab", "ethercrawler", "minigolem",
-  "warden", "dreadbat", "matron", "behemoth", "queen", "golem", "darkhunter", "crowrider",
+  "warden", "dreadbat", "matron", "behemoth", "queen", "golem", "darkhunter", "crowrider", "starwarden",
   "bigfish_1", "bigfish_2", "bigfish_3", "bigfish",
 }
 

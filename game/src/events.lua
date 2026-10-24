@@ -60,9 +60,7 @@ end
 -- Called once for each area as its props are placed. elites: the area's elite monsters.
 function events.spawnArea(w, info, index, tier, elites, chests)
   world = w
-  for _, s in ipairs(info.altars or {}) do
-    altars[#altars + 1] = { x = s[1], y = s[2], used = false, t = love.math.random() * 6 }
-  end
+  -- (the violet altars and the ghost are random events now: see randevents.external below)
   if info.vault then
     local v = info.vault
     local vault = { x = v.x, y = v.y, door = v.door, room = v.room, open = false, area = index }
@@ -182,20 +180,7 @@ function events.update(dt, player, areaIndex)
       table.remove(relics, i)
     end
   end
-  -- the ghost: turns up once, near the hunter, then fades after a while
-  if not ghost and not ghostDone and areaIndex and meta.profileActive() then
-    ghostTimer = ghostTimer - dt
-    if ghostTimer <= 0 then
-      ghostDone = true
-      if love.math.random() < 0.6 then
-        local x, y = ghostSpot(px, py)
-        if x then
-          ghost = { x = x, y = y, life = 110, age = 0, offers = rollOffers() }
-          effects.popup(x, y - 24, "...", { 0.7, 0.85, 1 })
-        end
-      end
-    end
-  end
+  -- the ghost (a random event, see below) fades after a while
   if ghost then
     ghost.age = ghost.age + dt
     ghost.life = ghost.life - dt
@@ -212,6 +197,48 @@ function events.update(dt, player, areaIndex)
     end
   end
 end
+
+-- The altar and the ghost are drawn and answered to here, but turn up through the random events
+-- (src.randevents picks them with the rest, in the middle of the dungeon)
+randevents.external.altar = {
+  start = function(x, gy)
+    local a = { x = x, y = gy, used = false, t = love.math.random() * 6 }
+    altars[#altars + 1] = a
+    effects.popup(x, gy - 30, "A violet flame stirs...", { 0.85, 0.6, 1 })
+    return a
+  end,
+  alive = function(a)
+    return not a.used
+  end,
+  finish = function(a)
+    if not a.used then
+      for i = #altars, 1, -1 do
+        if altars[i] == a then
+          table.remove(altars, i)
+        end
+      end
+    end
+  end,
+}
+
+randevents.external.ghost = {
+  start = function(x, gy)
+    if ghost then
+      return nil
+    end
+    ghost = { x = x, y = gy, life = 110, age = 0, offers = rollOffers() }
+    effects.popup(x, gy - 24, "...", { 0.7, 0.85, 1 })
+    return ghost
+  end,
+  alive = function(g)
+    return ghost == g
+  end,
+  finish = function(g)
+    if ghost == g then
+      ghost = nil
+    end
+  end,
+}
 
 -- For tests: the lists, and a ghost summoned beside the hunter at once
 function events.debug()

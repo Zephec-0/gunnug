@@ -248,6 +248,13 @@ function pickups.update(dt, world, player)
     local p = list[i]
     p.age = p.age + dt
     local dx, dy = px - p.x, py - p.y
+    if dx > config.FAR_X or dx < -config.FAR_X or dy > config.FAR_Y or dy < -config.FAR_Y then
+      -- Beyond three screens: loose gold is let go, everything else lies frozen where it is
+      if p.kind == "gold" then
+        table.remove(list, i)
+      end
+      goto continue
+    end
     local dist = math.sqrt(dx * dx + dy * dy)
     local taken = false
     -- Only gold is collected by walking near; items need E
@@ -294,6 +301,7 @@ function pickups.update(dt, world, player)
       p.vx, p.vy = p.vx * (1 - 4 * dt), p.vy * (1 - 4 * dt)
       p.x, p.y = p.x + p.vx * dt, p.y + p.vy * dt
     end
+    ::continue::
   end
 end
 

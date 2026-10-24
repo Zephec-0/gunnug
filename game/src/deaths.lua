@@ -33,6 +33,7 @@ local ADJECTIVES = {
   cairncrab = { "Rubble-Backed", "Pinching", "Rock-Slinging" },
   ethercrawler = { "Skittish", "Ether-Laden", "Wall-Walking" },
   darkhunter = { "Shadowed", "Twin-Gunned", "Uncanny" },
+  starwarden = { "Heavenly", "Unforgiving", "Star-Crowned" },
 }
 local BOSS_ADJECTIVES = { "Mighty", "Merciless", "Terrible", "Dreaded" }
 local GENERAL_ADJECTIVES = { "Wicked", "Ornery", "Cussed" }

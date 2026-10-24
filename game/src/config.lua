@@ -9,6 +9,11 @@ local config = {
   VIRTUAL_W = 640,
   VIRTUAL_H = 360,
 
+  -- How far from the hunter anything is still kept alive: three screens each way. What lies
+  -- further out is frozen or let go (loose gold, gas), so a long run carries no weight behind it
+  FAR_X = 1920,
+  FAR_Y = 1080,
+
   -- Screen-space UI (HUD, item bar, text) is sized in units of
   -- render.scale * UI_SCALE window pixels, independent of pixel density.
   UI_SCALE = 1.6,

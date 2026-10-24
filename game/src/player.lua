@@ -454,7 +454,8 @@ function Player:onKill(enemy, fx)
   if self.dead then
     return
   end
-  self:heal(perks.sum("killHeal") + (fx and fx.vamp or 0))
+  -- (ammo life steal fades against deep, armoured monsters; perks don't)
+  self:heal(perks.sum("killHeal") + math.max((fx and fx.vamp or 0) > 0 and 1 or 0, math.floor((fx and fx.vamp or 0) / (1 + 0.2 * (((enemy and enemy.level) or 1) - 1)) + 0.5)))
   if perks.has("momentum") then
     self.streak = math.min(5, self.streak + 1)
     self.streakTimer = 4

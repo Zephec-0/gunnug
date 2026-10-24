@@ -281,6 +281,8 @@ local function finish(b, w, x, y, forward)
   return true
 end
 
+local LEECH_BANK, LEECH_RATE = 2, 0.25 -- life steal heals at most 1 hp per 4 s on average, 2 in a burst
+
 -- What a bullet does to an enemy it hits, on top of the damage itself
 local function hurtEnemy(b, enemy)
   local fx = b.fx
@@ -319,12 +321,20 @@ local function hurtEnemy(b, enemy)
   if has(fx, "bleed") then
     enemies.poison(enemy, 2.5 * fx.bleed, 8)
   end
-  if has(fx, "leech") and bullets.player and not bullets.player.dead then
-    bullets.player.leechAcc = (bullets.player.leechAcc or 0) + 0.5 * fx.leech
-    if bullets.player.leechAcc >= 1 then
-      bullets.player.leechAcc = bullets.player.leechAcc - 1
-      bullets.player:heal(1)
+  if has(fx, "leech") and bullets.player and not bullets.player.dead and not enemy.def.dummy then
+    -- Life steal is slow: a quarter heart-point a hit, a trickle at most, and
+    -- weaker against deep (armoured) monsters
+    local p = bullets.player
+    local now = love.timer.getTime()
+    p.leechBank = math.min(LEECH_BANK, (p.leechBank or LEECH_BANK) + (now - (p.leechClock or now)) * LEECH_RATE)
+    p.leechClock = now
+    p.leechAcc = (p.leechAcc or 0) + 0.25 * fx.leech / (1 + 0.2 * ((enemy.level or 1) - 1))
+    if p.leechAcc >= 1 and p.leechBank >= 1 then
+      p.leechAcc = p.leechAcc - 1
+      p.leechBank = p.leechBank - 1
+      p:heal(1)
     end
+    p.leechAcc = math.min(p.leechAcc, 1)
   end
   if has(fx, "acid") then
     enemies.corrode(enemy, 4)
@@ -498,6 +508,21 @@ end
 -- Seeker Rounds curve toward the nearest enemy; Boomerang Rounds turn around
 local function steer(b, dt)
   local fx = b.fx
+  -- The Champion's gravity wells (src.starwarden) bend every shot that passes near them
+  local wells = enemies.wells
+  if wells and #wells > 0 then
+    for _, wl in ipairs(wells) do
+      local dx, dy = wl.x - b.x, wl.y - b.y
+      local d = math.sqrt(dx * dx + dy * dy)
+      if d < wl.r and d > 2 then
+        local pull = (1 - d / wl.r) ^ 1.5
+        local cur = math.atan2(b.dy, b.dx)
+        local diff = (math.atan2(dy, dx) - cur + math.pi) % (2 * math.pi) - math.pi
+        local turn = math.max(-14 * pull * dt, math.min(14 * pull * dt, diff))
+        b.dx, b.dy = math.cos(cur + turn), math.sin(cur + turn)
+      end
+    end
+  end
   if has(fx, "homing") then
     local target = enemies.nearest(b.x, b.y, 110, b.hit)
     if target then

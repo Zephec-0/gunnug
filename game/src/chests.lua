@@ -59,7 +59,9 @@ function chests.interact(player)
   end
   c.opened = true
   audio.play("chest")
-  if c.vault then
+  if c.onOpen then
+    c.onOpen(c) -- (a chest with something of its own: the airship's, src.airship)
+  elseif c.vault then
     -- A vault's chest: a fine weapon, something locked, and gold
     local ix = c.x
     pickups.dropWeapon(ix, c.y - H - 2, guns.generate(meta.lockedArchetype(), nil, 0.8), -30, -150)

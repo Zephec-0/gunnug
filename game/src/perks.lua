@@ -292,6 +292,17 @@ perks.defs.akimbo = {
   gated = true, -- (rolled only once unlocked on the profile: perks.isAvailable)
 }
 
+-- Skybound: the airship's chest (src.airship) unlocks it, an Epic: two jumps in the air, and a higher first jump
+perks.defs.skybound = {
+  name = "Skybound",
+  short = "SB",
+  color = { 0.62, 0.84, 1.0 },
+  rarity = "epic",
+  desc = "EPIC: two extra jumps in the air, and your first jump is 10% higher. The sky has been waiting for you.",
+  fx = { airJumps = 2, jump = 1.1 },
+  gated = true,
+}
+
 perks.order = {
   "thick_skin", "iron_will", "second_wind", "scar_tissue", "last_stand", "regeneration", "bloodthirst", "adrenaline",
   "springheel", "fleet_foot", "slick_soles", "double_jump",
@@ -299,7 +310,7 @@ perks.order = {
   "sharp_eyes", "heavy_hitter", "quick_hands", "momentum", "pyromaniac", "needle_sight",
   "death_burst", "juggler", "kicker",
   "glass_cannon", "devils_bargain", "greedy_hands", "berserker", "pact_of_pain",
-  "akimbo",
+  "akimbo", "skybound",
 }
 
 -- Set by src.meta: function(id) -> may this perk be rolled? (gated ones wait

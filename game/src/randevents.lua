@@ -33,7 +33,14 @@ local timer = 120
 local lastKind
 local world
 
-local KINDS = { "carnival", "gambler", "tinker", "shrine", "cavein", "hunt" }
+local KINDS = { "carnival", "gambler", "tinker", "shrine", "cavein", "hunt", "altar", "ghost" }
+
+-- Events whose stage and logic live elsewhere (src.events: the violet altar that trades a
+-- curse for a boon, the ghost merchant). Set by src.events:
+--   start(x, ground) -> handle    puts it up
+--   alive(handle) -> bool         false once it is spent or gone
+--   finish(handle)                takes it down
+randevents.external = {}
 
 function randevents.clear()
   active = nil
@@ -92,6 +99,51 @@ end
 
 -- Open, flat ground with air above, near the hunter but not on top of him
 -- (and always off-screen: past the edge of the view, which leads toward the aim, so the hunter has to find it)
+-- Is the floor at (x, gy) flat and clear for a stage flatHalf wide to each side?
+local function flatAt(x, gy, flatHalf)
+  if world:isSolid(x, gy - 4) or fluids.waterAt(x, gy - 4) then
+    return false
+  end
+  for dx = -flatHalf, flatHalf, 4 do
+    local g2 = world:findGround(x + dx, gy - 10)
+    if not g2 or math.abs(g2 - gy) > 4 then
+      return false
+    end
+    for k = 6, 30, 6 do
+      if world:isSolid(x + dx, gy - k) then
+        return false
+      end
+    end
+  end
+  return true
+end
+
+-- Events turn up in the horizontal middle of their dungeon (the middle half of its width), on a
+-- floor at about the hunter's depth and out of sight, so they are easy to find and never in the
+-- walls at its ends. Returns x, ground or nil (areaIndex: the dungeon the hunter is in).
+local midBox -- { x0, x1 } of the dungeon's middle band, set while spawning
+local function findMidSpot(px, py, flatHalf, areaIndex)
+  local x0, y0, x1, y1 = require("src.scenes.catacombs").bounds(areaIndex or 0)
+  if not x0 then
+    midBox = nil
+    return nil
+  end
+  local cx, half = (x0 + x1) / 2, (x1 - x0) * 0.25
+  midBox = { cx - half, cx + half }
+  local minD = config.VIRTUAL_W / 2 + 90
+  local cat = require("src.scenes.catacombs")
+  for _ = 1, 160 do
+    local x = math.floor(cx + (love.math.random() * 2 - 1) * half)
+    local y = math.max(y0 + 30, math.min(y1 - 60, py + (love.math.random() * 2 - 1) * 260))
+    local gy = world:findGround(x, math.floor(y))
+    if gy < y1 - 30 and math.abs(gy - py) < 280 and (x - px) ^ 2 + (gy - py) ^ 2 > minD * minD and flatAt(x, gy, flatHalf)
+      and not cat.inArena(x, gy) and not cat.inShop(x, gy) then
+      return x, gy
+    end
+  end
+  return nil
+end
+
 local function findSpot(px, py, flatHalf, minD, maxD)
   minD = math.max(minD, config.VIRTUAL_W / 2 + 90)
   maxD = math.max(maxD, minD + 160)
@@ -122,7 +174,7 @@ local function findSpot(px, py, flatHalf, minD, maxD)
   for _ = 1, 60 do
     local x = math.floor(px + (love.math.random() < 0.5 and -1 or 1) * (minD + love.math.random() * (maxD - minD)))
     local gy = world:findGround(x, math.floor(py - 40))
-    if gy and math.abs(gy - py) < 60 and not fluids.waterAt(x, gy - 4) then
+    if gy and math.abs(gy - py) < 60 and not fluids.waterAt(x, gy - 4) and (not midBox or (x > midBox[1] and x < midBox[2])) then
       local hw = flatHalf + 6
       local ok = true
       for yy = gy - 40, gy + 4, 4 do
@@ -736,12 +788,26 @@ local function spawn(kind, player, areaIndex, fx, fy)
   end
   local x, gy = fx, fy
   if not x then
-    x, gy = findSpot(px, py, kind == "gambler" and 40 or (kind == "carnival" and 20 or 12), 70, 260)
+    local flat = kind == "gambler" and 40 or (kind == "carnival" and 20 or 12)
+    x, gy = findMidSpot(px, py, flat, areaIndex)
+    if not x then
+      x, gy = findSpot(px, py, flat, 70, 260)
+    end
+    midBox = nil
   end
   if not x then
     return nil
   end
   o.x, o.y = x, gy
+  local ext = randevents.external[kind]
+  if ext then
+    o.life = 240
+    o.ext = ext.start(x, gy)
+    if not o.ext then
+      return nil
+    end
+    return o
+  end
   if not fx then
     local half = kind == "gambler" and 48 or (kind == "carnival" and 28 or 20)
     carveRoom(x, gy, half, half + (kind == "carnival" and CARNY_DX or 0), 56)
@@ -775,7 +841,18 @@ local function step(o, dt, player)
   if o.say then
     o.say.age = o.say.age + dt
   end
-  if o.kind == "gambler" then
+  if o.ext then
+    local ext = randevents.external[o.kind]
+    o.life = o.life - dt
+    if o.fixed or not ext then
+      return false
+    end
+    if not ext.alive(o.ext) or o.life <= 0 then
+      ext.finish(o.ext)
+      return true
+    end
+    return false
+  elseif o.kind == "gambler" then
     stepSlot(o, dt)
     o.life = o.life - dt
     if o.slot and love.timer.getTime() < o.slot.endT then
@@ -918,9 +995,9 @@ function randevents.addStand(kind, x, ground, w)
 end
 
 -- For tests: an event of the given kind beside the hunter at once
-function randevents.force(kind, player, w)
+function randevents.force(kind, player, w, areaIndex)
   world = w or world
-  active = spawn(kind, player, 1)
+  active = spawn(kind, player, areaIndex or 1)
   return active
 end
 

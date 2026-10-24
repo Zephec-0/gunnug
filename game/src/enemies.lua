@@ -420,11 +420,17 @@ local QUEEN_SCALES = { 6, 5, 4, 3, 2 }
 -- which scales health and gold, is set where they are placed)
 local DAMAGE_PER_AREA = 0.35
 
+-- Native armour: deeper monsters take a flat amount less from every direct hit
+-- (a hit still does at least ARMOR_FLOOR of its damage). Burning, poison and
+-- bleeding ignore it. Health scales less with the area, armour takes its place
+enemies.ARMOR_PER_TOUGHNESS = 1.6 -- (fields, not locals: this file is at Lua's limit of 200 locals)
+enemies.ARMOR_FLOOR = 0.3
+
 -- The DPS dummy's meter: a session starts with the first hit and ends once
 -- DPS_IDLE seconds pass without one; the reading then freezes until the next hit
 local DPS_IDLE = 2
 
-local ITEM_DROP_CHANCE = 0.05 -- chance a dying monster drops an ammo type or attachment
+local ITEM_DROP_CHANCE = 0.025 -- chance a dying monster drops an ammo type or attachment
 local ACTIVE_RANGE = 520 -- enemies further than this from the hunter are frozen
 -- Bullets only test the monsters within this of the hunter (rebuilt every
 -- frame): testing every monster in the world at every pixel a bullet moved
@@ -565,6 +571,7 @@ local function newEnemy(kind, x, y, toughness, level, swarm)
     hp = math.floor(def.hp * (toughness or 1) * (def.boss and 1 or require("src.meta").enemyHpMul()) + 0.5),
     maxHp = math.floor(def.hp * (toughness or 1) * (def.boss and 1 or require("src.meta").enemyHpMul()) + 0.5),
     toughness = toughness or 1,
+    armor = (def.boss or def.dummy) and 0 or math.max(0, math.floor(((toughness or 1) - 1) * enemies.ARMOR_PER_TOUGHNESS + 0.5)), -- flat damage shaved off every direct hit
     state = def.dummy and "still" or def.ground and "idle" or "sleep",
     level = level or 1,
     swarm = swarm, -- the colony this monster belongs to: { members = {...}, awake }
@@ -1167,6 +1174,15 @@ function enemies.damage(e, amount, dx, dy, force, crit, fx)
       local ax, ay = center(e)
       for _ = 1, 2 do
         effects.particle(ax + e.facing * e.body.w / 2, ay, e.facing * (30 + love.math.random() * 60), -love.math.random() * 60, 0.15, { 0.8, 0.88, 1 }, 200, true)
+      end
+    end
+  end
+  if e.armor and e.armor > 0 and (force or fx) then
+    local reduced = math.max(math.ceil(amount * enemies.ARMOR_FLOOR), amount - e.armor)
+    if reduced < amount then
+      amount = reduced
+      if love.math.random() < 0.25 then
+        sfx("clank", 0.12, 1.9)
       end
     end
   end
@@ -6424,6 +6440,7 @@ package.loaded["src.enemies"] = enemies
 require("src.aquatic")
 require("src.colossus")
 require("src.darkhunter")
+require("src.starwarden")
 require("src.needlemobs")
 require("src.quarrymobs")
 require("src.ethercrawler")

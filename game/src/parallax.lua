@@ -595,6 +595,7 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
   return glowShader
 end
 
+local clearImage -- (a 1x1 image with nothing in it: "no creatures")
 function parallax.drawSkyGlow(vx0, vy0, vx1, vy1, mask, profile, skip, ents)
   if not mask then
     return
@@ -605,7 +606,11 @@ function parallax.drawSkyGlow(vx0, vy0, vx1, vy1, mask, profile, skip, ents)
   local camX, camY = vx0, vy0
   love.graphics.setShader(glowShader)
   glowShader:send("mask", mask)
-  glowShader:send("ents", ents or mask)
+  if not ents then
+    clearImage = clearImage or love.graphics.newImage(love.image.newImageData(1, 1))
+    ents = clearImage
+  end
+  glowShader:send("ents", ents)
   glowShader:send("canvasSize", { mask:getDimensions() })
   cells(HOLE_P, HOLE_CW, HOLE_CH, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
     local hx, hy, rw, rh = holeAt(i, j, x, y)
@@ -648,7 +653,6 @@ end
 
 -- (camX, camY: the camera; vx0..vy1: the part of the view to draw, the area's own box: the far scenery is drawn
 -- nowhere else, so neither are its lanterns)
-local clearImage -- a 1x1 image with nothing in it: "no creatures" for the glow shader
 function parallax.drawLanternGlow(camX, camY, vx0, vy0, vx1, vy1, mask, ents)
   if not mask or not getGlowShader() then
     return

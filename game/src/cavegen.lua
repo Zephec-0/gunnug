@@ -47,6 +47,7 @@ local SIZES = {
   behemoth = { 28, 28 },
   dreadbat = { 30, 21, false, true }, -- (the fourth entry: hangs from a ceiling)
   darkhunter = { 8, 19, true },
+  starwarden = { 30, 44 },
   crow = { 10, 8, false, true }, -- the Needle's creatures
   cragram = { 22, 15, true },
   dustdevil = { 14, 22 },
@@ -1068,7 +1069,25 @@ function cavegen.generate(world, area, seed, tick)
   end
   carveCrossings()
   if arena then
+    if open then
+      -- The sky's hall: a floating citadel of cloudstone, hollowed into an oval (below)
+      world:fillRect(arena.x0 - 90, arena.top - 80, arena.x1 + 90, arena.floorY + 90, ROCKID)
+    end
     carveArena()
+    if open then
+      -- Two mouths into the lower corners of the oval, out through the citadel's sides to open sky,
+      -- each with a slab of cloud to walk in from (the iron ring seals them when the boss wakes)
+      local rx, ry = arena.w / 2, arena.h / 2
+      local nx = 0.66
+      local gy = math.floor(arena.top + ry + math.sqrt(1 - nx * nx) * ry)
+      for side = -1, 1, 2 do
+        local gx = arena.cx + side * nx * rx
+        local ex = arena.cx + side * (rx + 90)
+        world:fillRect(math.floor(math.min(gx, ex)), gy - 26, math.floor(math.max(gx, ex)), gy + 8, AIR)
+        local sx = arena.cx + side * (rx + 80)
+        world:fillRect(math.floor(math.min(ex, sx + side * 160)), gy + 9, math.floor(math.max(ex, sx + side * 160)), gy + 22, ROCKID)
+      end
+    end
   elseif not open then
     carveAntechamber()
   end
@@ -1108,7 +1127,7 @@ function cavegen.generate(world, area, seed, tick)
     shops[#shops + 1] = buildShop(sx, shopFloor)
   end
   local shop = shops[1]
-  if arena then
+  if arena and not open then
     -- A shaft from the arena floor down into each shop's ceiling, shut by an
     -- iron gate until the boss is dead (and rubble-filled later if the other
     -- shop is chosen, see src.scenes.catacombs)
@@ -1135,11 +1154,39 @@ function cavegen.generate(world, area, seed, tick)
   end
   world:fillRect(X0, sideTop, X0 + BORDER - 1, Y1, ROCKID)
   world:fillRect(X1 - BORDER + 1, sideTop, X1, Y1, ROCKID)
+  -- A secret nobody points to: a motherlode of gold in the middle of the solid rock between the
+  -- two paths, far from either one's caves. Only a long dig through the wall finds it. (Both
+  -- paths fill the gap, and the second fill would wipe the first's lode: both place the same one,
+  -- its place worked out from the gap's own position)
+  local function motherlode(gx0, gx1)
+    local function h(n)
+      local v = math.sin((gx0 + Y0 * 0.37 + n) * 12.9898) * 43758.5453
+      return v - math.floor(v)
+    end
+    local mx = (gx0 + gx1) / 2 + (h(1) - 0.5) * 80
+    local my = Y0 + H * (0.3 + h(2) * 0.4)
+    local lr = 30 + h(3) * 8
+    local lump = h(4) * 6.28
+    for oy = -math.ceil(lr * 1.3), math.ceil(lr * 1.3) do
+      for ox = -math.ceil(lr * 1.3), math.ceil(lr * 1.3) do
+        local a = math.atan2(oy, ox)
+        local rr = lr * (0.8 + 0.2 * math.sin(a * 3 + lump) + 0.1 * math.sin(a * 5 + lump * 2))
+        if ox * ox + oy * oy <= rr * rr then
+          local px, py = math.floor(mx + ox), math.floor(my + oy)
+          if world:get(px, py) == ROCKID then
+            world:setRaw(px, py, GOLDORE)
+          end
+        end
+      end
+    end
+  end
   if area.gapLeft then
     world:fillRect(X0 - area.gapLeft, sideTop, X0 - 1, Y1, ROCKID)
+    motherlode(X0 - area.gapLeft, X0 - 1)
   end
   if area.gapRight then
     world:fillRect(X1 + 1, sideTop, X1 + area.gapRight, Y1, ROCKID)
+    motherlode(X1 + 1, X1 + area.gapRight)
   end
   if open then
     -- (no roof: the world's top edge above is an invisible ceiling, out of view)
@@ -1158,7 +1205,7 @@ function cavegen.generate(world, area, seed, tick)
   -- What the hunter must be able to reach: the shop, or the arena's floor
   local goal = shop
   local goalX, goalY = shopX, tunnelEndY
-  if arena then
+  if arena and not open then
     goal = { x = arena.cx - 150, y = arena.floorY - 80, w = 300, h = 78 }
     goalX, goalY = arena.cx, arena.top + 24
   end
@@ -1232,7 +1279,7 @@ function cavegen.generate(world, area, seed, tick)
   -- Tougher the deeper in an area, and a lot tougher with each area
   local function toughnessAt(y)
     local depth = climb and (Y1 - y) / H or (y - Y0) / H -- (a climb gets tougher going up)
-    return (1 + depth * 0.6 + (level - 1) * 0.9) * (area.toughMul or 1)
+    return (1 + depth * 0.6 + (level - 1) * 0.55) * (area.toughMul or 1) -- (armour, src.enemies, carries the rest)
   end
   local function place(kind, spots)
     for _, s in ipairs(spots) do
@@ -1495,7 +1542,7 @@ function cavegen.generate(world, area, seed, tick)
     arena = arena, -- { x0, x1, top, floorY, cx, braziers = { {x, y} }, gates = { {x0, y0, x1, y1} } }
     crates = findFloorSpots(scaled(40), 16, avoid),
     ironCrates = findFloorSpots(scaled(12), 19, avoid),
-    chests = findFloorSpots(scaled(12), 22, avoidForEnemies), -- weapon chests, away from the entrance and shop
+    chests = findFloorSpots(scaled(9), 22, avoidForEnemies), -- weapon chests, away from the entrance and shop
     glows = findFloorSpots(scaled(area.glowCount or 150), 6, avoid), -- glowing fungus clusters
     level = level,
     enemies = enemies, -- { kind, x, y, toughness, boss }: ground monsters stand at y, the others hang from it

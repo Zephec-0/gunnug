@@ -44,7 +44,7 @@ local RANGE = 80 -- the DPS dummy's range at the left end; the goods start after
 local SELL_X0, SELL_X1 = 558, 590
 -- What the merchant pays for a thing lying on the mat: by item rarity, and by
 -- a gun's grade
-local SELL_ITEM = { common = 8, rare = 20, cursed = 15, fused = 40 }
+local SELL_ITEM = { common = 8, uncommon = 12, rare = 20, cursed = 15, fused = 40 }
 local SELL_GUN_BASE, SELL_GUN_PER_GRADE = 10, 12
 
 -- Where the DPS dummy stands in a shop room (x centre, floor y)
@@ -183,6 +183,7 @@ end
 function shop.take(entry, inv)
   inv.gold = inv.gold - priceOf(entry)
   entry.sold = true
+  require("src.save").stat("bought")
 end
 
 -- Rolls the three perks on offer

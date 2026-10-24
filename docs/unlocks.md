@@ -47,3 +47,7 @@ Knobs to adjust later: `STARTER_WEAPONS`, `TEACH_COST`, `SPECIAL_GUNS` and `canF
 ## Gunsmith's stock (new)
 
 Unlocked guns can be bought from the Gunsmith for gold, one per run, always B-grade: shotgun 50, semiauto 80, flare 100, automatic 200, crossbow 200, gatling 300 (`meta.GUN_PRICES`). A freed person's cage no longer returns in later runs.
+
+## Feats (new)
+
+Some ammo and attachments (`meta.FEATS`, about 30) also need a lifetime stat before they can drop, sit in a shop or be taught: elites slain, monsters killed, bosses slain, things bought in shops, gold gathered. Common and uncommon ones join the pool by themselves once the feat is done; rare and epic ones then still need seeing and teaching. The compendium and the Gunsmith's page show the feat and its progress.

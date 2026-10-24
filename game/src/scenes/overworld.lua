@@ -85,6 +85,7 @@ local WINCH_X = 1758 -- left edge of the winch house
 local SUN_X, SUN_Y = 440, 196 -- on screen, low over the horizon
 
 local background -- pre-rendered sky and parallax layers
+local backgroundEclipse -- whether it was drawn with the sun eclipsed
 local trees = {}
 
 -- Gently rolling ground of the open plain
@@ -229,7 +230,7 @@ local function skyColor(t)
   return SKY[#SKY][2][1], SKY[#SKY][2][2], SKY[#SKY][2][3]
 end
 
-local function buildBackground()
+local function buildBackground(eclipse)
   local W, H = config.VIRTUAL_W, config.VIRTUAL_H
   local rng = love.math.newRandomGenerator(7)
   local sky = love.image.newImageData(W, H)
@@ -238,11 +239,19 @@ local function buildBackground()
     for x = 0, W - 1 do
       local dx, dy = x - SUN_X, y - SUN_Y
       local d = math.sqrt(dx * dx + dy * dy)
-      if d < 30 then
+      if d < 30 and eclipse then
+        sky:setPixel(x, y, 0.012, 0.008, 0.025, 1) -- the sun swallowed: a black disc (the sky champion's fall, see src.starwarden)
+      elseif d < 30 then
         local core = 1 - d / 30 * 0.12
         sky:setPixel(x, y, 1, 0.74 * core, 0.44 * core, 1) -- the setting sun
       else
-        local glow = math.max(0, 1 - d / 220) ^ 2 * 0.45
+        local glow = math.max(0, 1 - d / 220) ^ 2 * (eclipse and 0.14 or 0.45)
+        if eclipse and d < 52 then
+          -- ...with a white-gold corona hugging it, and a thin bright ring of falling light just outside
+          local corona = math.max(0, 1 - (d - 30) / 22) ^ 2
+          local ring = math.max(0, 1 - math.abs(d - 37) / 2.2)
+          glow = glow + corona * 0.85 + ring * 0.6
+        end
         local cr, cg, cb = math.min(1, r + glow), math.min(1, g + glow * 0.6), math.min(1, b + glow * 0.3)
         -- Long thin clouds, lit from below by the sun
         if y > 50 and y < 190 then
@@ -436,8 +445,12 @@ function overworld.build(opts)
   world:markLazy(SPINE_W, world.top, world.right - 1, world.bottom - 1)
   world:markLazy(LEFT, world.top, -1, world.bottom - 1)
   world:repaintRect(0, 0, SPINE_W - 1, CAVE_TOP + 40)
+  require("src.airship").build(world) -- (a secret in the sky: nothing points to it)
 
-  background = background or buildBackground()
+  local eclipse = require("src.meta").isSkyBeaten()
+  if not background or backgroundEclipse ~= eclipse then
+    background, backgroundEclipse = buildBackground(eclipse), eclipse
+  end
   trees = {}
   for _, t in ipairs({ { 200, 1 }, { 1340, -1 }, { 2000, 1 }, { 2460, -1 }, { 2706, 1 }, { 3100, -1 }, { 3800, 1 }, { -2700, 1 }, { -2200, -1 }, { -1900, 1 }, { -1380, -1 }, { -460, -1 }, { -150, 1 }, { 4400, -1 }, { 5100, 1 }, { 5600, -1 } }) do
     trees[#trees + 1] = { x = t[1], y = world:findGround(t[1], 160), lean = t[2], height = 46 + (t[1] % 17) }
@@ -564,6 +577,11 @@ function overworld.populate(world)
   end
   -- Something for whoever explores: a chest on top of the west mesa and one
   -- under the ruins' gateway
+  do
+    local ax, ay = require("src.airship").chestSpot()
+    local c = chests.spawn(ax, ay, 1)
+    c.onOpen = require("src.airship").openChest
+  end
   chests.spawn(356, ground(356), 0.25)
   chests.spawn(2390, world:findGround(2390, surface(2390) - 30), 0.25)
   -- Farther out, a chest atop each of the far mesas, and pots in the open
@@ -786,9 +804,14 @@ function overworld.addLights(lighting, camX, camY)
   -- Low warm light from the setting sun's place in the sky, fading underground
   local sunlight = 1 - underground(camX + config.VIRTUAL_W / 2, camY + config.VIRTUAL_H / 2)
   if sunlight > 0 then
-    lighting.add(camX + SUN_X, camY + SUN_Y, 420, 1, 0.62, 0.38, 0.3 * sunlight)
+    if require("src.meta").isSkyBeaten() then
+      lighting.add(camX + SUN_X, camY + SUN_Y, 360, 0.55, 0.5, 0.95, 0.2 * sunlight) -- (a cold glimmer round the black sun)
+    else
+      lighting.add(camX + SUN_X, camY + SUN_Y, 420, 1, 0.62, 0.38, 0.3 * sunlight)
+    end
   end
   catacombs.addLights(lighting, view(camX, camY))
+  require("src.airship").addLights(lighting, view(camX, camY))
   town.addLights(lighting, view(camX, camY))
   for i, l in ipairs(lanterns()) do
     lighting.add(l[1], l[2] + 4, 68, 1, 0.7, 0.35, 0.48 + flicker(i) * 0.05)
@@ -1331,6 +1354,7 @@ end
 
 -- Decorations drawn behind the player (they receive lighting)
 function overworld.drawDecor(camX, camY)
+  require("src.airship").drawBack(camX, camY)
   local vx0, vy0 = camX - 8, camY - 8
   local vx1, vy1 = camX + config.VIRTUAL_W + 8, camY + config.VIRTUAL_H + 8
   -- Backdrop behind the ground, so holes, the mine shaft and the caves show

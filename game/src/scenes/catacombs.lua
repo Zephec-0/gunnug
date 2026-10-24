@@ -344,7 +344,7 @@ local THEMES = {
     arenaDecor = true, -- the Dark Hunter's hall: the shop's void behind the oval, violet crystals round it
     noBraziers = true, -- (no orange fires in it)
     arenaBanner = { "The Summit", "Something wearing your shape waits at the top. The way up lies beyond it" },
-    arenaWon = { "The Crow Rider Has Fallen", "The gate above the arena is open: the sky lies beyond" },
+    arenaWon = { "The Crow Rider Has Fallen", "The way up to the summit is open. Bring the proof of every boss: the sky waits there" },
     glyph = "hunter", -- (src.glyphs: what a boss leaves behind; the Dark Hunter can fall before the others)
     boss = "darkhunter", -- the Dark Hunter, then the Crow Rider (src.darkhunter)
     bossReward = "akimbo", -- (and beating him unlocks it for good)
@@ -377,6 +377,7 @@ local THEMES = {
     gravity = 0.35, -- a third of the pull: high jumps, long recoil
     -- The Champion of the Heavens waits in a floating citadel of cloudstone (an oval hall entered from its lower corners)
     boss = "starwarden", -- (src.starwarden)
+    summit = true, -- the chamber on the mountain's top (src.summit)
     arena = true,
     arenaFrac = 0.22,
     arenaCx = 4100,
@@ -740,6 +741,7 @@ local function areaFor(i)
         entranceY = lv.y1 - 230,
         shaftX0 = ex.x0,
         shaftX1 = ex.x1,
+        summit = lv.theme.summit and { cx = ex.cx } or nil,
       }
     else
     local hatch = parent.info.shops[lv.side == "right" and 2 or 1].hatch

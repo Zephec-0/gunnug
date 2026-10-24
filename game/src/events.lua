@@ -36,6 +36,7 @@ events.onGhost = nil
 
 function events.clear()
   randevents.clear()
+  require("src.summit").clear()
   world = nil
   altars, vaults, keys, relics = {}, {}, {}, {}
   wounded, ghost = nil, nil
@@ -60,6 +61,9 @@ end
 -- Called once for each area as its props are placed. elites: the area's elite monsters.
 function events.spawnArea(w, info, index, tier, elites, chests)
   world = w
+  if info.summit then
+    require("src.summit").setup(w, info.summit) -- (the top of the mountain, with the glyph pedestals)
+  end
   -- (the violet altars and the ghost are random events now: see randevents.external below)
   if info.vault then
     local v = info.vault
@@ -149,6 +153,7 @@ function events.update(dt, player, areaIndex)
     return
   end
   randevents.update(dt, player, areaIndex, world)
+  require("src.summit").update(dt, player)
   local px, py = player:center()
   local inv = player.inventory
   -- keys fall and are picked up by walking over them
@@ -313,7 +318,7 @@ function events.interact(player)
   if player.dead then
     return false
   end
-  if randevents.interact(player) then
+  if randevents.interact(player) or require("src.summit").interact(player) then
     return true
   end
   local px, py = player:center()
@@ -549,12 +554,14 @@ function events.draw(view)
     drawGhost(ghost)
   end
   randevents.draw(view)
+  require("src.summit").draw(view)
 end
 
 function events.drawEmissive(view)
   if not world then
     return
   end
+  require("src.summit").drawEmissive(view)
   local t = love.timer.getTime()
   for _, a in ipairs(altars) do
     if inView(view, a.x, a.y, 40) and not a.used then
@@ -596,6 +603,7 @@ function events.addLights(lighting, view)
     return
   end
   randevents.addLights(lighting, view)
+  require("src.summit").addLights(lighting, view)
   local t = love.timer.getTime()
   for _, a in ipairs(altars) do
     if inView(view, a.x, a.y, 120) and not a.used then
@@ -637,6 +645,7 @@ function events.drawScreen(toScreen, font, player)
     return
   end
   randevents.drawScreen(toScreen, font, player)
+  require("src.summit").drawScreen(toScreen, font, player)
   for _, o in ipairs({ wounded, ghost }) do
     if o and o.say then
       npcs.bubble(font, o.say.text, toScreen(o.x, o.y - 22), select(2, toScreen(o.x, o.y - 22)), o.say.age)

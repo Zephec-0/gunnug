@@ -164,6 +164,9 @@ function cavegen.generate(world, area, seed, tick)
     return xa ~= nil and x >= xa + m + (area.caveInset or 0) and x <= xb - m
   end
   local function inArena(x, y, margin)
+    if area.summit and math.abs(x - area.summit.cx) < 500 and y > Y1 - 960 then
+      return true -- (the summit chamber and the island over it)
+    end
     return arena and x > arena.x0 - margin and x < arena.x1 + margin and y > arena.top - margin and y < arena.floorY + margin
   end
 
@@ -685,7 +688,9 @@ function cavegen.generate(world, area, seed, tick)
     local placed = {}
     -- Keep the sky clear over the shop and over the hole where the way in arrives
     local keepClear = { { (shopXs[1] or X0) - 90, (shopXs[1] or X0) + 90 } }
-    if area.shaftX0 then
+    if area.summit then
+      keepClear[#keepClear + 1] = { area.summit.cx - 480, area.summit.cx + 480 }
+    elseif area.shaftX0 then
       keepClear[#keepClear + 1] = { area.shaftX0 - 110, area.shaftX1 + 110 }
     end
     local function clear(x0, x1)
@@ -755,6 +760,52 @@ function cavegen.generate(world, area, seed, tick)
   -- The hole through the sky's floor where the shaft from the mountain arrives
   local function carveSkyEntrance(x0, x1)
     world:fillRect(x0, Y1 - 205, x1, Y1, AIR)
+  end
+
+  -- The summit: where the shaft from the mountain comes out. A chamber open to the sky above, walled and
+  -- roofed in bedrock (it can't be dug into, from outside or in: only the four glyphs open the roof, see
+  -- src.summit), standing on the mountain's top, with a few low humps of rock on its floor. Above it hangs the
+  -- island the gust lands the hunter on.
+  local summit
+  local function carveSummit()
+    local s = area.summit
+    local half, height = 230, 400
+    local x0, x1 = s.cx - half, s.cx + half
+    local top = Y1 - height
+    world:fillRect(x0, top, x1, Y1, AIR)
+    world:fillRect(x0 - 6, top - 6, x0 - 1, Y1, BEDROCK)
+    world:fillRect(x1 + 1, top - 6, x1 + 6, Y1, BEDROCK)
+    world:fillRect(x0 - 6, top - 6, x1 + 6, top - 1, BEDROCK) -- (the roof, taken away by the gust)
+    local pedestals = { s.cx - 165, s.cx - 55, s.cx + 55, s.cx + 165 }
+    for x = x0, x1 do
+      local flat = math.abs(x - s.cx) < 28
+      for _, px in ipairs(pedestals) do
+        flat = flat or math.abs(x - px) < 16
+      end
+      if not flat then
+        local h = math.floor(love.math.noise(x * 0.03, noiseSeed + 140) * 7 - 1.5)
+        if h > 0 then
+          world:fillRect(x, Y1 - h + 1, x, Y1, materials.SANDSTONE)
+        end
+      end
+    end
+    -- The island the gust throws him onto: wide, flat, tapering underneath
+    local ly = top - 540
+    local lx = s.cx + 240 -- (beside the gust, not over it: the wind passes the island and he drops onto it)
+    for i = 0, 30 do
+      local w = math.floor(190 - i * 5.2)
+      world:fillRect(lx - w, ly + i, lx + w, ly + i, i < 3 and DIRTID or ROCKID)
+    end
+    summit = {
+      cx = s.cx,
+      x0 = x0,
+      x1 = x1,
+      top = top, -- the interior's top
+      roof = { x0 = x0 - 6, y0 = top - 6, x1 = x1 + 6, y1 = top - 1 },
+      floorY = Y1 + 1, -- the mountain's top
+      pedestals = pedestals,
+      landing = { x = lx, y = ly, w = 190 },
+    }
   end
 
   -- Chamber the player arrives in from the shaft. Timber ledges either side,
@@ -1109,13 +1160,15 @@ function cavegen.generate(world, area, seed, tick)
     end
     exit = { cx = math.floor(arena.cx), x0 = math.floor(arena.cx) - 21, x1 = math.floor(arena.cx) + 21 }
     world:fillRect(exit.x0, Y0, exit.x1, arena.top - 10, AIR)
-    local gate = { x0 = exit.x0 - 1, x1 = exit.x1 + 1, y0 = arena.top - 9, y1 = arena.top - 6, glyph = true } -- (the sky's door: it also wants every boss's glyph)
+    local gate = { x0 = exit.x0 - 1, x1 = exit.x1 + 1, y0 = arena.top - 9, y1 = arena.top - 6 }
     world:fillRect(gate.x0, gate.y0, gate.x1, gate.y1, IRON)
-    arena.gates[#arena.gates + 1] = gate
+    arena.gates[#arena.gates + 1] = gate -- (opens with the boss: the glyphs are asked for at the summit now, src.summit)
     addLadder(exit.cx, arena.top - 12, Y0, noiseSeed + 300)
     entranceY = carveWalkIn(entranceX, entranceY)
   elseif open then
-    if area.shaftX0 then
+    if area.summit then
+      carveSummit()
+    elseif area.shaftX0 then
       carveSkyEntrance(area.shaftX0, area.shaftX1)
       addLadder((area.shaftX0 + area.shaftX1) / 2, Y1 + 2, Y1 - 205, noiseSeed + 301)
     end
@@ -1190,7 +1243,9 @@ function cavegen.generate(world, area, seed, tick)
   end
   if open then
     -- (no roof: the world's top edge above is an invisible ceiling, out of view)
-    if area.shaftX0 then
+    if area.summit then
+      carveSummit() -- (the bottom shell must not close the chamber)
+    elseif area.shaftX0 then
       carveSkyEntrance(area.shaftX0, area.shaftX1) -- (the bottom shell must not close the hole)
     end
   end
@@ -1209,7 +1264,7 @@ function cavegen.generate(world, area, seed, tick)
     goal = { x = arena.cx - 150, y = arena.floorY - 80, w = 300, h = 78 }
     goalX, goalY = arena.cx, arena.top + 24
   end
-  if not isReachable(spawnX, spawnY, goal) then
+  if not area.summit and not isReachable(spawnX, spawnY, goal) then -- (the sky: its way in is the gust, not a tunnel through the chamber wall)
     local len = math.sqrt((goalX - entranceX) ^ 2 + (goalY - entranceY) ^ 2)
     for d = 0, len, 3 do
       local t = d / len
@@ -1550,6 +1605,7 @@ function cavegen.generate(world, area, seed, tick)
     water = water, -- the same, without vents
     flood = flood, -- { top, runs }: the area's flooded part (runs of 2-px cells { gy, gx0, gx1 })
     platforms = ladders, -- one-way platforms to climb by: { x0, x1, y }
+    summit = summit, -- the sky's chamber on the mountain's top (see carveSummit)
     exit = exit, -- a climbing area's way on: { cx, x0, x1 } (the shaft up from its arena)
     story = require("src.story").generate(world, findFloorSpots(scaled(16), 22, avoidForEnemies), level, rng, area.name), -- (src.story: signs, camps, the fallen)
     lava = lava, -- pools of molten rock (src.fluids): they don't flow

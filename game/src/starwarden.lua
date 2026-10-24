@@ -1509,14 +1509,6 @@ enemies.afterEmissive = function(view)
     love.graphics.setColor(0, 0, 0, 1)
     love.graphics.circle("fill", wl.x, wl.y, 9 * k)
     love.graphics.setBlendMode("add")
-    -- the rim: a crowd of single pixels circling at their own speeds, flaring and dying out
-    for q = 0, 36 do
-      local ang = q / 37 * math.pi * 2 + t * (0.9 + (q % 5) * 0.28) * (q % 2 == 0 and 1 or -1)
-      local rr = (9.5 + (q * 7 % 5) * 0.9 + math.sin(t * 5 + q * 1.3) * 1.1) * k
-      local br = math.abs(math.sin(t * (3 + q % 4) + q * 1.7))
-      love.graphics.setColor(1, 0.45 + 0.4 * br, 0.25 + 0.5 * br, (0.25 + 0.75 * br) * k)
-      love.graphics.rectangle("fill", math.floor(wl.x + math.cos(ang) * rr), math.floor(wl.y + math.sin(ang) * rr), 1, 1)
-    end
     -- flecks thrown off the rim, spiralling out
     for q = 0, 16 do
       local ph = (t * 0.9 + q * 0.37) % 1
@@ -1524,13 +1516,6 @@ enemies.afterEmissive = function(view)
       local rr = (10 + ph * 22) * k
       love.graphics.setColor(1, 0.7, 0.45, (1 - ph) * 0.9 * k)
       love.graphics.rectangle("fill", math.floor(wl.x + math.cos(ang) * rr), math.floor(wl.y + math.sin(ang) * rr * 0.8), 1, 1)
-    end
-    for q = 0, 10 do
-      local ang = t * 2.2 + q * 0.5
-      local rr = (12 + q * 0.7) * k
-      love.graphics.setColor(1, 0.6, 0.5, 0.55 * (1 - q / 32) * k)
-      love.graphics.points(wl.x + math.cos(ang) * rr * 1.5, wl.y + math.sin(ang) * rr * 0.34)
-      love.graphics.points(wl.x + math.cos(ang + 3.14) * rr * 1.5, wl.y + math.sin(ang + 3.14) * rr * 0.34)
     end
     -- the pull, as arms of light curling in
     for arm = 0, 3 do

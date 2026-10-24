@@ -2327,9 +2327,9 @@ local function drawCollapsingPoster(cx, cy, w, h, noun, photo, scale, spin, alph
   if tt < 1.5 then
     holeK = math.min(1, tt / 0.8)
   else
-    holeK = math.max(0, 1 - (tt - 1.5) / 0.8)
+    holeK = math.max(0, 1 - (tt - 1.5) / 0.5)
   end
-  if tt > 2.4 or holeK <= 0 and gone >= 1 then
+  if tt > 2.05 or holeK <= 0 and gone >= 1 then
     return
   end
   local m = math.floor(10 * u)

@@ -1014,24 +1014,6 @@ end
 local function drawBlackSun()
   local t = love.timer.getTime()
   love.graphics.setBlendMode("add")
-  -- the rim and the edge-on disc, flickering a pixel at a time
-  for q = 0, 44 do
-    local a = q / 45 * math.pi * 2 + t * (0.5 + (q % 4) * 0.2)
-    local rr = 31 + (q * 5 % 4) + math.sin(t * 3 + q) * 0.8
-    local br = math.abs(math.sin(t * (2 + q % 5) + q * 1.9))
-    love.graphics.setColor(1, 0.5 + 0.35 * br, 0.25 + 0.4 * br, 0.2 + 0.7 * br)
-    love.graphics.rectangle("fill", math.floor(SUN_X + math.cos(a) * rr), math.floor(SUN_Y + math.sin(a) * rr), 1, 1)
-  end
-  for q = 0, 40 do
-    local ph = (t * (0.12 + (q % 7) * 0.02) + q * 0.173) % 1
-    local side = q % 2 == 0 and 1 or -1
-    local rr = 40 + ph * 70
-    local ang = t * 0.9 * side / (0.4 + ph) + q
-    local x = SUN_X + math.cos(ang) * rr * 1.7
-    local y = SUN_Y + math.sin(ang) * rr * 0.16 + math.sin(t + q) * 0.6
-    love.graphics.setColor(1, 0.62, 0.34, (1 - ph) * 0.8)
-    love.graphics.rectangle("fill", math.floor(x), math.floor(y), 1, 1)
-  end
   -- light falling in from the whole sky: pixels drifting down toward it
   for q = 0, 70 do
     local ph = (t * 0.07 + q * 0.0611) % 1

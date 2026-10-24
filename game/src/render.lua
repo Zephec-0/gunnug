@@ -112,13 +112,33 @@ uniform float exposure;
 uniform float gammaAdj;
 uniform float ditherMode; // 0 off, 1 Bayer, 2 gradient noise, 3 white noise, 4 animated grain, 5 strong Bayer
 uniform vec2 sunPos;     // uv
+uniform vec3 lens;       // a gravity lens (a black hole): uv of its centre, and how hard it bends (0 = none)
+uniform float lensR;     // its radius, in heights of the frame
+uniform float aspect;    // width over height of the frame
 uniform vec2 lampPos[4];  // uv of the strongest lamps in view
 uniform vec3 lampCol[4];
 uniform float lampStr[4];
 
 vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
+  if (lens.z > 0.0) {
+    // Light bent round a black hole: what is seen is pulled from further out toward the centre
+    vec2 d = uv - lens.xy;
+    d.x *= aspect;
+    float r = max(length(d), 0.0005);
+    float disp = lens.z * lensR * lensR / (r * r + lensR * lensR * 0.12) * smoothstep(lensR * 6.0, lensR * 0.4, r);
+    vec2 n = d / r;
+    n.x /= aspect;
+    uv -= n * disp * 0.35;
+  }
   vec2 q = uv - 0.5;
   vec3 c = Texel(tex, uv).rgb;
+  if (lens.z > 0.0) {
+    // the horizon itself is black, with a bright thin ring at its rim
+    vec2 d2 = uv - lens.xy;
+    d2.x *= aspect;
+    float r2 = length(d2);
+    c *= smoothstep(lensR * 0.55, lensR * 0.8, r2);
+  }
 
   // Sun shafts: the bright parts smeared toward the sun
   if (shaft > 0.0) {
@@ -208,6 +228,7 @@ end
 -- Sets this frame's look: the area's mood (a table like DEFAULT_FX, may be
 -- nil) and the hunter's state (hurt flash 0..1, low health 0..1, dead 0..1)
 local warpNow = 0
+local lensNow
 
 function render.setMood(area, hurt, lowhp, dead)
   render.mixFx(fx, area, area, 0)
@@ -217,6 +238,12 @@ function render.setMood(area, hurt, lowhp, dead)
     warpNow = 0
   end
   mood.hurt, mood.lowhp, mood.dead = hurt or 0, lowhp or 0, dead or 0
+end
+
+-- A black hole bending the light this frame: its centre on the small frame (pixels), its radius, and the strength.
+-- Call every frame it is on screen
+function render.setLens(vx, vy, radius, strength)
+  lensNow = { vx, vy, radius, strength }
 end
 
 -- A burst of warping (the Colossus's beam): call every frame it lasts
@@ -367,6 +394,10 @@ function render.endWorld()
     f:send("lampCol", lampColT[1], lampColT[2], lampColT[3], lampColT[4])
     f:send("lampStr", lampStrT[1], lampStrT[2], lampStrT[3], lampStrT[4])
     f:send("lowhp", mood.lowhp)
+    f:send("lens", lensNow and { lensNow[1] / W, lensNow[2] / H, lensNow[4] } or { 0, 0, 0 })
+    f:send("lensR", lensNow and lensNow[3] / H or 0.1)
+    f:send("aspect", W / H)
+    lensNow = nil
     f:send("dead", mood.dead)
     f:send("shadowTint", fx.shadow)
     f:send("lightTint", fx.light)

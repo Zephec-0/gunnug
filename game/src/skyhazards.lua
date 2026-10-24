@@ -23,6 +23,17 @@ function skyhazards.clear()
   strikes, strikeTimer, bellT, inVent = {}, 8, {}, false
 end
 
+-- A strike called by something else (a storm cloud): on the ground under x, with the usual warning
+function skyhazards.queueStrike(x, fromY)
+  if not S or not world then
+    return
+  end
+  local y = world:findGround(math.floor(x), math.floor(fromY))
+  if y < fromY + 700 then
+    strikes[#strikes + 1] = { x = math.floor(x), y = y, t = 0, warn = 1.3 }
+  end
+end
+
 function skyhazards.setup(w, info)
   world, S = w, info
   strikes, strikeTimer, bellT, inVent = {}, 8, {}, false

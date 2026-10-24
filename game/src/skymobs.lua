@@ -353,6 +353,11 @@ local function fireBolt(e, px, py)
   audio.playAt("clank", cx, cy, 0.6, 1.4)
 end
 
+-- (the Champion's minions fire the same bolts: src.starmobs)
+enemies.skyBolt = function(x, y, vx, vy, dmg, home, life)
+  bolts[#bolts + 1] = { x = x, y = y, vx = vx, vy = vy, life = life or 4.5, dmg = dmg, home = home or 0 }
+end
+
 local function updateSentinel(e, dt, world, player, px, py)
   local def, b = e.def, e.body
   local cx, cy = center(e)

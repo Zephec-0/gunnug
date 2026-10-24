@@ -38,6 +38,10 @@ local ADJECTIVES = {
   starmoth = { "Glittering", "Fluttering", "Lamp-Drawn" },
   sentinel = { "Brass-Plated", "Unblinking", "Well-Aimed" },
   windspirit = { "Gusty", "Breathless", "Bitter-Cold" },
+  gildedlens = { "Gilded", "Far-Seeing", "Gold-Plated" },
+  cometling = { "Streaking", "Tailed", "Falling" },
+  stormcloud = { "Thundering", "Brooding", "Lightning-Struck" },
+  starguardian = { "Burning", "Faithful", "Star-Bound" },
 }
 local BOSS_ADJECTIVES = { "Mighty", "Merciless", "Terrible", "Dreaded" }
 local GENERAL_ADJECTIVES = { "Wicked", "Ornery", "Cussed" }

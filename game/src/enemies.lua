@@ -6290,6 +6290,9 @@ function enemies.addLights(lighting, view)
       end
     end
   end
+  if enemies.afterLights then
+    enemies.afterLights(lighting, view) -- (bosses in modules of their own: their shots, beams and fires)
+  end
 end
 
 -- The DPS dummy's readout over its head (full resolution): live while a
@@ -6444,6 +6447,7 @@ require("src.starwarden")
 require("src.needlemobs")
 require("src.quarrymobs")
 require("src.skymobs")
+require("src.starmobs")
 require("src.ethercrawler")
 
 -- The bosses and creatures in the modules above add their drawing functions after the

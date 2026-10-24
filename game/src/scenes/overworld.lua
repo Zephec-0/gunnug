@@ -926,6 +926,34 @@ local function drawSpace(camX, camY)
       end
     end
   end
+  -- After the Champion has fallen: the dark of space turns violet and the stars wheel round the hole he left
+  local hole = require("src.enemies").skyHole()
+  if hole then
+    local k = math.min(1, hole.t / 8)
+    for sy = 0, H - 1, 3 do
+      local d = depth(camY + sy)
+      if d > 0 then
+        love.graphics.setColor(0.2, 0.02, 0.3, d * 0.3 * k)
+        love.graphics.rectangle("fill", 0, sy, W, 3)
+      end
+    end
+    local hx, hy = hole.x - camX, hole.y - camY
+    for i = 1, 240 do
+      local h1 = math.sin(i * 12.9898) * 43758.5453
+      local h2 = math.sin(i * 78.233) * 12543.123
+      h1, h2 = h1 - math.floor(h1), h2 - math.floor(h2)
+      local r0 = 24 + h2 * h2 * 520
+      local ang = h1 * 6.283 + t * (70 / (r0 + 40))
+      local r = r0 * (1 - 0.2 * k)
+      local x, y = hx + math.cos(ang) * r, hy + math.sin(ang) * r * 0.55
+      if x >= 0 and x < W and y >= 0 and y < H then
+        love.graphics.setColor(1, 0.8 + 0.2 * h1, 0.6 + 0.4 * h2, k * 0.85 * (1 - r0 / 560))
+        love.graphics.rectangle("fill", math.floor(x), math.floor(y), 1, 1)
+      end
+    end
+    love.graphics.setColor(1, 0.5, 0.2, 0.08 * k)
+    love.graphics.circle("fill", hx, hy, 70)
+  end
 end
 
 function overworld.drawBackground(camX, camY)

@@ -973,20 +973,66 @@ local function drawSpace(camX, camY)
   end
 end
 
+-- The black sun bends the far scenery (sky, mountains, mesas) round it as they are drawn: part of the background, so
+-- everything nearer than the mesas is drawn over it untouched
+local bendShader
+local function bendBegin(x, y, w, h)
+  if bendShader == nil then
+    local ok, sh = pcall(love.graphics.newShader, [[
+      uniform vec2 lensPos;
+      uniform float lensR;
+      uniform float strength;
+      uniform vec2 imgPos;
+      uniform vec2 imgSize;
+      vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
+        vec2 d = sc - lensPos;
+        float r = max(length(d), 0.5);
+        float k = lensR / (r + lensR * 0.3);
+        float disp = strength * lensR * 1.2 * k * k * smoothstep(lensR * 7.0, lensR * 0.5, r);
+        disp = min(disp, r * 0.9);
+        vec2 s = sc - d / r * disp;
+        vec2 q = (s - imgPos) / imgSize;
+        if (q.x < 0.0 || q.x > 1.0 || q.y < 0.0 || q.y > 1.0) {
+          return vec4(0.0);
+        }
+        return Texel(tex, q) * color;
+      }
+    ]])
+    bendShader = ok and sh or false
+  end
+  if not bendShader then
+    return
+  end
+  bendShader:send("lensPos", { SUN_X, SUN_Y })
+  bendShader:send("lensR", 30)
+  bendShader:send("strength", 1.1)
+  bendShader:send("imgPos", { x, y })
+  bendShader:send("imgSize", { w, h })
+  love.graphics.setShader(bendShader)
+end
+
 function overworld.drawBackground(camX, camY)
   if camY > CAVE_TOP - 200 then
     return -- the view is all underground; the backdrop (drawDecor) covers it
   end
-  if require("src.meta").isSkyBeaten() then
-    require("src.render").setLens(SUN_X, SUN_Y, 30 / 0.7, 0.4) -- (the sun is a black hole: the light bends round it)
-  end
+  local black = require("src.meta").isSkyBeaten()
   love.graphics.setColor(1, 1, 1)
   -- (stretched across if the view has grown wider than when it was painted)
-  love.graphics.draw(background.sky, 0, 0, 0, math.max(1, config.VIRTUAL_W / background.sky:getWidth()), math.max(1, config.VIRTUAL_H / background.sky:getHeight()))
+  local ssx, ssy = math.max(1, config.VIRTUAL_W / background.sky:getWidth()), math.max(1, config.VIRTUAL_H / background.sky:getHeight())
+  if black then
+    bendBegin(0, 0, background.sky:getWidth() * ssx, background.sky:getHeight() * ssy)
+  end
+  love.graphics.draw(background.sky, 0, 0, 0, ssx, ssy)
+  love.graphics.setShader()
   for i, l in ipairs(background.layers) do
     local oy = -math.floor(camY * l.parallax * 0.5)
     love.graphics.setColor(1, 1, 1)
-    love.graphics.draw(l.image, -math.floor((camX - LEFT) * l.parallax), oy)
+    local lx = -math.floor((camX - LEFT) * l.parallax)
+    if black then
+      bendBegin(lx, oy, l.image:getWidth(), l.image:getHeight())
+    end
+    love.graphics.draw(l.image, lx, oy)
+    love.graphics.setShader()
     -- When the camera is high the layer scrolls up; keep its base filled
     local bottom = oy + l.image:getHeight()
     if bottom < config.VIRTUAL_H then

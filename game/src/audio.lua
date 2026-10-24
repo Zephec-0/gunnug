@@ -549,6 +549,91 @@ local DEFS = {
     end,
     volume = 0.6,
   },
+  -- The Champion of the Heavens (src.starwarden): a bright chime when an orb charges, a plucked whoosh when it flies,
+  -- a rising shimmer before a ray, the crack of the ray, a swelling choir when he grows, a reversed cymbal when he
+  -- slips out of the world, and a low hum under a sweeping hand
+  sw_chime = {
+    gen = function()
+      return synth(1.1, function(t, p)
+        local v = 0
+        for k, f in ipairs({ 660, 990, 1320 }) do
+          v = v + (math.sin(t * f * TAU) + 0.35 * math.sin(t * f * 2.76 * TAU) * math.exp(-t * 6)) * math.exp(-t * (2.2 + k)) / k
+        end
+        return v * 0.5 * math.min(1, t * 300)
+      end)
+    end,
+    volume = 0.5,
+    cooldown = 0.12,
+  },
+  sw_orb = {
+    gen = function()
+      local band = lp(0.3)
+      return synth(0.42, function(t, p)
+        return (band(noise()) * 0.9 * math.sin(p * math.pi) ^ 0.8 + math.sin(t * (1100 - 700 * p) * TAU) * 0.4 * (1 - p)) * 0.8
+      end)
+    end,
+    volume = 0.4,
+    cooldown = 0.08,
+  },
+  sw_charge = {
+    gen = function()
+      return synth(1.1, function(t, p)
+        local f = 300 * 4 ^ p
+        local trem = 0.7 + 0.3 * math.sin(t * (10 + 30 * p) * TAU)
+        return (math.sin(t * f * TAU) * 0.5 + math.sin(t * f * 1.5 * TAU) * 0.25) * trem * p ^ 1.3 * (1 - (p > 0.95 and (p - 0.95) * 20 or 0))
+      end)
+    end,
+    volume = 0.45,
+    cooldown = 0.2,
+  },
+  sw_ray = {
+    gen = function()
+      local low = lp(0.08)
+      local high = hp(0.4)
+      return synth(0.7, function(t, p)
+        local crack = high(noise()) * math.exp(-t * 9)
+        local boom = math.sin(t * (80 - 30 * p) * TAU) * math.exp(-t * 5) * 1.2
+        local sizzle = low(noise()) * 0.7 * math.exp(-t * 3) + math.sin(t * 1760 * TAU) * 0.15 * math.exp(-t * 6)
+        return crack + boom + sizzle
+      end)
+    end,
+    volume = 0.7,
+    cooldown = 0.1,
+  },
+  sw_grow = {
+    gen = function()
+      return synth(2.4, function(t, p)
+        local v = 0
+        for k, f in ipairs({ 110, 165, 220, 330, 440 }) do
+          v = v + math.sin(t * f * TAU + math.sin(t * 5 + k) * 0.6) / k
+        end
+        return v * 0.45 * math.sin(p * math.pi) ^ 0.9
+      end)
+    end,
+    volume = 0.6,
+    cooldown = 0.5,
+  },
+  sw_vanish = {
+    gen = function()
+      local band = hp(0.25)
+      return synth(1.3, function(t, p)
+        return band(noise()) * 1.1 * p ^ 2.2 * (1 - (p > 0.9 and (p - 0.9) * 10 or 0)) + math.sin(t * (200 + 900 * p) * TAU) * 0.2 * p
+      end)
+    end,
+    volume = 0.5,
+    cooldown = 0.5,
+  },
+  sw_hum = {
+    gen = function()
+      local low = lp(0.12)
+      return synth(1.0, function(t, p)
+        local saw = ((t * 140) % 1) * 2 - 1
+        return low(saw + math.sin(t * 280 * TAU) * 0.5) * 1.3 * math.sin(p * math.pi) ^ 0.8
+      end)
+    end,
+    volume = 0.35,
+    cooldown = 0.6,
+  },
   -- A small gulp: two quick throat clicks, each a short pitch dip
   gulp = {
     gen = function()

@@ -213,7 +213,7 @@ local WR = {
 local function drawWraith(e)
   local b = e.body
   local white = e.flash > 0
-  local alpha = e.state == "mist" and 0.28 or (e.state == "sleep" and 0.8 or 0.88)
+  local alpha = e.state == "mist" and 0.28 or 1
   local function color(c, a)
     if white then
       love.graphics.setColor(1, 1, 1, alpha)
@@ -241,10 +241,10 @@ local function drawWraith(e)
   -- the ragged hem: ribbons that wave
   for i = -2, 2 do
     local len = 2 + (i + 2) % 3
-    color(WR.robe, 0.85)
+    color(WR.robe)
     rect(mid + i * 2 + math.sin(ph + i) * 1.2, bottom + 1, 2, len + (st == "lunge" and 2 or 0))
   end
-  color(WR.light, 0.7)
+  color(WR.light)
   rect(mid - 3, top + 1, 1, 6)
   -- head under a hard hat: a dark hollow face, two eyes (drawn in the glow)
   color(WR.robe)
@@ -266,7 +266,7 @@ local function drawWraith(e)
   local ly = ay + 1 + math.floor(math.sin(ph * 0.7) * (asleep and 0 or 1.2) + 0.5)
   color(WR.dark)
   rect(lx - 1, ly, 3, 4)
-  color(WR.lamp, white and 1 or 0.9)
+  color(WR.lamp)
   rect(lx, ly + 1, 1, 2)
 end
 

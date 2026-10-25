@@ -501,11 +501,16 @@ local function drawDevil(e)
     local w = (2 + u * 11) * (spin and 1.2 or 1)
     local off = math.sin(t * 0.7 + row * 0.9) * (1 + u * 2)
     local shade = 0.55 + 0.25 * math.sin(t + row * 1.7)
-    love.graphics.setColor(white and { 1, 1, 1 } or { 0.78 * shade + 0.1, 0.66 * shade + 0.1, 0.50 * shade + 0.1, 0.8 })
-    rect(mid + off - w / 2, y, w, 2)
+    love.graphics.setColor(white and { 1, 1, 1 } or { 0.78 * shade + 0.1, 0.66 * shade + 0.1, 0.50 * shade + 0.1 })
+    -- solid pixels, the ragged edge a one-pixel checker instead of a see-through fringe
+    local wi = math.max(3, math.floor(w + 0.5))
+    local x0 = math.floor(mid + off - wi / 2 + 0.5)
+    rect(x0 + 1, y, wi - 2, 2)
+    rect(x0, y + row % 2)
+    rect(x0 + wi - 1, y + (row + 1) % 2)
     -- the leading edge of each ring, lighter
-    love.graphics.setColor(white and { 1, 1, 1 } or { 0.95, 0.88, 0.7, 0.7 })
-    local ex = mid + off + math.cos(t * 1.3 + row) * w / 2
+    love.graphics.setColor(white and { 1, 1, 1 } or { 0.95, 0.88, 0.7 })
+    local ex = mid + off + math.cos(t * 1.3 + row) * wi / 2
     rect(ex, y, 1, 1)
   end
   -- flung grit

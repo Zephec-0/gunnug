@@ -308,6 +308,53 @@ materials.defs[25] = {
   variation = 0.09, -- (a mottled bone that takes on the ground's colour)
 }
 
+-- Vault rock: the hard rock round the Buried Vault. Only a bullet with the vaultDig effect (src.guns
+-- BULLET_FX; see the table in docs/undercroft-design.md) can dig it; nothing else touches it, whatever its power
+materials.VAULTROCK = 27
+materials.defs[27] = {}
+for k, v in pairs(materials.defs[2]) do
+  materials.defs[27][k] = v
+end
+materials.defs[27].name = "vault rock"
+materials.defs[27].hardness = 4
+materials.defs[27].vault = true
+
+-- The Undercroft's rock (docs/undercroft-design.md). Greywacke: hard grey rock with a green-brown cast, over red
+-- clay, for the zone under the fossil beds
+materials.GREYWACKE = 28
+materials.defs[28] = {
+  name = "greywacke",
+  solid = true,
+  hardness = 3,
+  density = 2.5,
+  color = { 0.31, 0.34, 0.29 },
+  topColor = { 0.47, 0.49, 0.38 },
+  variation = 0.06,
+  bands = 0.05,
+}
+materials.REDCLAY = 29
+materials.defs[29] = {
+  name = "red clay",
+  solid = true,
+  hardness = 1,
+  density = 1.7,
+  color = { 0.44, 0.23, 0.17 },
+  topColor = { 0.62, 0.34, 0.24 },
+  variation = 0.08,
+}
+-- Old grey slate, dusted over: the buried city's rock
+materials.DUSTSLATE = 39
+materials.defs[39] = {
+  name = "dust slate",
+  solid = true,
+  hardness = 3,
+  density = 2.6,
+  color = { 0.30, 0.29, 0.29 },
+  topColor = { 0.54, 0.51, 0.47 },
+  variation = 0.06,
+  bands = 0.06,
+}
+
 -- Blades of grass, stamped into the terrain when an area is generated (src.grass): not solid (bullets, the hunter
 -- and the flow of water and gas pass through them), only painted, three shades of green root to tip for each
 -- material that grows grass. A blade whose ground is dug away vanishes on the next repaint (see World:colorAt).

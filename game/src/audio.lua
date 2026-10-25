@@ -2751,8 +2751,37 @@ local TABLE_TRACK = {
   },
 }
 
+-- The Hollow King's: heavy and slow, in C minor, a low saw pulse under cold bells
+local HOLLOW_TRACK = {
+  bpm = 72,
+  bars = 8,
+  echo = { delay = 0.416, fb = 0.5 },
+  prog = { "Cm", "Cm", "Ab", "Ab", "Fm", "Fm", "G", "G" },
+  chords = {
+    Cm = { root = "C2", fifth = "G2", pad = { "C3", "G3", "C4", "Eb4" }, notes = { "C4", "Eb4", "G4", "Bb4", "C5" } },
+    Ab = { root = "Ab1", fifth = "Eb2", pad = { "Ab2", "Eb3", "Ab3", "C4" }, notes = { "Ab3", "C4", "Eb4", "G4", "Ab4" } },
+    Fm = { root = "F2", fifth = "C3", pad = { "F3", "C4", "F4", "Ab4" }, notes = { "F4", "Ab4", "C5", "Eb5", "F5" } },
+    G = { root = "G1", fifth = "D2", pad = { "G2", "D3", "G3", "B3" }, notes = { "G3", "B3", "D4", "F4", "G4" } },
+  },
+  channels = {
+    { drum = true, gain = 0.7, steps = 8, tokens = everyBar("k - - k - - k -") },
+    { drum = true, gain = 0.16, steps = 8, tokens = everyBar("- - s - - - s -") },
+    { wave = "saw", gain = 0.1, steps = 4, a = 0.02, r = 0.25, legato = 0.9, tokens = bassPattern("R . R 5") },
+    { wave = "sine", gain = 0.34, steps = 1, a = 0.3, r = 0.9, legato = 1.0, tokens = bassPattern("R") },
+    { wave = "saw", gain = 0.05, steps = 1, a = 1.0, r = 0.8, legato = 1.0, tokens = padPattern() },
+    { wave = "tri", gain = 0.1, steps = 1, a = 0.8, r = 0.8, legato = 1.0, tokens = padPattern() },
+    {
+      wave = "p50", gain = 0.05, steps = 8, pluck = 6,
+      tokens = explicit({
+        "C6 . . . - - - -", "- - - - G5 . . .", "Eb6 . . . - - - -", "- - - - Bb5 . . .",
+        "C6 . . . - - - -", "- - - - Ab5 . . .", "F6 . . . - - - -", "- - - - C6 . . .",
+      }),
+    },
+  },
+}
+
 -- Each boss fight's theme (audio.setBoss): the Dark Hunter's is the "hunter" one
-local BOSS_TRACKS = { hunter = BOSS_TRACK, bigfish = FISH_TRACK, queen = QUEEN_TRACK, golem = GOLEM_TRACK, table = TABLE_TRACK }
+local BOSS_TRACKS = { hunter = BOSS_TRACK, bigfish = FISH_TRACK, queen = QUEEN_TRACK, golem = GOLEM_TRACK, table = TABLE_TRACK, hollowking = HOLLOW_TRACK }
 
 -- The title screen's theme: a slow, cold drift in D minor with a glassy bell
 -- line, falling away into a long echo
@@ -3149,7 +3178,7 @@ local playCheck = 0 -- (looping music never stops by itself: whether it is playi
 
 local eventTimers = {}
 local lastArea
-local AREA_TRACK = {} -- areas that borrow another area's music (none now: every area has its own theme)
+local AREA_TRACK = { [14] = 6, [15] = 12, [16] = 13, [17] = 9 } -- areas that borrow another area's music (the Undercroft borrows the Quarry's, the Foundry's, the Silt Vaults' and the Deep's)
 
 -- Fades the wind, the area themes and the shop's piano: underground is 0 (open
 -- air) to 1; area is the number of the area the hunter is in (nil on the

@@ -42,6 +42,8 @@ local ADJECTIVES = {
   cometling = { "Streaking", "Tailed", "Falling" },
   stormcloud = { "Thundering", "Brooding", "Lightning-Struck" },
   starguardian = { "Burning", "Faithful", "Star-Bound" },
+  slagback = { "Glowing", "Cracked", "Slow-Burning" },
+  ashshade = { "Choking", "Grey", "Drifting" },
 }
 local BOSS_ADJECTIVES = { "Mighty", "Merciless", "Terrible", "Dreaded" }
 local GENERAL_ADJECTIVES = { "Wicked", "Ornery", "Cussed" }

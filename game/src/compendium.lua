@@ -113,13 +113,13 @@ end
 local RATES = {
   bat = 18, swarmbat = 20, dreadbat = 11, wisp = 6, crow = 14, dustdevil = 8, gargoyle = 8, wraith = 5, ethercrawler = 14,
   cloudray = 8, starmoth = 22, sentinel = 3, windspirit = 6, gildedlens = 4, cometling = 10, stormcloud = 2, starguardian = 3,
-  bloater = 2, queen = 2, jellyfish = 2, angler = 1, urchin = 1.5, spitter = 1, worm = 2,
+  bloater = 2, queen = 2, jellyfish = 2, angler = 1, urchin = 1.5, spitter = 1, worm = 2, ashshade = 6,
 }
 -- How far the flyers bob up and down
 local BOB = {
   bat = 2, swarmbat = 2, dreadbat = 3, wisp = 3, crow = 2, dustdevil = 2, gargoyle = 2, wraith = 2,
   cloudray = 3, starmoth = 3, sentinel = 2, windspirit = 3, gildedlens = 2, cometling = 2, stormcloud = 3, starguardian = 2,
-  jellyfish = 3, starwarden = 3, urchin = 2, piranha = 1, bigfish_1 = 1, bigfish_2 = 1,
+  jellyfish = 3, starwarden = 3, urchin = 2, piranha = 1, bigfish_1 = 1, bigfish_2 = 1, ashshade = 3,
 }
 
 -- What each kind does while it waits, on top of its animation clock (e is the specimen, t the time).
@@ -170,7 +170,7 @@ local EXTRA = {
 local ENEMY_ORDER = {
   "ghoul", "bat", "swarmbat", "spitter", "hopper", "bloater", "wisp", "worm", "miner", "roller", "piranha",
   "jellyfish", "angler", "urchin", "crow", "cragram", "dustdevil", "gargoyle", "wraith", "cairncrab", "ethercrawler", "minigolem", "cloudray", "starmoth", "sentinel", "windspirit", "gildedlens", "cometling", "stormcloud", "starguardian",
-  "warden", "dreadbat", "matron", "behemoth", "queen", "golem", "darkhunter", "crowrider", "starwarden",
+  "warden", "dreadbat", "matron", "behemoth", "queen", "golem", "darkhunter", "crowrider", "starwarden", "hollowking",
   "bigfish_1", "bigfish_2", "bigfish_3", "bigfish",
 }
 
@@ -354,7 +354,9 @@ local function build()
   for _, id in ipairs(items.fusedOrder or {}) do
     itemOrder[#itemOrder + 1] = id
   end
-  for _, id in ipairs(ordered(items.defs, itemOrder)) do
+  for _, id in ipairs(ordered(items.defs, itemOrder, function(id, def)
+    return def.compendium ~= false and not (def.secret and not require("src.meta").isUnlocked(def.kind, id))
+  end)) do
     local d = items.defs[id]
     local thing = items.new(id)
     local a, b = items.recipe(id)
@@ -399,7 +401,9 @@ local function build()
     end
   end
 
-  for _, id in ipairs(ordered(perks.defs, perks.order)) do
+  for _, id in ipairs(ordered(perks.defs, perks.order, function(_, def)
+    return def.compendium ~= false
+  end)) do
     local d = perks.defs[id]
     add("perk", {
       id = id,

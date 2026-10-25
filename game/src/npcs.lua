@@ -54,6 +54,7 @@ function npcs.clear()
   cages = {}
   camp = {}
   board = nil
+  hatStand = nil
   pond = nil
 end
 
@@ -80,6 +81,11 @@ end
 
 -- The bounty board at camp (src.bounties): always there
 local board -- { x, y = ground }
+local hatStand -- { x, y = ground }: where the hunter changes his hat (src.meta HATS)
+
+function npcs.setHatStand(x, groundY)
+  hatStand = { x = math.floor(x), y = math.floor(groundY) }
+end
 
 function npcs.setBoard(x, groundY)
   board = { x = math.floor(x), y = math.floor(groundY) }
@@ -339,6 +345,14 @@ local function nearBoard(player)
   return math.abs(px - board.x) < TALK_REACH and math.abs(py - (board.y - 10)) < 24
 end
 
+local function nearHatStand(player)
+  if not hatStand then
+    return false
+  end
+  local px, py = player:center()
+  return math.abs(px - hatStand.x) < TALK_REACH and math.abs(py - (hatStand.y - 10)) < 24
+end
+
 -- Someone out cold on the water, next to the hunter
 local function nearFloat(player)
   local px, py = player:center()
@@ -359,6 +373,13 @@ function npcs.interact(player)
     audio.play("page")
     if npcs.onTalk then
       npcs.onTalk("board")
+    end
+    return true
+  end
+  if nearHatStand(player) then
+    audio.play("page")
+    if npcs.onTalk then
+      npcs.onTalk("hats")
     end
     return true
   end
@@ -889,6 +910,30 @@ local function drawBoard(view)
   end
 end
 
+-- The hat stand: a post with three pegs, a hat on each, and the one the hunter is wearing in the middle
+local function drawHatStand()
+  local hx, g = hatStand.x, hatStand.y
+  R(WOOD_D, hx - 1, g - 24, 3, 24)
+  R(WOOD_D, hx - 6, g - 2, 13, 2)
+  R(WOOD, hx - 1, g - 24, 1, 22)
+  local worn = meta.hat()
+  local pegs = { { -9, -17 }, { 0, -26 }, { 9, -17 } }
+  local i = 0
+  for _, h in ipairs(meta.HATS) do
+    if h.id ~= "plain" then
+      i = i + 1
+      local px, py = hx + pegs[i][1], g + pegs[i][2]
+      R(WOOD_D, px < hx and px or (px > hx and px - 4 or px), py, math.abs(px - hx) > 0 and 5 or 1, 1) -- the peg
+      R({ 0.11, 0.09, 0.11 }, px - 3, py - 2, 7, 1) -- brim
+      R({ 0.11, 0.09, 0.11 }, px - 2, py - 5, 5, 3) -- crown
+      R(h.band, px - 2, py - 3, 5, 1)
+      if worn == h.id then
+        R({ 1, 0.88, 0.6 }, px - 1, py - 8, 3, 1) -- a marker over the hat that is worn
+      end
+    end
+  end
+end
+
 local function inView(view, x, y, m)
   return x > view.x - m and x < view.x + view.w + m and y > view.y - m and y < view.y + view.h + m
 end
@@ -900,6 +945,9 @@ function npcs.draw(view, player)
   end
   if board and meta.boardOpen() and inView(view, board.x, board.y, 40) then
     drawBoard(view)
+  end
+  if hatStand and inView(view, hatStand.x, hatStand.y, 40) then
+    drawHatStand()
   end
   for _, c in ipairs(cages) do
     if inView(view, c.x, c.y, 40) then
@@ -1041,6 +1089,16 @@ function npcs.drawScreen(toScreen, font, player)
   if player and not player.dead and nearPond(player) then
     local text = "[" .. input.label("interact") .. "] Talk to the Bartender"
     local sx, sy = toScreen(pond.x, pond.y + 4)
+    love.graphics.setFont(font)
+    local x, y = math.floor(sx - font:getWidth(text) / 2), math.floor(sy)
+    love.graphics.setColor(0, 0, 0, 0.85)
+    love.graphics.print(text, x + 2, y + 2)
+    love.graphics.setColor(1, 0.88, 0.6)
+    love.graphics.print(text, x, y)
+  end
+  if player and not player.dead and nearHatStand(player) then
+    local text = "[" .. input.label("interact") .. "] Change hats"
+    local sx, sy = toScreen(hatStand.x, hatStand.y + 4)
     love.graphics.setFont(font)
     local x, y = math.floor(sx - font:getWidth(text) / 2), math.floor(sy)
     love.graphics.setColor(0, 0, 0, 0.85)

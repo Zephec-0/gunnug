@@ -318,6 +318,7 @@ local ADDED = {
   "bleed", "leech", "ramp", "lastRound", "blastSize", "bounceBoost", "critBoost", "far", "close",
   "burst", "rear", "opener", "quickdraw", "mortar",
   "laser", "bayonet", "overheat", "jets", "steady", "vulnerable", "bgReload",
+  "vaultDig", "moveSpeed",
 }
 -- Ammo with any of these tints its bullets with the item's colour
 local TINTING = {
@@ -329,7 +330,7 @@ local TINTING = {
 local BULLET_FX = {
   "freeze", "shock", "poison", "acid", "concussive", "vamp", "greed", "refill", "sticky", "homing", "gravity",
   "split", "cluster", "boomerang", "ghost", "execute", "glow", "sneak",
-  "bleed", "leech", "bounceBoost", "far", "close",
+  "bleed", "leech", "bounceBoost", "far", "close", "vaultDig",
 }
 
 -- Effects whose order in the slots matters: what a bullet does on impact, against
@@ -590,8 +591,8 @@ end
 function Gun:update(dt)
   self.fireTimer = math.max(0, self.fireTimer - dt)
   self.heat = math.max(0, self.heat - 4 * dt)
-  if self.chambers <= 0 and self.reloadTimer <= 0 then
-    self:reload() -- an empty gun goes straight back to reloading
+  if self.chambers <= 0 and self.reloadTimer <= 0 and not guns.manualReload then
+    self:reload() -- an empty gun goes straight back to reloading (unless a hat says to do it by hand)
   end
   if self.reloadTimer > 0 then
     self.reloadTimer = self.reloadTimer - dt

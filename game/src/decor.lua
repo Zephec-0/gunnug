@@ -123,6 +123,52 @@ sets.flooded = {
   { shape = "strand", name = "drip", cover = 0.014, len = { 2, 6 }, water = "avoid", colors = { rgb(0.36, 0.50, 0.66), rgb(0.58, 0.76, 0.90), rgb(0.92, 0.98, 1.0) } },
 }
 
+-- The Undercroft, under the fossil beds (the Greywacke): hard grey rock with a green-brown cast, clay red strata,
+-- scree, lichen, clay drifts and pale green stone
+sets.greywacke = {
+  tint = {
+    { kind = "strata", color = rgb(0.58, 0.22, 0.14), amount = 0.24, freq = 0.17, cut = 0.5 }, -- clay red bands
+    { kind = "blotch", color = rgb(0.36, 0.48, 0.28), amount = 0.18, freq = 0.014, cut = 0.4, soft = 1.6, seed = 21 }, -- muted green staining
+    { kind = "streak", color = rgb(0.20, 0.18, 0.15), amount = 0.18, freq = 0.5, cut = 0.55 },
+  },
+  { shape = "mound", name = "gwscree", cover = 0.09, w = { 3, 9 }, h = { 1, 3 }, colors = { rgb(0.24, 0.26, 0.22), rgb(0.38, 0.41, 0.34), rgb(0.54, 0.56, 0.46) }, water = "avoid" },
+  { shape = "tuft", name = "gwlichen", cover = 0.09, h = { 1, 3 }, lean = true, colors = { rgb(0.22, 0.30, 0.15), rgb(0.38, 0.48, 0.24), rgb(0.58, 0.68, 0.38) }, water = "avoid" },
+  { shape = "mound", name = "gwclay", cover = 0.05, w = { 4, 11 }, h = { 1, 2 }, colors = { rgb(0.34, 0.16, 0.12), rgb(0.52, 0.26, 0.18), rgb(0.68, 0.38, 0.26) }, water = "avoid" },
+  { shape = "strand", name = "gwroot", cover = 0.02, len = { 4, 13 }, sway = 1, colors = { rgb(0.22, 0.17, 0.12), rgb(0.34, 0.26, 0.17), rgb(0.48, 0.37, 0.24) }, water = "avoid" },
+  { shape = "streak", name = "gwiron", cover = 0.007, len = { 5, 16 }, colors = { rgb(0.30, 0.13, 0.08), rgb(0.50, 0.22, 0.12), rgb(0.66, 0.32, 0.18) }, water = "avoid" },
+  { shape = "tuft", name = "gwgreenstone", cover = 0.012, h = { 3, 6 }, twin = 0.6, colors = { rgb(0.26, 0.40, 0.28), rgb(0.50, 0.68, 0.46), rgb(0.82, 0.94, 0.70) }, water = "avoid" },
+}
+
+-- The buried city: grey slate and clay, dust lying over it in drifts, cracks, dead roots and cobweb
+sets.buriedcity = {
+  tint = {
+    { kind = "blotch", color = rgb(0.80, 0.75, 0.66), amount = 0.24, freq = 0.012, cut = 0.35, soft = 1.8, seed = 31 }, -- dust lying over it
+    { kind = "strata", color = rgb(0.52, 0.27, 0.20), amount = 0.16, freq = 0.22, cut = 0.5 }, -- clay bands
+    { kind = "blotch", color = rgb(0.10, 0.09, 0.10), amount = 0.14, freq = 0.02, cut = 0.42, soft = 1.5, seed = 37 }, -- soot
+  },
+  { shape = "mound", name = "bcdust", cover = 0.22, w = { 6, 16 }, h = { 1, 3 }, colors = { rgb(0.40, 0.37, 0.33), rgb(0.60, 0.56, 0.49), rgb(0.78, 0.74, 0.66) }, water = "avoid" },
+  { shape = "mound", name = "bcrubble", cover = 0.08, w = { 3, 8 }, h = { 1, 3 }, colors = { rgb(0.22, 0.21, 0.21), rgb(0.36, 0.35, 0.34), rgb(0.50, 0.48, 0.45) }, water = "avoid" },
+  { shape = "strand", name = "bcdeadroot", cover = 0.018, len = { 4, 14 }, sway = 1, colors = { rgb(0.20, 0.16, 0.13), rgb(0.32, 0.26, 0.20), rgb(0.46, 0.38, 0.29) }, water = "avoid" },
+  { shape = "fringe", name = "bccobweb", cover = 0.012, w = { 4, 10 }, colors = { rgb(0.56, 0.55, 0.53), rgb(0.72, 0.71, 0.68), rgb(0.86, 0.85, 0.82) }, water = "avoid" },
+  { shape = "streak", name = "bccrack", cover = 0.01, len = { 5, 17 }, colors = { rgb(0.08, 0.07, 0.07), rgb(0.14, 0.13, 0.13), rgb(0.22, 0.21, 0.20) }, water = "avoid" },
+  { shape = "streak", name = "bcclay", cover = 0.008, len = { 5, 14 }, colors = { rgb(0.32, 0.15, 0.11), rgb(0.50, 0.24, 0.17), rgb(0.64, 0.34, 0.24) }, water = "avoid" },
+}
+
+-- The core: dark brown and grey rock, soot, ash, cooled slag and seams of magma
+sets.core = {
+  tint = {
+    { kind = "strata", color = rgb(0.06, 0.05, 0.05), amount = 0.40, freq = 0.28, cut = 0.5 }, -- soot bands
+    { kind = "blotch", color = rgb(0.36, 0.21, 0.12), amount = 0.22, freq = 0.02, cut = 0.45, soft = 1.5, seed = 41 }, -- dark brown
+    { kind = "blotch", color = rgb(0.95, 0.38, 0.10), amount = 0.16, freq = 0.05, cut = 0.68, seed = 43 }, -- magma showing through
+    { kind = "streak", color = rgb(0.28, 0.27, 0.27), amount = 0.22, freq = 0.5, cut = 0.58 },
+  },
+  { shape = "mound", name = "coreash", cover = 0.10, w = { 4, 12 }, h = { 1, 3 }, colors = { rgb(0.17, 0.16, 0.16), rgb(0.30, 0.28, 0.27), rgb(0.44, 0.41, 0.39) }, water = "avoid" },
+  { shape = "mound", name = "coreslag", cover = 0.05, w = { 2, 6 }, h = { 1, 2 }, colors = { rgb(0.14, 0.09, 0.07), rgb(0.32, 0.14, 0.08), rgb(0.78, 0.34, 0.10) }, water = "avoid" },
+  { shape = "tuft", name = "corespike", cover = 0.035, h = { 2, 7 }, twin = 0.5, colors = { rgb(0.20, 0.10, 0.08), rgb(0.46, 0.18, 0.08), rgb(1.0, 0.54, 0.16) }, water = "avoid" },
+  { shape = "strand", name = "coreroot", cover = 0.02, len = { 4, 15 }, sway = 1, colors = { rgb(0.12, 0.09, 0.08), rgb(0.22, 0.15, 0.11), rgb(0.32, 0.22, 0.15) }, water = "avoid" },
+  { shape = "streak", name = "coreseam", cover = 0.01, len = { 6, 18 }, colors = { rgb(0.30, 0.10, 0.06), rgb(0.74, 0.26, 0.08), rgb(1.0, 0.56, 0.18) }, water = "avoid" },
+}
+
 -- ---------------------------------------------------------------------------------------------------------------
 -- Shapes. Each puts decoration pixels (stampPixel only ever writes into open air) for a spot found by the scan.
 -- ---------------------------------------------------------------------------------------------------------------

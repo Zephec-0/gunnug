@@ -538,7 +538,7 @@ function game.load()
     menu.open("ghost")
   end
   npcs.onTalk = function(id)
-    menu.open(id == "board" and "board" or "camp", id)
+    menu.open((id == "board" or id == "hats") and id or "camp", id)
   end
   -- Akimbo taken: the third weapon slot goes (its gun moves over, or drops)
   perks.onAdd = function(id)
@@ -971,6 +971,7 @@ function game.update(dt)
   if playing then
     track(area)
     bounties.update(player, area)
+    meta.speedFeat(player, dt)
     if not player.dead then
       surveymap.update(dt, player:center())
     end

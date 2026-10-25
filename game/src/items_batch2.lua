@@ -61,7 +61,7 @@ A("rangefinder", "Rangefinder", "RF", { 0.45, 0.78, 0.95 }, "attachment", "commo
   "Shots hit up to 50% harder the further they have flown. +10% bullet speed.")
 A("sawnstock", "Sawn Stock", "SW", { 0.7, 0.45, 0.3 }, "attachment", "common", { close = 0.6, spread = 1.2, recoil = 1.2 },
   "Up to 60% more damage at point-blank range. Wider spread, more kick.")
-A("pick", "Prospector's Pick", "PK", { 0.9, 0.78, 0.4 }, "attachment", "common", { digRadius = 1, digPower = 1, greed = 0.25 },
+A("pick", "Prospector's Pick", "PK", { 0.9, 0.78, 0.4 }, "attachment", "common", { digRadius = 1, digPower = 1, greed = 0.25, vaultDig = 1 },
   "Bullets dig deeper and kills spill 25% more gold.")
 
 -- Rare ammo -----------------------------------------------------------------
@@ -101,7 +101,7 @@ A("fang", "Vampire Fang", "VF", { 0.85, 0.15, 0.25 }, "attachment", "rare", { va
   "Kills heal you, and hits drink a little.")
 A("reloadengine", "Reload Engine", "RL", { 0.5, 0.8, 0.6 }, "attachment", "rare", { reloadTime = 0.45, chambers = 0.9 },
   "Reloads in under half the time. 10% fewer chambers.")
-A("treasurebarrel", "Treasure Hunter's Barrel", "TB", { 1.0, 0.85, 0.3 }, "attachment", "rare", { greed = 1, magnet = 100, digPower = 1 },
+A("treasurebarrel", "Treasure Hunter's Barrel", "TB", { 1.0, 0.85, 0.3 }, "attachment", "rare", { greed = 1, magnet = 100, digPower = 1, vaultDig = 1 },
   "Kills spill double gold, gold flies to you from 100 px, and bullets dig a little.")
 A("huntersscope", "Hunter's Scope", "HU", { 0.55, 0.75, 0.55 }, "attachment", "rare", { far = 0.8, critChance = 0.15, laser = 1 },
   "A laser sight, +15% crit chance and up to 80% more damage at range.")

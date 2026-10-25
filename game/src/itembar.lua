@@ -170,6 +170,7 @@ function itembar.isOpen()
   return isOpen
 end
 
+
 function itembar.toggle()
   isOpen = not isOpen
   drag = nil
@@ -443,6 +444,12 @@ local function hitTest(mx, my)
     end
   end
   return nil
+end
+
+-- The slot under a point (window pixels) as { kind, index }, or nil: for what is dragged in from outside (src.eventui)
+function itembar.slotAt(x, y)
+  local h = hitTest(x, y)
+  return h and h.ref or nil
 end
 
 local function shadowPrint(text, x, y, f, color)

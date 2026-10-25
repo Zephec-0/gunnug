@@ -20,6 +20,8 @@
 --     vulnerable                               (curse: damage taken +20% each)
 --     bleed leech ramp lastRound blastSize bounceBoost critBoost far close   (see src.items_batch2)
 --     bgReload                                 (keeps reloading while holstered)
+--     vaultDig                                 (can dig vault rock; see src.materials VAULTROCK)
+--     moveSpeed                                (the hunter runs this much faster while the gun is in his hand)
 --
 -- Rarity: "common", "rare" or "cursed" (powerful, with a real downside).
 -- An item is a table { kind = "ammo" | "attachment", id, name, short, color,
@@ -36,6 +38,8 @@ items.rarities = {
   epic = { name = "Epic", weight = 0.8, price = { 90, 130 }, border = { 0.72, 0.42, 1.0 } },
   -- Made only in the fuser (src.fuser), never found: weight 0
   fused = { name = "Fused", weight = 0, price = { 80, 110 }, border = { 0.25, 1.0, 0.82 } },
+  -- The Sunken Key (below): never found at random, never sold, never listed
+  relic = { name = "Relic", weight = 0, price = { 0, 0 }, border = { 0.85, 0.7, 0.35 } },
 }
 
 items.defs = {
@@ -175,7 +179,7 @@ items.defs = {
     color = { 0.65, 0.50, 0.35 },
     rarity = "common",
     desc = "Bores big holes: +3 crater size, digs hard rock. -20% damage.",
-    mods = { digRadius = 3, digPower = 2, damage = 0.8 },
+    mods = { digRadius = 3, digPower = 2, damage = 0.8, vaultDig = 1 },
   },
   splitting = {
     kind = "ammo",
@@ -202,7 +206,7 @@ items.defs = {
     color = { 0.75, 0.95, 0.25 },
     rarity = "common",
     desc = "Corrodes enemies: they take 30% more damage from everything for 4 seconds. Eats rock a little.",
-    mods = { acid = 1, digRadius = 1, damage = 0.9 },
+    mods = { acid = 1, digRadius = 1, damage = 0.9, vaultDig = 1 },
   },
   concussive = {
     kind = "ammo",
@@ -552,7 +556,7 @@ local FUSED = {
   blight = {
     kind = "ammo", name = "Blight Rounds", short = "BL", color = { 0.55, 0.95, 0.35 },
     desc = "Poisons and corrodes: enemies take 30% more damage while the venom eats at them. Eats rock a little.",
-    mods = { poison = 1, acid = 1, digRadius = 1 },
+    mods = { poison = 1, acid = 1, digRadius = 1, vaultDig = 1 },
   },
   sledge = {
     kind = "ammo", name = "Sledge Rounds", short = "SD", color = { 0.75, 0.72, 0.85 },
@@ -577,7 +581,7 @@ local FUSED = {
   corkscrew = {
     kind = "ammo", name = "Corkscrew Rounds", short = "CK", color = { 0.8, 0.6, 0.4 },
     desc = "Bullets bore big holes through hard rock, then come back and bore again. -10% damage.",
-    mods = { digRadius = 3, digPower = 2, boomerang = 1, damage = 0.9 },
+    mods = { digRadius = 3, digPower = 2, boomerang = 1, damage = 0.9, vaultDig = 1 },
   },
   -- Attachments from two attachments ------------------------------------------
   marksman = {
@@ -646,6 +650,44 @@ for _, id in ipairs(batch2.fusedOrder) do
   items.fusedOrder[#items.fusedOrder + 1] = id
 end
 
+-- The Sunken Key: the Relic from the Buried Vault (src.buriedvault). It does nothing when fitted; carried to the
+-- Deep, it opens the way down (docs/undercroft-design.md). Not in items.order or items.fusedOrder, so nothing
+-- generates it, and the compendium leaves it out.
+items.defs.sunkenkey = {
+  kind = "attachment",
+  name = "The Sunken Key",
+  short = "SK",
+  color = { 0.85, 0.7, 0.35 },
+  rarity = "relic",
+  desc = "A heavy key of black iron, cold to hold. It fits no lock you know.",
+  mods = {},
+  compendium = false,
+}
+
+-- Two secrets (docs/undercroft-design.md section 5). The Ace of Spades comes off the High-Low table (src.eventui),
+-- dragged to the item bar; Redline Rounds are unlocked for good by moving faster than anything should
+-- (src.meta.speedFeat). Neither is shown in the compendium until it has been found.
+items.defs.aceofspades = {
+  kind = "ammo",
+  name = "The Ace of Spades",
+  short = "AS",
+  color = { 0.86, 0.86, 0.94 },
+  rarity = "relic",
+  desc = "A card from the house's own deck, worn soft at the corners. Every shot is a gamble: critical hits are far more likely and far worse for what they land on, and the plain hits are a little weak.",
+  mods = { critChance = 0.4, critBoost = 1.0, damage = 0.9 },
+  compendium = false,
+}
+items.defs.redline = {
+  kind = "ammo",
+  name = "Redline Rounds",
+  short = "RL",
+  color = { 1.0, 0.35, 0.2 },
+  rarity = "rare",
+  desc = "Loaded for speed: bullets fly half again as fast and hit 15% harder, with more kick, and the hunter runs 15% faster for as long as the gun is in his hand. He has moved this fast before, and does not forget it.",
+  mods = { bulletSpeed = 1.5, damage = 1.15, recoil = 1.2, moveSpeed = 0.15 },
+  secret = true,
+}
+
 -- What fuses into what: two common items (in either order) -> a fused one
 items.fusions = {
   { "incendiary", "frost", "thermal" },
@@ -709,6 +751,7 @@ items.order = {
 for _, id in ipairs(batch2.order) do
   items.order[#items.order + 1] = id
 end
+items.order[#items.order + 1] = "redline" -- (rolled only once the speed secret has unlocked it)
 
 -- Uncommon, the middle tier (some moved down from rare, some up from common)
 for _, id in ipairs({ "incendiary", "frost", "poison", "splitting", "boomerang", "acid", "concussive", "burst", "backblast", "charge", "laser", "bayonet", "scavenger", "quickdraw", "hollowpoint", "leechround", "lucky", "brass", "rangefinder", "sawnstock", "pick", "rubber", "dumdum", "piercing", "shock", "sticky", "spectral", "jets", "scope", "stormround", "marked", "napalm", "hemorrhage", "grapeshot", "rebound" }) do

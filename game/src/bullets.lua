@@ -84,7 +84,7 @@ local function explode(b, w, x, y)
   local radius = (26 + 6 * (count - 1)) * (scale < 1 and 0.75 or 1)
   local damage = (10 + 4 * (count - 1)) * scale
   local dug = b.blastDig or math.max(3, radius * 0.25)
-  destruction.dig(w, x, y, dug, b.blastPower or 1.5, b.dx, b.dy)
+  destruction.dig(w, x, y, dug, b.blastPower or 1.5, b.dx, b.dy) -- (no blast digs vault rock)
   gore.scorch(w, x, y, dug + radius * 0.12)
   effects.explosion(x, y, radius)
   fluids.explosion(x, y, radius) -- lights any gas it reaches
@@ -484,7 +484,7 @@ local function step(b, dt, w)
         elseif b.explosive then
           explode(b, w, b.x, b.y) -- the blast does the digging
         elseif b.digRadius > 0 then
-          destruction.dig(w, px + 0.5, py + 0.5, b.digRadius, b.digPower, b.dx, b.dy)
+          destruction.dig(w, px + 0.5, py + 0.5, b.digRadius, b.digPower, b.dx, b.dy, has(fx, "vaultDig"))
         end
         if (b.bolt or b.flare) and #marks < 60 then
           marks[#marks + 1] = { x = b.x + b.dx * 1.5, y = b.y + b.dy * 1.5, dx = b.dx, dy = b.dy, kind = b.bolt and "bolt" or "flare", t = b.bolt and 14 or 16, spark = 0 }

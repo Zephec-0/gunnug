@@ -638,7 +638,8 @@ function Player:update(dt, aimX, aimY)
     self:updateCrouch(dt, controls.down("crouch"))
   end
 
-  local walk = cfg.walkSpeed * perks.prod("speed") * (self.haste > 0 and 1.35 or 1) * (self.inWater and 0.6 or 1)
+  local held = self.gun and self.gun:stats().moveSpeed or 0 -- (Redline Rounds: faster while the gun is in his hand)
+  local walk = cfg.walkSpeed * perks.prod("speed") * (1 + held) * (self.haste > 0 and 1.35 or 1) * (self.inWater and 0.6 or 1)
   local maxSpeed = (self.crouched and self.grounded) and cfg.crouchSpeed or walk
   local friction = self.grounded and cfg.groundFriction or cfg.airFriction
   if self.rollT then

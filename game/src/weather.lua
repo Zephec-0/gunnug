@@ -8,7 +8,7 @@ local audio = require("src.audio")
 local effects = require("src.effects")
 local lighting = require("src.lighting")
 
-local weather = { wind = 0, dust = 0, drift = 0 }
+local weather = { wind = 0, dust = 0, drift = 0, ash = 0 }
 
 local W, H = 640, 360
 local state = "clear" -- or "dust"
@@ -25,6 +25,12 @@ for i = 1, STREAKS do
   streaks[i] = { x = math.random() * W, y = math.random() * H, d = 0.5 + math.random() * 1.0, len = 3 + math.random() * 8, a = 0.2 + math.random() * 0.5 }
 end
 
+-- Ash falling over the surface once the core has gone out (src.meta.undercroftBeaten): flakes drifting down
+local flakes = {}
+for i = 1, 140 do
+  flakes[i] = { x = math.random() * W, y = math.random() * H, d = 0.4 + math.random() * 1.0, a = 0.3 + math.random() * 0.5 }
+end
+
 -- (for tests) jump straight into a state
 function weather.force(name)
   state, stateTimer = name, 120
@@ -37,6 +43,7 @@ function weather.reset()
   state, stateTimer, windDir, dirTimer = "clear", 25 + math.random() * 40, 1, 30
   gust, gustTimer = 0, 8
   weather.wind, weather.dust, weather.drift = 0, 0, 0
+  weather.ash = 0
 end
 
 -- surface: 1 above ground .. 0 deep underground
@@ -54,6 +61,8 @@ function weather.update(dt, surface)
     dirTimer = 20 + love.math.random() * 40
     windDir = love.math.random() < 0.7 and windDir or -windDir
   end
+  local ashTarget = require("src.meta").undercroftBeaten() and 1 or 0
+  weather.ash = weather.ash + (ashTarget - weather.ash) * math.min(1, dt * 0.4)
   local dustTarget = state == "dust" and 1 or 0
   weather.dust = weather.dust + (dustTarget - weather.dust) * math.min(1, dt * 0.3)
 
@@ -68,7 +77,7 @@ function weather.update(dt, surface)
   gust = math.max(0, gust - dt / 3)
   local swell = gust * math.sin((1 - gust) * math.pi) -- rises then dies away
   local t = love.timer.getTime()
-  surfaceWind = windDir * (12 + 18 * (0.5 + 0.5 * math.sin(t * 0.13)) + 90 * weather.dust + 70 * gustMax * swell)
+  surfaceWind = windDir * (12 + 18 * (0.5 + 0.5 * math.sin(t * 0.13)) + 90 * weather.dust + 70 * gustMax * swell + 14 * weather.ash)
   caveWind = windDir * (3 + 5 * math.sin(t * 0.09) + 40 * gustMax * swell)
   local target = caveWind + (surfaceWind - caveWind) * surface
   weather.wind = weather.wind + (target - weather.wind) * math.min(1, dt * 1.5)
@@ -81,6 +90,17 @@ end
 
 -- Dulls the surface's look in a storm: fx and ambient are the scene's (modified in place)
 function weather.apply(fx, ambient, surface)
+  local k = weather.ash * surface
+  if k > 0.001 then
+    -- after the core: a dull, grey, smoky day, the shafts of sun smothered
+    fx.shaft = (fx.shaft or 0) * (1 - 0.7 * k)
+    fx.sat = (fx.sat or 1) * (1 - 0.35 * k)
+    fx.vig = (fx.vig or 0.38) + 0.1 * k
+    local dull = { 0.50, 0.42, 0.40 }
+    for i = 1, 3 do
+      ambient[i] = ambient[i] + (dull[i] - ambient[i]) * 0.5 * k
+    end
+  end
   local d = weather.dust * surface
   if d <= 0.001 then
     return
@@ -97,6 +117,28 @@ end
 
 -- Sand streaming across the view (screen space, on the low-res canvas)
 function weather.drawScreen(dt)
+  local k = weather.ash * (weather.surface or 1)
+  if k > 0.01 then
+    love.graphics.push("all")
+    love.graphics.origin()
+    love.graphics.setColor(0.42, 0.40, 0.38, 0.14 * k) -- the haze
+    love.graphics.rectangle("fill", 0, 0, W, H)
+    for _, f in ipairs(flakes) do
+      f.x = f.x + weather.wind * f.d * dt * 0.8 + math.sin(f.y * 0.06 + f.d * 5) * dt * 6
+      f.y = f.y + (10 + 16 * f.d) * dt
+      if f.y > H then
+        f.y, f.x = -2, math.random() * W
+      end
+      if f.x > W + 4 then
+        f.x = -4
+      elseif f.x < -4 then
+        f.x = W + 4
+      end
+      love.graphics.setColor(0.78, 0.75, 0.70, f.a * k)
+      love.graphics.rectangle("fill", math.floor(f.x), math.floor(f.y), f.d > 1 and 2 or 1, 1)
+    end
+    love.graphics.pop()
+  end
   local d = weather.dust * (weather.surface or 1)
   if d <= 0.01 then
     return

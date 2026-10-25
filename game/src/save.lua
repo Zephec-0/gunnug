@@ -135,6 +135,11 @@ local function fresh()
     limbs = {}, -- what the Sawbone has taken (and paid for in bonuses): id -> true
     mounted = {}, -- monster kind -> level the Taxidermist has mounted its trophy to (0 or absent: not yet)
     board = false, -- the bounty board has gone up (an elite slain, then a death)
+    hat = "plain", -- the hat worn into the next run (src.meta HATS): some set a rule for the whole run
+    -- The Undercroft (docs/undercroft-design.md): the way below the Deep, opened once for good
+    undercroft = { open = false, beaten = false },
+    secrets = {}, -- secret id -> true, found for good (the Ace of Spades, the full bar tab, ...)
+    hatWins = {}, -- hat id -> true: a boss beaten wearing it
   }
   for _, c in ipairs(save.CATEGORIES) do
     p.found[c] = {}
@@ -156,6 +161,11 @@ local function repair(p)
   for k, v in pairs(base.stats) do
     if type(p.stats[k]) ~= "number" then
       p.stats[k] = v
+    end
+  end
+  for k, v in pairs(base.undercroft) do
+    if type(p.undercroft[k]) ~= type(v) then
+      p.undercroft[k] = v
     end
   end
   for _, c in ipairs(save.CATEGORIES) do

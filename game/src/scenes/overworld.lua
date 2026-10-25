@@ -86,6 +86,7 @@ local SUN_X, SUN_Y = 440, 196 -- on screen, low over the horizon
 
 local background -- pre-rendered sky and parallax layers
 local backgroundEclipse -- whether its sky was painted with the sun a black hole
+local backgroundAsh -- whether it was painted for the world after the core (the Undercroft beaten): ash and a volcano
 local trees = {}
 
 -- Gently rolling ground of the open plain
@@ -230,7 +231,7 @@ local function skyColor(t)
   return SKY[#SKY][2][1], SKY[#SKY][2][2], SKY[#SKY][2][3]
 end
 
-local function buildBackground(eclipse, keepLayers)
+local function buildBackground(eclipse, ash, keepLayers)
   local W, H = config.VIRTUAL_W, config.VIRTUAL_H
   local rng = love.math.newRandomGenerator(7)
   local sky = love.image.newImageData(W, H)
@@ -243,9 +244,13 @@ local function buildBackground(eclipse, keepLayers)
         sky:setPixel(x, y, 0, 0, 0, 1) -- the sun swallowed: the black hole the sky champion left (src.starwarden)
       elseif d < 30 then
         local core = 1 - d / 30 * 0.12
-        sky:setPixel(x, y, 1, 0.74 * core, 0.44 * core, 1) -- the setting sun
+        if ash then
+          sky:setPixel(x, y, 0.55 * core, 0.2 * core, 0.12 * core, 1) -- (a dull red disc through the smoke)
+        else
+          sky:setPixel(x, y, 1, 0.74 * core, 0.44 * core, 1) -- the setting sun
+        end
       else
-        local glow = math.max(0, 1 - d / 220) ^ 2 * (eclipse and 0.05 or 0.45)
+        local glow = math.max(0, 1 - d / 220) ^ 2 * (eclipse and 0.05 or (ash and 0.12 or 0.45))
         if eclipse then
           -- ...a burning orange rim hugging it, and a thin disc of falling light seen edge-on across it
           local rim = math.max(0, 1 - (d - 30) / 5) ^ 2
@@ -266,12 +271,24 @@ local function buildBackground(eclipse, keepLayers)
             cb = cb + (0.36 - cb) * k
           end
         end
+        if ash then
+          -- After the core: the sky is smoke, grey and brown, bruised red at the horizon where the volcano's light
+          -- lies on it, with heavy bands of ash cloud across it
+          local lum = 0.3 * cr + 0.55 * cg + 0.15 * cb
+          local hz = (y / (H - 1)) ^ 2.2
+          local grey = lum * 0.7 + 0.04
+          local band = love.math.noise(x * 0.003, y * 0.02, 9.1)
+          local dark = 1 - 0.4 * math.max(0, band - 0.35) * 1.4
+          cr = math.min(1, (grey * 1.05 + hz * 0.42) * dark)
+          cg = math.min(1, (grey * 0.9 + hz * 0.12) * dark)
+          cb = math.min(1, (grey * 0.86 + hz * 0.05) * dark)
+        end
         sky:setPixel(x, y, cr, cg, cb, 1)
       end
     end
   end
   -- A few early stars, high up where the sky is darkest
-  for _ = 1, 60 do
+  for _ = 1, ash and 0 or 60 do
     local x, y = rng:random(0, W - 1), math.floor(rng:random() ^ 2 * H * 0.3)
     local s = 0.45 + rng:random() * 0.3
     sky:setPixel(x, y, s, s * 0.95, s, 1)
@@ -287,6 +304,11 @@ local function buildBackground(eclipse, keepLayers)
       local top
       if kind == "mountains" then
         top = baseY - math.floor(love.math.noise(x * 0.006, seed) * 60 + love.math.noise(x * 0.03, seed + 2) * 12)
+      elseif kind == "volcano" then
+        -- one great cone far off, its crater alight
+        local cx = math.floor(w * 0.62)
+        local hh = 118 - math.abs(x - cx) * 0.85
+        top = hh > 0 and baseY - math.floor(hh) or H
       else
         local n = love.math.noise(x * 0.005, seed)
         local mesaTop = n > 0.55 and baseY - 80 - math.floor((n - 0.55) * 128) or baseY
@@ -301,6 +323,22 @@ local function buildBackground(eclipse, keepLayers)
       for y = math.max(0, top), H - 1 do
         img:setPixel(x, y, color[1], color[2], color[3], 1)
       end
+      if kind == "volcano" and top < H then
+        local cx = math.floor(w * 0.62)
+        local dx = math.abs(x - cx)
+        if dx < 11 then
+          for y = top, top + 3 do
+            img:setPixel(x, y, 1, 0.45 + 0.1 * (y - top), 0.12, 1)
+          end
+          -- the plume, a smoke column leaning with the wind
+          for y = math.max(0, top - 90), top - 1 do
+            local spread = (top - y) * 0.22 + 4
+            if math.abs(x - cx - (top - y) * 0.18) < spread and love.math.noise(x * 0.2, y * 0.2, 4.4) > 0.3 then
+              img:setPixel(x, y, 0.20, 0.17, 0.17, 0.75)
+            end
+          end
+        end
+      end
     end
     return { image = love.graphics.newImage(img), parallax = parallax, color = color }
   end
@@ -308,24 +346,31 @@ local function buildBackground(eclipse, keepLayers)
   return {
     sky = love.graphics.newImage(sky),
     -- (the far scenery is the same either way: when only the sun changes, it is kept)
-    layers = keepLayers or {
+    layers = keepLayers or (ash and {
+      layer(0.06, 268, { 0.27, 0.20, 0.21 }, 41, "mountains"),
+      layer(0.10, 338, { 0.17, 0.12, 0.13 }, 5, "volcano"),
+      layer(0.15, 304, { 0.22, 0.16, 0.17 }, 11),
+      layer(0.35, 344, { 0.14, 0.10, 0.11 }, 23, "towers"),
+    } or {
       layer(0.06, 268, { 0.50, 0.29, 0.36 }, 41, "mountains"),
       layer(0.15, 304, { 0.40, 0.22, 0.30 }, 11),
       layer(0.35, 344, { 0.26, 0.14, 0.20 }, 23, "towers"),
-    },
+    }),
   }
 end
 
 -- The background as the active save should see it: the sun is the black hole only once that save has beaten the sky's
 -- champion. A world built behind the title may have used another save, so this is checked as it is drawn, and the
 -- sky is repainted (once) the moment the answer changes; only one is ever held
-local function ensureBackground(eclipse)
-  if background and backgroundEclipse == eclipse then
+local function ensureBackground(eclipse, ash)
+  ash = ash and true or false
+  if background and backgroundEclipse == eclipse and backgroundAsh == ash then
     return background
   end
   local old = background
-  background = buildBackground(eclipse, old and old.layers)
+  background = buildBackground(eclipse, ash, old and backgroundAsh == ash and old.layers or nil)
   backgroundEclipse = eclipse
+  backgroundAsh = ash
   if old then
     old.sky:release()
   end
@@ -465,9 +510,10 @@ function overworld.build(opts)
   world:markLazy(LEFT, world.top, -1, world.bottom - 1)
   world:repaintRect(0, 0, SPINE_W - 1, CAVE_TOP + 40)
   require("src.airship").build(world) -- (a secret in the sky: nothing points to it)
+  require("src.buriedvault").build(world) -- (a secret in the rock under the Needle: nothing points to it either)
 
   local eclipse = require("src.meta").isSkyBeaten()
-  ensureBackground(eclipse)
+  ensureBackground(eclipse, require("src.meta").undercroftBeaten())
   trees = {}
   for _, t in ipairs({ { 200, 1 }, { 1340, -1 }, { 2000, 1 }, { 2460, -1 }, { 2706, 1 }, { 3100, -1 }, { 3800, 1 }, { -2700, 1 }, { -2200, -1 }, { -1900, 1 }, { -1380, -1 }, { -460, -1 }, { -150, 1 }, { 4400, -1 }, { 5100, 1 }, { 5600, -1 } }) do
     trees[#trees + 1] = { x = t[1], y = world:findGround(t[1], 160), lean = t[2], height = 46 + (t[1] % 17) }
@@ -548,6 +594,7 @@ function overworld.populate(world)
   targets.clear()
   props.clear()
   catacombs.spawnProps()
+  require("src.relicdoor").populate() -- (the item in the Buried Vault's pocket)
   fluids.fillWater(world, POND_X0 + 1, POND_X1 - 1, math.floor(plain(POND_X0 - 4)) + 2)
   for _, l in ipairs(lakes) do
     fluids.floodBox(world, l.x0, l.top, l.x1, CAVE_TOP - 1)
@@ -574,6 +621,8 @@ function overworld.populate(world)
       npcs.setCamp(lot.id, lot.x, lot.top)
     end
   end
+  -- The hat stand, by the spawn: the hat worn into a run sets a rule for it (src.meta HATS)
+  npcs.setHatStand(930, ground(930))
   -- The Bartender, once the hunter has fallen three times: drinking at the oasis pond's west bank
   npcs.setPond(POND_X0 - 6, ground(POND_X0 - 6))
   props.spawn("crate", 1700, ground(1700) - 7)
@@ -830,6 +879,8 @@ function overworld.addLights(lighting, camX, camY)
   if sunlight > 0 then
     if require("src.meta").isSkyBeaten() then
       lighting.add(camX + SUN_X, camY + SUN_Y, 360, 0.55, 0.5, 0.95, 0.2 * sunlight) -- (a cold glimmer round the black sun)
+    elseif require("src.meta").undercroftBeaten() then
+      lighting.add(camX + SUN_X, camY + SUN_Y, 380, 0.85, 0.32, 0.18, 0.2 * sunlight) -- (a dull red through the smoke)
     else
       lighting.add(camX + SUN_X, camY + SUN_Y, 420, 1, 0.62, 0.38, 0.3 * sunlight)
     end
@@ -1046,7 +1097,7 @@ function overworld.drawBackground(camX, camY)
   end
   -- (asked every frame: a world built behind the title with another save's profile must not keep its sun)
   local black = require("src.meta").isSkyBeaten()
-  local background = ensureBackground(black)
+  local background = ensureBackground(black, require("src.meta").undercroftBeaten())
   love.graphics.setColor(1, 1, 1)
   -- (stretched across if the view has grown wider than when it was painted)
   local ssx, ssy = math.max(1, config.VIRTUAL_W / background.sky:getWidth()), math.max(1, config.VIRTUAL_H / background.sky:getHeight())

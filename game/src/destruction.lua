@@ -234,9 +234,10 @@ end
 
 -- Digs a crater of the given radius at (cx, cy). Each pixel in range is
 -- removed with probability power / hardness. dx, dy is the impact direction
--- (debris sprays back against it). Returns the number of pixels removed.
+-- (debris sprays back against it). Vault rock only gives to a dig with vaultDig set.
+-- Returns the number of pixels removed.
 local digX, digY = {}, {}
-function destruction.dig(world, cx, cy, radius, power, dx, dy)
+function destruction.dig(world, cx, cy, radius, power, dx, dy, vaultDig)
   local removedX, removedY, n = digX, digY, 0
   local r2 = radius * radius
   for y = math.floor(cy - radius), math.ceil(cy + radius) do
@@ -245,7 +246,7 @@ function destruction.dig(world, cx, cy, radius, power, dx, dy)
       if ox * ox + oy * oy <= r2 and world:inBounds(x, y) then
         local id = world:get(x, y)
         local def = defs[id]
-        if def.solid and love.math.random() < power / def.hardness then
+        if def.solid and (vaultDig or not def.vault) and love.math.random() < power / def.hardness then
           n = n + 1
           removedX[n], removedY[n] = x, y
           if def.gold and love.math.random() < 0.1 then

@@ -58,6 +58,9 @@ local SIZES = {
   starmoth = { 9, 8 },
   sentinel = { 16, 16 },
   windspirit = { 14, 22 },
+  slagback = { 16, 11, true }, -- the Undercroft's (src.undermobs)
+  ashshade = { 16, 22 },
+  hollowking = { 26, 52 }, -- the Undercroft's last boss (src.hollowking)
 }
 local ENTRANCE_GAP = 26 -- half-width of the opening down from the entrance chamber
 
@@ -98,6 +101,7 @@ local PLAYER_W, PLAYER_H = config.player.width, config.player.height
 --                  the last quarter, all the routes lead into it, and its floor has two
 --                  gated shafts, left and right, each dropping into its own shop (the
 --                  returned info.shops); the boss (area.boss) waits in the middle
+--   oneShop        true (with arena): a single shop, at the right-hand corner, instead of two
 -- tick: optional, called regularly so a coroutine can yield. Returns a description:
 --   { seed, area, spawnX, spawnY, shop = {x, y, w, h}, crates, ironCrates, chests, glows, breakables, enemies, gas }
 -- (spots are { x, groundY }). Never fails: if the reachability check can't
@@ -145,6 +149,9 @@ function cavegen.generate(world, area, seed, tick)
     arena.x0 = math.floor(arena.cx - arena.w / 2)
     arena.x1 = arena.x0 + arena.w - 1
     shopXs = { X0 + W * 0.3, X0 + W * 0.7 } -- a shop at each lower corner
+    if area.oneShop then
+      shopXs = { X0 + W * 0.7 } -- (or just the one, for an area that does not split into two paths)
+    end
     funnel.top = math.huge -- (no funnel: the arena is the gathering place)
   end
   local climb, open, profile = area.climb, area.open, area.profile

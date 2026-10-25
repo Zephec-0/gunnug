@@ -38,6 +38,7 @@ function events.clear()
   randevents.clear()
   require("src.summit").clear()
   require("src.skyhazards").clear()
+  require("src.secrets").clear()
   world = nil
   altars, vaults, keys, relics = {}, {}, {}, {}
   wounded, ghost = nil, nil
@@ -156,6 +157,7 @@ function events.update(dt, player, areaIndex)
     randevents.update(dt, player) -- (the test room's stands)
     return
   end
+  require("src.secrets").update(dt, player)
   randevents.update(dt, player, areaIndex, world)
   require("src.summit").update(dt, player)
   require("src.skyhazards").update(dt, player)
@@ -318,12 +320,12 @@ end
 -- E: returns true if it handled the key
 function events.interact(player)
   if not world then
-    return randevents.interact(player)
+    return randevents.interact(player) or require("src.secrets").interact(player)
   end
   if player.dead then
     return false
   end
-  if randevents.interact(player) or require("src.summit").interact(player) then
+  if randevents.interact(player) or require("src.summit").interact(player) or require("src.secrets").interact(player) then
     return true
   end
   local px, py = player:center()
@@ -535,6 +537,7 @@ end
 function events.draw(view)
   if not world then
     randevents.draw(view)
+    require("src.secrets").draw(view)
     return
   end
   for _, a in ipairs(altars) do
@@ -559,11 +562,13 @@ function events.draw(view)
     drawGhost(ghost)
   end
   randevents.draw(view)
+  require("src.secrets").draw(view)
   require("src.summit").draw(view)
   require("src.skyhazards").draw(view)
 end
 
 function events.drawEmissive(view)
+  require("src.secrets").drawEmissive(view)
   if not world then
     return
   end
@@ -607,9 +612,11 @@ end
 function events.addLights(lighting, view)
   if not world then
     randevents.addLights(lighting, view)
+    require("src.secrets").addLights(lighting, view)
     return
   end
   randevents.addLights(lighting, view)
+  require("src.secrets").addLights(lighting, view)
   require("src.summit").addLights(lighting, view)
   require("src.skyhazards").addLights(lighting, view)
   local t = love.timer.getTime()
@@ -647,12 +654,14 @@ end
 function events.drawScreen(toScreen, font, player)
   if not world then
     randevents.drawScreen(toScreen, font, player)
+    require("src.secrets").drawScreen(toScreen, font, player)
     return
   end
   if require("src.menu").isOpen() then
     return
   end
   randevents.drawScreen(toScreen, font, player)
+  require("src.secrets").drawScreen(toScreen, font, player)
   require("src.summit").drawScreen(toScreen, font, player)
   for _, o in ipairs({ wounded, ghost }) do
     if o and o.say then

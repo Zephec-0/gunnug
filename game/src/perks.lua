@@ -303,6 +303,18 @@ perks.defs.skybound = {
   gated = true,
 }
 
+-- The House Regular: a perk of the Bartender's, given for drinking one of every drink in a single run
+perks.defs.regular = {
+  name = "The House Regular",
+  short = "HR",
+  color = { 0.92, 0.66, 0.30 },
+  rarity = "epic",
+  desc = "EPIC: you hold your drink. +30 maximum health, 10% less damage taken, and no amount of drink makes you drunk or passes you out.",
+  fx = { maxHp = 30, dmgTaken = 0.9 },
+  gated = true,
+  compendium = false,
+}
+
 perks.order = {
   "thick_skin", "iron_will", "second_wind", "scar_tissue", "last_stand", "regeneration", "bloodthirst", "adrenaline",
   "springheel", "fleet_foot", "slick_soles", "double_jump",
@@ -365,6 +377,10 @@ function perks.prod(key)
 end
 
 function perks.maxHp(base)
+  local fixed = perks.hatMaxHp and perks.hatMaxHp() -- (the Glass Hat: ten, and nothing raises it)
+  if fixed then
+    return fixed
+  end
   return math.max(10, math.floor((base + perks.sum("maxHp")) * perks.prod("maxHpMult") + 0.5))
 end
 

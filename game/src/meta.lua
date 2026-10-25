@@ -154,6 +154,19 @@ meta.RULES = {
   { id = "powderkeg", name = "Powder Keg", desc = "Monsters hit 30% harder.", marks = 1.3, enemyDmg = 1.3 },
   { id = "lean", name = "Lean Times", desc = "Shops charge 30% more, healing too.", marks = 1.2, shop = 1.3 },
 }
+-- Hats (the hat stand at camp): the hat worn into a run sets a rule for the whole of it. The Bartender's house
+-- rules are off in a run under a hat. Beating a boss in one for the first time unlocks its reward for good:
+-- an item taught for free, and some marks.
+meta.HATS = {
+  { id = "plain", name = "The Old Hat", rule = "No rule: a run as it always is.", band = { 0.30, 0.24, 0.18 } },
+  { id = "glass", name = "Glass Hat", rule = "Ten health, all run, and nothing raises it.", band = { 0.55, 0.78, 0.95 },
+    reward = { category = "attachment", id = "glassbarrel", marks = 10 } },
+  { id = "lone", name = "Lone Hat", rule = "One weapon slot.", band = { 0.78, 0.22, 0.18 },
+    reward = { category = "attachment", id = "holsterloader", marks = 10 } },
+  { id = "manual", name = "Reloader's Hat", rule = "Guns never reload themselves: reload by hand.", band = { 0.78, 0.62, 0.22 },
+    reward = { category = "attachment", id = "overclock", marks = 10 } },
+}
+
 -- The Sawbone's trades: each part taken gives a bonus and a penalty (fx tables
 -- like a perk's: multipliers for speed/reload/jump/spread/fireDelay/damage/
 -- dmgTaken/gold/maxHpMult, sums for crit/regen)
@@ -376,7 +389,7 @@ function meta.isUnlocked(category, id, p)
     return meta.STARTER_WEAPONS[id] == true
   end
   local def = items.defs[id]
-  return not def or ((def.rarity == "common" or def.rarity == "uncommon" or def.rarity == "fused") and meta.featMet(id, p))
+  return not def or def.rarity == "relic" or ((def.rarity == "common" or def.rarity == "uncommon" or def.rarity == "fused") and meta.featMet(id, p))
 end
 
 -- Whether the hunter has met it (collected, or seen lying about)
@@ -546,6 +559,69 @@ function meta.skyBeaten()
   p.stats.skyBeaten = (p.stats.skyBeaten or 0) + 1
   save.touch()
   save.flush()
+end
+
+-- The Undercroft, the way below the Deep (docs/undercroft-design.md): the Relic opens it once and it stays open
+function meta.undercroftOpen()
+  local p = profile()
+  return p ~= nil and p.undercroft.open
+end
+
+function meta.openUndercroft()
+  local p = profile()
+  if p and not p.undercroft.open then
+    p.undercroft.open = true
+    save.touch()
+    save.flush()
+  end
+end
+
+-- The core has fallen: the world turns to dust and ash for good
+function meta.undercroftBeaten()
+  local p = profile()
+  return p ~= nil and p.undercroft.beaten
+end
+
+function meta.beatUndercroft()
+  local p = profile()
+  if p and not p.undercroft.beaten then
+    p.undercroft.beaten = true
+    save.touch()
+    save.flush()
+  end
+end
+
+-- Secrets found for good (by id), and bosses beaten in a hat's altered run (by hat id)
+function meta.secretFound(id)
+  local p = profile()
+  return p ~= nil and p.secrets[id] == true
+end
+
+function meta.findSecret(id)
+  local p = profile()
+  if p and not p.secrets[id] then
+    p.secrets[id] = true
+    save.touch()
+    save.flush()
+    return true
+  end
+  return false
+end
+
+function meta.hatWon(id)
+  local p = profile()
+  return p ~= nil and p.hatWins[id] == true
+end
+
+function meta.winHat(id)
+  local p = profile()
+  if p and not p.hatWins[id] then
+    p.hatWins[id] = true
+    save.touch()
+    save.flush()
+    return true
+  end
+  return false
 end
 
 -- Banks marks at once (they survive a death a second later)
@@ -915,6 +991,7 @@ meta.DRINK_TIME = 300 -- seconds a drink lasts (a Stiffer Pour makes it longer)
 meta.DRUNK_FROM = 2
 meta.PASS_OUT = 10
 local drinks = {} -- id -> { left = seconds, n = how many }, for this run
+local drunkTypes = {} -- the drinks drunk so far this run (id -> true)
 -- Called when a drink is bought or runs out (src.game refreshes max health)
 meta.onDrink = nil
 
@@ -952,6 +1029,9 @@ function meta.drunkFrom()
 end
 
 function meta.drunkness()
+  if require("src.perks").has("regular") then
+    return 0 -- (the House Regular holds his drink)
+  end
   local n = meta.drinkLevel()
   local from = meta.drunkFrom()
   if n <= from then
@@ -961,6 +1041,9 @@ function meta.drunkness()
 end
 
 function meta.passedOut()
+  if require("src.perks").has("regular") then
+    return false
+  end
   return meta.drinkLevel() >= meta.PASS_OUT
 end
 
@@ -973,6 +1056,21 @@ function meta.buyDrink(id)
   end
   local cur = drinks[id]
   drinks[id] = { left = meta.drinkTime(), n = (cur and cur.n or 0) + 1 }
+  -- One of every drink in a single run: the House Regular
+  if not drunkTypes[id] then
+    drunkTypes[id] = true
+    local n = 0
+    for _ in pairs(drunkTypes) do
+      n = n + 1
+    end
+    local perks = require("src.perks")
+    if n >= #meta.DRINKS and not perks.has("regular") then
+      perks.add("regular")
+      meta.unlockPerk("regular")
+      meta.findSecret("regular")
+      require("src.toasts").notice("The House Regular", "One of every drink: you hold it now")
+    end
+  end
   profile().stats.drinks = (profile().stats.drinks or 0) + 1 -- (counted for good, on the save file)
   save.touch()
   meta.mountsDirty = true
@@ -1078,17 +1176,98 @@ function meta.sawHeal(player, inv, mode)
   return true
 end
 
+local activeHat = "plain" -- the hat this run was begun in (nothing changes it mid-run)
+
+-- The speed secret: moving this fast (px/s, all directions; the cap on a hunter's speed is 576, so only stacked
+-- recoil gets there) for a moment unlocks Redline Rounds for good
+meta.SPEED_FEAT = 500
+local fastFor = 0
+function meta.speedFeat(player, dt)
+  local b = player.body
+  if player.dead or not b or meta.secretFound("redline") then
+    return
+  end
+  if math.sqrt(b.vx * b.vx + b.vy * b.vy) >= meta.SPEED_FEAT then
+    fastFor = fastFor + dt
+    if fastFor >= 0.15 then
+      meta.findSecret("redline")
+      local p = profile()
+      p.unlocked.ammo = p.unlocked.ammo or {}
+      p.unlocked.ammo.redline = true
+      save.touch()
+      require("src.toasts").notice("Redline", "Redline Rounds unlocked")
+    end
+  else
+    fastFor = 0
+  end
+end
+
+function meta.hatDef(id)
+  for _, h in ipairs(meta.HATS) do
+    if h.id == id then
+      return h
+    end
+  end
+  return meta.HATS[1]
+end
+
+-- The hat chosen for the next run (and so the one worn at camp)
+function meta.hat()
+  local p = profile()
+  return p and meta.hatDef(p.hat).id or "plain"
+end
+
+function meta.setHat(id)
+  local p = profile()
+  if p and meta.hatDef(id).id == id then
+    p.hat = id
+    save.touch()
+    require("src.playeranim").hatBand = meta.hatDef(id).band
+  end
+end
+
+-- The hat this run is in
+function meta.runHat()
+  return activeHat
+end
+
 function meta.beginRun()
   meta.mountsDirty = true
   gunBought = false
   drinks = {}
+  drunkTypes = {}
   activeRules = {}
   local p = profile()
+  activeHat = p and meta.hatDef(p.hat).id or "plain"
+  guns.manualReload = activeHat == "manual"
+  require("src.playeranim").hatBand = meta.hatDef(activeHat).band
+  if activeHat ~= "plain" then
+    return -- (no house rules under a hat)
+  end
   for _, r in ipairs(meta.RULES) do
     if p and p.rules[r.id] and meta.rulesUnlocked() then
       activeRules[r.id] = true
     end
   end
+end
+
+-- A boss has fallen: in a run under a hat, the hat's reward is unlocked the first time. Returns the hat's reward
+-- (for a notice) if it was just won
+function meta.hatBossKilled()
+  local p = profile()
+  local hat = meta.hatDef(activeHat)
+  if not p or activeHat == "plain" or not hat.reward then
+    return nil
+  end
+  if not meta.winHat(activeHat) then
+    return nil
+  end
+  local r = hat.reward
+  p.unlocked[r.category] = p.unlocked[r.category] or {}
+  p.unlocked[r.category][r.id] = true
+  save.touch()
+  meta.earn(r.marks, "hatwin")
+  return r
 end
 
 local function ruleProd(key)
@@ -1222,6 +1401,12 @@ end
 -- Hooks ---------------------------------------------------------------------------------
 
 function meta.install()
+  require("src.perks").hatMaxHp = function()
+    return activeHat == "glass" and 10 or nil
+  end
+  require("src.inventory").oneSlot = function()
+    return activeHat == "lone"
+  end
   items.isAvailable = function(id)
     local def = items.defs[id]
     return meta.isUnlocked(def.kind, id)

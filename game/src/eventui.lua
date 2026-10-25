@@ -178,7 +178,9 @@ function eventui.highlow(o, player, env)
     end
     for i, c in ipairs(hl.pile) do
       local depth = #hl.pile - i
-      drawCard(eventart.card(c.card, c.suit), PILE[1] + c.dx, PILE[2] + c.dy, 0, max(0.55, 1 - depth * 0.1), 1, c.rot)
+      if not (hl.drag and i == #hl.pile) then -- (the Ace of Spades, while it is being carried off, is in the hand)
+        drawCard(eventart.card(c.card, c.suit), PILE[1] + c.dx, PILE[2] + c.dy, 0, max(0.55, 1 - depth * 0.1), 1, c.rot)
+      end
     end
     if hl.anim then
       local a = hl.anim
@@ -233,6 +235,64 @@ function eventui.highlow(o, player, env)
     end
     local y, h = place(24, 0)
     H.button("dlg:hl:leave", "Leave table", bx, y, bw, h, function() return false end, { disabled = busy or hl.card ~= nil, sub = hl.card and "Cash out first" or nil })
+
+    -- The Ace of Spades, when it lies on top of the pile: it can be picked up, and dragged to the item bar
+    local top = hl.pile[#hl.pile]
+    local ace = top and top.card == 1 and top.suit == 0 and not hl.anim
+    local mx, my = love.mouse.getPosition()
+    local down = love.mouse.isDown(1)
+    if ace or hl.drag then
+      local cw, ch = eventart.CARD_W * S, eventart.CARD_H * S
+      local cx, cy = sx(PILE[1] + (top and top.dx or 0)), sy(PILE[2] + (top and top.dy or 0))
+      local over = inside(mx, my, cx - cw / 2, cy - ch / 2, cw, ch)
+      if not hl.drag and over then
+        gfx.setColor(1, 0.95, 0.7, 0.35 + 0.2 * sin(now * 5))
+        gfx.setLineWidth(max(1, floor(S)))
+        gfx.rectangle("line", cx - cw / 2, cy - ch / 2, cw, ch)
+        if down and not hl.wasDown then
+          hl.drag = true
+          audio.play("card_deal")
+        end
+      end
+      if hl.drag then
+        if down then
+          gfx.setColor(1, 1, 1)
+          gfx.draw(eventart.card(1, 0), mx, my, 0.12, S * 1.12, S * 1.12, eventart.CARD_W / 2, eventart.CARD_H / 2)
+        else
+          hl.drag = false
+          local ref = itembar.slotAt(mx, my)
+          local carried = false
+          for i = 1, inventory.ITEM_SLOTS do
+            if inv.items[i] and inv.items[i].id == "aceofspades" then
+              carried = true
+            end
+          end
+          if ref and not carried then
+            local item = require("src.items").new("aceofspades")
+            local placed = false
+            if ref.kind == "item" and not inv.items[ref.index] then
+              inv.items[ref.index] = item
+              placed = true
+            else
+              placed = inv:addItem(item)
+            end
+            if placed then
+              table.remove(hl.pile)
+              hl.msg = "You pocket the Ace of Spades."
+              audio.play("buy")
+              require("src.meta").findSecret("aceofspades")
+              env.sparkle(o.x, o.y - 10, { 0.9, 0.9, 1 })
+            else
+              hl.msg = "No room to carry it."
+              audio.play("deny")
+            end
+          elseif ref then
+            hl.msg = "You already hold one."
+          end
+        end
+      end
+    end
+    hl.wasDown = down
   end
   open(dlg)
 end

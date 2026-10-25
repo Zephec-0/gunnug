@@ -261,6 +261,7 @@ local THEMES = {
     -- Under the galleries: a big flooded chamber for an aquatic boss. A
     -- placeholder boss for now (the Matron).
     name = "The Deep",
+    oneShop = true, -- (its way on is the sealed floor under the shop, not a choice of two paths)
     decor = "flooded", -- baked dressing and rock colouring (src.decor)
     subtitle = "Something large lives here",
     ambient = { 0.05, 0.10, 0.14 },
@@ -441,6 +442,96 @@ THEMES[13] = derive(THEMES[5], {
   stalactites = 100,
 })
 
+-- The Undercroft, below the Deep: the fossil beds first, a dry, buried place of bone and cut sandstone, the
+-- Quarry's creatures a good deal harder. Its music is the Quarry's for now (src.audio AREA_TRACK)
+THEMES[14] = derive(THEMES[6], {
+  name = "The Fossil Beds",
+  subtitle = "Under the Deep",
+  prisoner = false,
+  mine = false,
+  ambient = { 0.16, 0.12, 0.09 },
+  glowCount = 140,
+  spawnMul = 1.7,
+  toughMul = 2.0,
+  eliteMul = 3,
+  monsters = { ghoul = 22, bat = 10, worm = 22, roller = 16, cairncrab = 26, wraith = 18, miner = 10, spitter = 8 },
+  breakables = { { "urn", 10 }, { "pouch", 14 }, { "lantern", 10 }, { "skullCandle", 14 }, { "crate", 14 } },
+  stalactites = 80,
+})
+
+-- Under the Fossil Beds: lava, to the Foundry's measure, then a drowned-and-dusty city, then the core
+THEMES[15] = derive(THEMES[14], {
+  name = "The Greywacke",
+  decor = "greywacke",
+  subtitle = "Hard rock under the Fossil Beds",
+  palette = { rock = materials.GREYWACKE, dirt = materials.REDCLAY },
+  ambient = { 0.24, 0.25, 0.21 },
+  fx = { shadow = { 0.93, 1.0, 0.95 }, light = { 1.04, 1.02, 0.92 }, sat = 0.92, aberr = 0.5, vig = 0.45 },
+  glow = { 0.62, 0.86, 0.52 }, -- pale green stone
+  glowCount = 170,
+  glowRadius = 34,
+  stalk = { 0.46, 0.50, 0.38 },
+  backTop = { 0.075, 0.085, 0.065 },
+  backDeep = { 0.04, 0.05, 0.04 },
+  pillars = { { 0.025, 0.03, 0.02 }, { 0.20, 0.23, 0.17 }, { 0.12, 0.14, 0.10 } },
+  spawnMul = 1.8,
+  toughMul = 2.3,
+  waterPools = 16,
+  monsters = { ghoul = 20, bat = 8, cairncrab = 30, cragram = 22, roller = 22, miner = 18, worm = 22, gargoyle = 14 },
+  breakables = { { "urn", 10 }, { "pouch", 14 }, { "lantern", 10 }, { "crate", 14 }, { "tntBarrel", 14 } },
+  stalactites = 90,
+})
+THEMES[16] = derive(THEMES[5], {
+  name = "The Buried City",
+  decor = "buriedcity",
+  subtitle = "Under the Greywacke",
+  palette = { rock = materials.DUSTSLATE, dirt = materials.REDCLAY },
+  fx = { shadow = { 1.0, 0.97, 0.94 }, light = { 1.06, 1.0, 0.9 }, sat = 0.88, aberr = 0.5, vig = 0.5 },
+  glow = { 0.95, 0.78, 0.52 }, -- old lamplight
+  stalk = { 0.58, 0.54, 0.48 },
+  backTop = { 0.095, 0.085, 0.08 },
+  backDeep = { 0.05, 0.045, 0.045 },
+  pillars = { { 0.035, 0.03, 0.03 }, { 0.26, 0.23, 0.21 }, { 0.15, 0.13, 0.12 } },
+  parallax = 5,
+  ambient = { 0.22, 0.20, 0.19 },
+  waterPools = 0,
+  spawnMul = 1.9,
+  toughMul = 2.6,
+  eliteMul = 3,
+  monsters = { ghoul = 24, bat = 10, spitter = 14, wraith = 18, miner = 12, worm = 10, ashshade = 26, slagback = 12 },
+  breakables = { { "urn", 20 }, { "pouch", 16 }, { "lantern", 16 }, { "skullCandle", 20 }, { "crate", 10 } },
+  stalactites = 70,
+})
+-- The last of them: the Hollow King's hall, and the one shop
+THEMES[17] = derive(THEMES[4], {
+  name = "The Core",
+  decor = "core",
+  palette = { rock = materials.BASALT, dirt = materials.ASH },
+  prisoner = false,
+  glow = { 1.0, 0.5, 0.18 },
+  stalk = { 0.42, 0.26, 0.18 },
+  backTop = { 0.075, 0.045, 0.04 },
+  backDeep = { 0.04, 0.025, 0.025 },
+  pillars = { { 0.03, 0.02, 0.02 }, { 0.20, 0.11, 0.08 }, { 0.11, 0.06, 0.05 } },
+  parallax = 4,
+  glowCount = 300,
+  subtitle = "Where the world still burns",
+  ambient = { 0.28, 0.18, 0.14 },
+  lavaPools = 70,
+  spawnMul = 1.6,
+  toughMul = 3.0,
+  arena = true,
+  oneShop = true,
+  arenaFrac = 0.06, -- the hall starts right under the way in: the hunter falls into it
+  arenaH = 1100,
+  arenaWidth = 0.9,
+  noPlatforms = true, -- (a great open space: nothing to stand on but the floor)
+  boss = "hollowking",
+  arenaBanner = { "The Core", "Something hangs in the middle of the dark. Shoot it, or leave it" },
+  arenaWon = { "The Core Is Quiet", "The gates are open. The world will burn out now" },
+  monsters = { ghoul = 14, bat = 6, spitter = 8, worm = 16, miner = 12, slagback = 34, ashshade = 24, wisp = 22 },
+})
+
 local AREA_W, AREA_H = 2880, 3100
 -- The Quarry is a narrow dungeon: deep, but only QUARRY_W wide (centred where it always was)
 local QUARRY_W = 1800
@@ -476,6 +567,15 @@ local LAYOUT = {
   -- The way on below each post-Queen path (their last shops get hatches)
   { x = 0, y = 4 * AREA_H, w = AREA_W / 2, h = AREA_H, tier = 5, parent = 4, gapRight = PATH_GAP },
   { x = AREA_W / 2 + PATH_GAP, y = 4 * AREA_H, w = AREA_W / 2, h = AREA_H, tier = 5, parent = 5, gapLeft = PATH_GAP },
+  -- The Undercroft's first zone, under the Deep (the second ending, docs/undercroft-design.md): entered down the
+  -- shaft under the sealed floor (src.deepseal). It is not built until the Sunken Key has opened that floor
+  { x = -2800, y = 4400, w = 2400, h = 3100, tier = 5, parent = 9, seal = true },
+  -- ...and the three below it, each through the hatch of the one above: the magma sea, the buried city, and the
+  -- core, where the way ends in the last boss's hall (all of them rank as their own number, so "deepest reached"
+  -- is the Undercroft's own)
+  { x = -2800, y = 7500, w = 2400, h = 2800, tier = 5, parent = 14 },
+  { x = -2800, y = 10300, w = 2400, h = 2600, tier = 5, parent = 15 },
+  { x = -2800, y = 12900, w = 2400, h = 1900, tier = 5, parent = 16 },
 }
 
 -- Width of the main road's column: everything east of it is side branches
@@ -529,7 +629,7 @@ local firstArea, baseSeed
 local deadline = 0 -- os.clock() time the current slice of work must stop at
 local announced = {} -- the areas whose banner has been shown
 -- The bosses whose fights have a theme of their own (src.audio); the Dark Hunter's is played by src.darkhunter
-local BOSS_MUSIC = { queen = true, golem = true, bigfish = true } -- (the Dark Hunter and the Champion play their own through src.audio.setBoss)
+local BOSS_MUSIC = { queen = true, golem = true, bigfish = true, hollowking = true } -- (the Dark Hunter and the Champion play their own through src.audio.setBoss)
 
 function catacombs.count()
   return #levels
@@ -550,6 +650,10 @@ local TITLE_WORDS = {
   ["The Needle"] = { { "Wind-Cut", "Giddy", "Narrow", "Sky-Bound", "Windward", "Spired", "Cragged", "Last" }, { "Ascent", "Stair", "Spire", "Climb", "Ridgeway", "Chimney", "Flue", "Pinnacle" } },
   ["The Cloud Reaches"] = { { "Drifting", "Thin", "Silver", "Floating", "Breathless", "Pale", "Lofty", "Windblown" }, { "Isles", "Spires", "Shelves", "Banks", "Heights", "Steps", "Terraces", "Shoals" } },
   ["The Ember Foundry"] = { { "Roaring", "White-Hot", "Slag", "Forge", "Glowing", "Iron-Fed", "Choking", "Bellows" }, { "Floor", "Casting-Hall", "Foundry", "Crucible", "Works", "Pour", "Smelter", "Furnace-Row" } },
+  ["The Fossil Beds"] = { { "Buried", "Ribbed", "Calcined", "Petrified", "Stooping", "Sunk", "Pale", "Long-Dead" }, { "Beds", "Seams", "Ossuary", "Strata", "Deposits", "Layers", "Cuttings", "Charnel" } },
+  ["The Greywacke"] = { { "Grey", "Hard", "Green-Veined", "Unyielding", "Red-Banded", "Cold", "Dense", "Heavy" }, { "Seams", "Faces", "Ledges", "Cuttings", "Strata", "Galleries", "Shelves", "Deeps" } },
+  ["The Buried City"] = { { "Silent", "Ash-Choked", "Lost", "Fallen", "Terraced", "Empty", "Under", "Last" }, { "Streets", "Quarter", "Square", "Steps", "Market", "Gate", "Wards", "Rows" } },
+  ["The Core"] = { { "Beating", "Searing", "Last", "First", "Hollow", "Glowing", "Bare", "Waiting" }, { "Heart", "Chamber", "Furnace", "Root", "Seat", "Throne", "Floor", "Center" } },
   ["The Silt Vaults"] = { { "Muddy", "Sinking", "Buried", "Murky", "Slumped", "Silted", "Rotting", "Croaking" }, { "Vaults", "Cellars", "Strongrooms", "Crypts", "Basements", "Bogs", "Sumps", "Undercroft" } },
 }
 
@@ -635,6 +739,7 @@ function catacombs.start(w, first, seed, tiers)
         row = l.tier, -- (the depth tier; still called row in the code below)
         parent = l.parent,
         side = l.side,
+        seal = l.seal,
         entry = l.entry,
         gapLeft = l.gapLeft,
         gapRight = l.gapRight,
@@ -660,6 +765,12 @@ function catacombs.start(w, first, seed, tiers)
           require("src.pickups").dropGlyph(e.body.x + e.body.w / 2 - 14, e.body.y + e.body.h / 2 - 6, lv.theme.glyph, -30, -80)
         end
         catacombs.openGates(lv)
+        local reward = require("src.meta").hatBossKilled()
+        if reward then
+          local items = require("src.items")
+          local hat = require("src.meta").hatDef(require("src.meta").runHat())
+          require("src.toasts").notice(hat.name .. " won", (items.defs[reward.id] and items.defs[reward.id].name or reward.id) .. " unlocked")
+        end
         if lv.theme.boss == "starwarden" then
           -- The champion of the heavens is down: the world changes (the sun is eclipsed, the epic items turn up)
           require("src.meta").skyBeaten()
@@ -687,7 +798,7 @@ end
 -- The area (index) that the shop j (1 = left, 2 = right) of area i leads to
 local function childOf(i, j)
   for k, l in ipairs(levels) do
-    if k > 1 and not l.entry and (l.parent or k - 1) == i and (not l.side or (l.side == "left") == (j == 1)) then
+    if k > 1 and not l.entry and not l.seal and (l.parent or k - 1) == i and (not l.side or (l.side == "left") == (j == 1)) then
       return k
     end
   end
@@ -726,6 +837,20 @@ local function areaFor(i)
       shaftX0 = lv.entry.x - neck,
       shaftX1 = lv.entry.x + neck,
     }
+  elseif lv.seal then
+    -- Entered down the shaft under the sealed floor in the room below the Deep's shop (src.deepseal)
+    local plate = require("src.deepseal").geometry(levels[lv.parent].info.shops[require("src.deepseal").which()].back)
+    base = {
+      x0 = lv.x0,
+      x1 = lv.x1,
+      y0 = lv.y0,
+      y1 = lv.y1,
+      entranceX = math.floor((plate.x0 + plate.x1) / 2),
+      entranceY = lv.y0 + 96,
+      shaftX0 = plate.x0,
+      shaftX1 = plate.x1,
+      shaftTop = plate.y1 + 1,
+    }
   else
     local parent = levels[lv.parent or (i - 1)]
     if parent.info.exit then
@@ -761,6 +886,7 @@ local function areaFor(i)
   base.gapLeft, base.gapRight = lv.gapLeft, lv.gapRight
   base.palette = lv.theme.palette
   base.arena = lv.theme.arena
+  base.oneShop = lv.theme.oneShop
   base.glowCount = lv.theme.glowCount
   base.beacons = lv.theme.beacons
   base.breakables = lv.theme.breakables
@@ -832,6 +958,16 @@ end
 -- (the mountain at the east end first: it is seen from the desert, so it must be standing before the
 -- hunter walks over, and they can all be reached on foot without going through the caves), then the
 -- rest in order
+-- An area that waits to be opened (the Undercroft, until the Sunken Key has turned): nothing builds it
+local dormant
+function dormant(lv)
+  if lv.seal then
+    return not require("src.meta").undercroftOpen()
+  end
+  local parent = lv.parent and not lv.entry and levels[lv.parent]
+  return parent and dormant(parent) or false
+end
+
 local function nextUnfinished()
   if levels[1] and not levels[1].info then
     return 1
@@ -844,7 +980,7 @@ local function nextUnfinished()
     end
   end
   for i, lv in ipairs(levels) do
-    if not lv.info then
+    if not lv.info and not dormant(lv) then
       return i
     end
   end
@@ -857,7 +993,7 @@ end
 -- parent is missing too).
 local function needed(py, px, reach)
   for i, lv in ipairs(levels) do
-    if not lv.info then
+    if not lv.info and not dormant(lv) then
       local close
       if lv.entry then
         local ey = lv.entry.y or lv.y0
@@ -924,7 +1060,7 @@ end
 -- Completes generation of every area up to and including level `upTo` (default: all)
 function catacombs.finish(upTo)
   for i = 1, math.min(upTo or #levels, #levels) do
-    while not levels[i].info do
+    while not levels[i].info and not dormant(levels[i]) do
       resume(i, math.huge)
     end
   end
@@ -934,7 +1070,7 @@ end
 -- to it (an area entered from the surface needs nothing)
 function catacombs.generate(i)
   local lv = levels[i]
-  if not lv or lv.info then
+  if not lv or lv.info or dormant(lv) then
     return
   end
   if i > 1 and not lv.entry then
@@ -956,7 +1092,7 @@ local ENSURE_NEAR = 450
 -- screen meanwhile, rather than the game freezing on a half-built world.
 local function generateShowing(i, started)
   local lv = levels[i]
-  if not lv or lv.info then
+  if not lv or lv.info or dormant(lv) then
     return
   end
   if i > 1 and not lv.entry then
@@ -992,7 +1128,7 @@ end
 function catacombs.ensure(py, px)
   for i, lv in ipairs(levels) do
     -- (the first area is completed by the scene when the hunter goes underground)
-    if i > 1 and not lv.info then
+    if i > 1 and not lv.info and not dormant(lv) then
       if lv.entry then
         -- A side branch: when the hunter is near its crevice (or already in its rock)
         local ey = lv.entry.y or lv.y0
@@ -1136,6 +1272,10 @@ function catacombs.spawnProps()
       for _, cart in ipairs(info.mine and info.mine.carts or {}) do
         props.spawn("minecart", cart.x, cart.y - 7).body:setAwake(false)
       end
+      local seal = lv.theme.boss == "bigfish" and info.shops[require("src.deepseal").which()]
+      if seal and seal.back then
+        require("src.deepseal").setup(world, seal.back) -- (the sealed floor under the Deep, for the Sunken Key)
+      end
       for j, room in ipairs(info.shops) do
         shop.populate(room, world, lv.row, childOf(i, j))
         enemies.spawn("dummy", shop.dummySpot(room))
@@ -1248,6 +1388,17 @@ function catacombs.spawnProps()
             ge.areaIndex, ge.arena, ge.reward = i, a, m.reward
             lv.boss.e = ge
           end
+          if m.kind == "hollowking" then
+            -- The core hangs in the middle of the hall, no pedestal: the fight starts when it is shot
+            lv.boss.noAltar = true
+            local a = info.arena
+            local e = enemies.spawn("hollowking", a.cx, a.floorY - 150, 1, lv.row)
+            e.dormant = true
+            e.areaIndex = i
+            e.arena = a
+            e.reward = m.reward
+            lv.boss.e = e
+          end
           if m.kind == "bigfish" then
             -- The fish waits at the bottom middle of its round arena, no pedestal:
             -- the fight starts when it notices the hunter
@@ -1358,7 +1509,7 @@ function catacombs.update(player, dt)
     local fish = lv.boss and lv.boss.noAltar and lv.boss.state == "idle" and lv.boss.e
     if fish and not fish.dead then
       local fx, fy = fish.body.x + fish.body.w / 2, fish.body.y + fish.body.h / 2
-      if (px - fx) ^ 2 + (py - fy) ^ 2 < 380 ^ 2 or fish.hp < fish.maxHp then
+      if (fish.kind ~= "hollowking" and (px - fx) ^ 2 + (py - fy) ^ 2 < 380 ^ 2) or fish.hp < fish.maxHp or fish.woken then
         catacombs.startBoss(lv, player)
       end
     end
@@ -1725,6 +1876,10 @@ updateBossCamera = function(player, dt)
     if best.kind == "bigfish" then
       camera.setFocus(nil) -- (the camera stays on the hunter: only a wider view)
       zoomWant = 1.3
+    elseif best.kind == "hollowking" and best.hk then
+      -- the hall is huge: the view pulls out and keeps the swarm in it
+      camera.setFocus((best.hk.x + px) / 2, (best.hk.y + py) / 2)
+      zoomWant = best.hk.zoom or FIGHT_ZOOM
     else
       if n > 0 then
         camera.setFocus(sx / n, sy / n)

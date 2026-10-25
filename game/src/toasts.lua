@@ -40,7 +40,7 @@ function toasts.notice(title, label)
 end
 
 -- Marks earned for something other than a discovery (src.meta.earn's reason)
-local REASONS = { area = "A new depth reached" }
+local REASONS = { area = "A new depth reached", hatwin = "A hat run won" }
 function toasts.marks(amount, reason)
   local text = REASONS[reason] or (reason and ((reason:find("freed") or reason:find("^Bounty")) and reason or (reason .. " slain"))) or "Marks earned"
   push({ title = text, label = "Marks earned", marks = amount, age = 0 })

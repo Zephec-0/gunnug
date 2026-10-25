@@ -21,7 +21,12 @@ Inventory.__index = Inventory
 
 -- How many weapon slots the hunter has now: Akimbo (an Epic perk) takes the
 -- third away, and the guns in the first two are held and fired together
+inventory.oneSlot = nil -- set by src.meta: true under the Lone Hat
+
 function inventory.weaponSlots()
+  if inventory.oneSlot and inventory.oneSlot() then
+    return 1
+  end
   return perks.has("akimbo") and 2 or inventory.WEAPON_SLOTS
 end
 

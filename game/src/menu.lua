@@ -2656,6 +2656,37 @@ PAGES.board = function()
   end
 end
 
+PAGES.hats = function()
+  local ww, wh = love.graphics.getDimensions()
+  love.graphics.setColor(0.015, 0.01, 0.025, 0.93)
+  love.graphics.rectangle("fill", 0, 0, ww, wh)
+  litBackdrop()
+  pageTitle("The Hat Stand", X(14), Y(9))
+  shadowPrint("The hat you wear into a run sets a rule for all of it. Beat a boss in one for the first time and it pays: an item taught for free, and marks. No house rules under a hat.", X(14), Y(26), F.small, FAINT)
+  local worn = meta.hat()
+  local bw, bh = math.floor(60 * u), math.floor(12 * u)
+  for i, h in ipairs(meta.HATS) do
+    local y = Y(44 + (i - 1) * 36)
+    local won = meta.hatWon(h.id)
+    -- the hat, as a little swatch of its band
+    love.graphics.setColor(0.11, 0.09, 0.11)
+    love.graphics.rectangle("fill", X(14), y + 2 * u, 16 * u, 10 * u)
+    love.graphics.setColor(h.band[1], h.band[2], h.band[3])
+    love.graphics.rectangle("fill", X(14), y + 8 * u, 16 * u, 3 * u)
+    shadowPrint(h.name .. (won and "   (won)" or ""), X(38), y, F.body, TEXT)
+    shadowPrint(h.rule, X(38), y + F.body:getHeight() * 1.15, F.small, DIM)
+    if h.reward then
+      local def = require("src.items").defs[h.reward.id]
+      shadowPrint("First win: " .. (def and def.name or h.reward.id) .. " and " .. h.reward.marks .. " marks", X(38), y + F.body:getHeight() * 1.15 + F.small:getHeight() * 1.2, F.small, won and FAINT or meta.SIGIL_COLOR)
+    end
+    local isWorn = worn == h.id
+    button("hat:" .. h.id, isWorn and "Worn" or "Wear", X(330), y + 2 * u, bw, bh, function()
+      meta.setHat(h.id)
+      audio.play("select")
+    end, { disabled = isWorn })
+  end
+end
+
 PAGES.recap = function()
   local d = recapData or {}
   local ww, wh = love.graphics.getDimensions()
@@ -2954,7 +2985,7 @@ local function back()
     audio.play("back")
     return
   end
-  if not pop() and (root == "pause" or root == "camp" or root == "board" or root == "map" or root == "ghost" or root == "dialog") then
+  if not pop() and (root == "pause" or root == "camp" or root == "board" or root == "hats" or root == "map" or root == "ghost" or root == "dialog") then
     act("resume")
   end
 end
@@ -3010,7 +3041,7 @@ function menu.keypressed(key)
       return
     end
   end
-  if (root == "camp" or root == "board" or root == "ghost" or root == "dialog") and #stack == 0 and input.is("interact", key) then
+  if (root == "camp" or root == "board" or root == "hats" or root == "ghost" or root == "dialog") and #stack == 0 and input.is("interact", key) then
     act("resume") -- (the key that opened a camp page closes it again)
     return
   end

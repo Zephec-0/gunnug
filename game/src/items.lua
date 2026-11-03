@@ -655,11 +655,11 @@ end
 -- generates it, and the compendium leaves it out.
 items.defs.sunkenkey = {
   kind = "attachment",
-  name = "The Sunken Key",
-  short = "SK",
-  color = { 0.85, 0.7, 0.35 },
+  name = "Cork of Lerna",
+  short = "CL",
+  color = { 0.62, 0.42, 0.24 },
   rarity = "relic",
-  desc = "A heavy key of black iron, cold to hold. It fits no lock you know.",
+  desc = "A runed cork. It seals the bottle and fits no other neck. Carried to the Deep, it opens the way down.",
   mods = {},
   compendium = false,
 }

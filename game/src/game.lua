@@ -248,6 +248,7 @@ local function snapshotRun()
       keys = inv.keys or 0,
       selected = inv.selected,
       secondWindUsed = inv.secondWindUsed or false,
+      cork = inv.cork or false,
       weapons = {},
       items = {},
       perks = {},
@@ -338,6 +339,7 @@ local function inventoryFrom(run)
   new.flasks = tonumber(r.flasks) or 0
   new.keys = tonumber(r.keys) or 0
   new.secondWindUsed = r.secondWindUsed == true
+  new.cork = r.cork == true
   new.selected = math.max(1, math.min(inventory.weaponSlots(), math.floor(tonumber(r.selected) or 1)))
   -- (items the fuser holds, loose items and guns' attachments count too)
   for _, list in ipairs({ new.items, new.fuse.slots }) do

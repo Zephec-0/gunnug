@@ -209,6 +209,7 @@ enemies.defs.worm = {
 
 -- Skeleton miner: lobs sticks of dynamite from a distance
 enemies.defs.miner = {
+  noHitStun = true, -- (being shot does not interrupt the throw: shooting the stick out of the air is the answer)
   ground = true,
   w = 10,
   h = 19,
@@ -339,17 +340,17 @@ enemies.defs.dreadbat = giant("bat", {
 enemies.defs.queen = giant("bloater", {
   name = "The Sulfur Queen",
   scale = 6,
-  w = 84, h = 84, hp = 1000, speed = 78, accel = 260,
-  sight = 560, forget = 4000, damage = 24,
+  w = 84, h = 84, hp = 3000, speed = 78, accel = 260,
+  sight = 560, forget = 4000, damage = 34,
   knockback = 0.02, gold = { 200, 260 }, weight = 30,
   knockMul = 0.1, -- 90% less shove from bullets, kicks, blasts and singularities
   fireproof = true,
   puff = true,
-  globSpeed = 210, globGravity = 60, globDamage = 14,
-  dripDamage = 9, dripPeriod = 6, -- slime drips fall from her and hurt; each of her drips lets go every dripPeriod seconds
+  globSpeed = 210, globGravity = 60, globDamage = 20,
+  dripDamage = 14, dripPeriod = 6, -- slime drips fall from her and hurt; each of her drips lets go every dripPeriod seconds
   holdDist = 60, -- she keeps this far from the hunter (plus her own size); dashes in when further
   splitDepth = 3, -- below 33% health she splits in two, and every piece splits again below half of its own, down to this many splits in a line (like a slime)
-  splitDamage = 0.75, -- each split deals this much of the damage of the one before
+  splitDamage = 0.9, -- each split deals this much of the damage of the one before
 })
 
 -- The Marble Colossus: the Quarry's boss, a lumbering golem of veined marble.
@@ -1225,7 +1226,7 @@ function enemies.damage(e, amount, dx, dy, force, crit, fx)
   if force and force > 0 and knock > 0 and not e.armored and kindMovable(e) then
     e.body.vx = e.body.vx + (dx or 0) * force * knock
     e.body.vy = e.body.vy + (dy or 0) * force * knock - 30 * (e.def.knockMul or 1)
-    if not e.def.knockMul then
+    if not e.def.knockMul and not e.def.noHitStun then
       e.stun = 0.15
     end
   end
@@ -2640,7 +2641,8 @@ local function splitQueen(e)
     q.mito, q.qm, q.qd = nil, nil, nil
     q.iframes = MITOSIS_AFTER -- (untouchable a moment after, too)
     q.orbit = -math.pi / 2 + (i == 1 and -1 or 1) * (0.35 + love.math.random() * 0.5)
-    q.qs, q.qt, q.atk, q.atkI, q.dashT, q.fanLeft, q.recoverSet, q.vulnerable = "hover", 1.5 + love.math.random(), nil, love.math.random(0, 2), nil, nil, nil, nil
+    q.qs, q.qt, q.atk, q.dashT, q.fanLeft, q.recoverSet, q.vulnerable = "hover", 1.5 + love.math.random(), nil, nil, nil, nil, nil
+    q.hpSeen, q.calmT, q.enraged = nil, 0, nil
     q.puffT, q.novaWind, q.flash = nil, nil, 0
     q.minions = {}
     q.phase = love.math.random() * 10
@@ -2666,18 +2668,93 @@ end
 --   fan     three fans of gas globs with a two-glob gap to slip through
 --   dash    she locks on and barrels across the arena in a line, leaving gas
 --   bloom   she swells and bursts: a ring of globs and a cloud of gas
---   vents   gas columns crack open across the arena (they show a warning first)
---   spawn   calls bloaters (and later wisps)
+--   spawn   calls gas spirits (src.gasspirit)
 -- Each stage (by health) adds attacks and shortens the pauses. Below a third
 -- she splits in two (see splitQueen); the remnants only fan and dash. She is
 -- immune to fire, flies through rock and platforms, and never leaves her arena.
-local QUEEN_CYCLES = {
-  { "fan", "dash", "fan", "spawn" },
-  { "fan", "bloom", "dash", "vents", "fan", "dash" },
-  { "fan", "dash", "bloom", "dash", "vents", "fan", "dash", "bloom" },
+-- The next attack is drawn from a weighted pool for her stage, never the one
+-- she just did (so the order cannot be learnt), and no more minions are called
+-- while the ones she has are alive.
+local queenAI = {} -- (one local: this file is at the limit)
+queenAI.pools = {
+  { fan = 4, dash = 3, spawn = 1.5 },
+  { fan = 3, dash = 3, bloom = 2, spawn = 1.5 },
+  { fan = 3, dash = 3, bloom = 2.5, spawn = 1.5 },
 }
-local REMNANT_CYCLE = { "fan", "dash", "fan" }
-local QUEEN_WIND = { fan = 0.9, dash = 1.1, bloom = 1.3, vents = 0.7, spawn = 0.7 }
+queenAI.remnantPool = { fan = 3, dash = 2 }
+function queenAI.pick(e, pool, stage)
+  local alive = 0
+  for _, m in ipairs(e.minions or {}) do
+    if not m.dead then
+      alive = alive + 1
+    end
+  end
+  local total = 0
+  local opts = {}
+  for atk, w in pairs(pool) do
+    if atk ~= e.atk and not (atk == "spawn" and alive >= 3 + stage) then
+      opts[#opts + 1] = { atk, w }
+      total = total + w
+    end
+  end
+  table.sort(opts, function(x, y) return x[1] < y[1] end)
+  local r = love.math.random() * total
+  for _, o in ipairs(opts) do
+    r = r - o[2]
+    if r <= 0 then
+      return o[1]
+    end
+  end
+  return opts[#opts][1]
+end
+
+-- Gas seals. The arena is five sections wide; every so often one fills with gas
+-- from the floor up, after a warning, and stays full a while. Usually it is the
+-- section the hunter stands in, so he has to leave. The brood shares one timer
+-- (the first piece alive runs it).
+queenAI.sealEvery = { 15, 11, 8 }
+queenAI.sealMax = { 1, 2, 2 }
+function queenAI.seals(e, dt, px, stage)
+  local a, g = e.arena, e.group
+  if not (a and g) then
+    return
+  end
+  if not g.owner or g.owner.dead then
+    g.owner = e
+  end
+  if g.owner ~= e then
+    return
+  end
+  g.seals = g.seals or {}
+  for i = #g.seals, 1, -1 do
+    g.seals[i].t = g.seals[i].t - dt
+    if g.seals[i].t <= 0 then
+      table.remove(g.seals, i)
+    end
+  end
+  g.sealT = (g.sealT or 5) - dt
+  if g.sealT > 0 or #g.seals >= queenAI.sealMax[stage] then
+    return
+  end
+  g.sealT = queenAI.sealEvery[stage] * (0.8 + love.math.random() * 0.4)
+  local w = (a.x1 - a.x0) / 5
+  local mine = math.max(1, math.min(5, math.floor((px - a.x0) / w) + 1))
+  local sec = mine
+  if love.math.random() > 0.65 then
+    sec = love.math.random(1, 5)
+  end
+  for _, s in ipairs(g.seals) do
+    if s.sec == sec then
+      return
+    end
+  end
+  local warn, life, rise = 2.2 - 0.2 * stage, 10 + stage, 0.9
+  fluids.addColumn(a.x0 + (sec - 0.5) * w, w, a.top + 12, a.floorY - 2, warn, life, rise)
+  g.seals[#g.seals + 1] = { sec = sec, t = warn + life + 1 }
+  sfx("explosion", 0.5, 0.4)
+end
+
+local QUEEN_WIND = { fan = 0.9, dash = 1.1, bloom = 1.3, spawn = 0.7 }
 
 -- Starts the attack once its telegraph is over
 local function queenAttack(e, px, py, aimAng, stage, gen, sf)
@@ -2690,7 +2767,25 @@ local function queenAttack(e, px, py, aimAng, stage, gen, sf)
     e.fanLeft = gen > 0 and 2 or (stage == 3 and 4 or 3)
     e.fanT = 0
   elseif atk == "dash" then
-    e.dashT = 0.9
+    -- A swoop in a U: down through where the hunter stood, up the far side to the height she
+    -- started from (x runs straight across, y follows a parabola)
+    local tx, ty = e.dashTx or px, e.dashTy or py
+    local lo, hi = a and a.x0 + 60 or cx - 600, a and a.x1 - 60 or cx + 600
+    local dir = tx >= cx and 1 or -1
+    if math.abs(tx - cx) < 80 then
+      dir = love.math.random() < 0.5 and -1 or 1
+    end
+    local x2 = tx + dir * math.max(math.abs(tx - cx), 260)
+    if x2 < lo or x2 > hi then
+      x2 = tx - dir * math.max(math.abs(tx - cx), 260)
+    end
+    x2 = math.max(lo, math.min(hi, x2))
+    if a then
+      ty = math.min(ty, a.floorY - b.h / 2 - 6)
+    end
+    local len = math.abs(x2 - cx) + 2 * math.abs(cy - ty)
+    e.dashP = { x0 = cx, y0 = cy, x2 = x2, ty = ty, T = math.max(0.9, math.min(1.5, len / 560)) }
+    e.dashT = e.dashP.T
     sfx("bat_screech", 0.9, 0.7)
     effects.ring(cx, cy, 40 * sf + 14, { 0.9, 0.95, 0.4 })
   elseif atk == "bloom" then
@@ -2706,19 +2801,6 @@ local function queenAttack(e, px, py, aimAng, stage, gen, sf)
     end
     e.qs = "recover"
     e.qt = 0.1
-  elseif atk == "vents" then
-    if a and gen == 0 then
-      local n = 1 + stage
-      local lo, hi = a.x0 + 110, a.x1 - 110
-      local seg = (hi - lo) / n
-      for k = 1, n do
-        local x = lo + (k - 0.5 + (love.math.random() - 0.5) * 0.7) * seg
-        fluids.addColumn(x, 64, a.top + 12, a.floorY - 2, 1.4, 7)
-      end
-      sfx("explosion", 0.5, 0.5)
-    end
-    e.qs = "recover"
-    e.qt = 0.1
   elseif atk == "spawn" then
     local alive = {}
     for _, m in ipairs(e.minions or {}) do
@@ -2729,9 +2811,8 @@ local function queenAttack(e, px, py, aimAng, stage, gen, sf)
     e.minions = alive
     for side = -1, 1, 2 do
       if #e.minions < 3 + stage then
-        local kind = "bloater" -- (never wisps: their flames set her own gas alight)
-        local m = enemies.spawn(kind, cx + side * 30 * sf - 7, cy + 10 * sf, e.toughness * 0.4, e.level)
-        m.state = "chase"
+        local m = enemies.spawn("gasspirit", cx + side * 30 * sf - 6, cy + 10 * sf, e.toughness * 0.6, e.level)
+        m.state = "drift"
         e.minions[#e.minions + 1] = m
         effects.ring(cx + side * 30 * sf, cy + 10 * sf, 16, { 0.8, 0.92, 0.3 })
       end
@@ -2779,7 +2860,24 @@ local function updateQueen(e, dt, world, player, px, py)
   e.stage = stage
   e.qs = e.qs or "hover"
   e.qt = e.qt or 2
-  local timeScale = 1 + gen * 0.35
+  -- Enrage: left alone for 7 s she stops tiring and attacks faster, until she
+  -- has lost a few percent of her health again
+  if e.hpSeen and e.hp < e.hpSeen then
+    e.calmT = 0
+  else
+    e.calmT = (e.calmT or 0) + dt
+  end
+  e.hpSeen = e.hp
+  if e.enraged and e.hp < e.enraged - e.maxHp * 0.04 then
+    e.enraged = nil
+  elseif not e.enraged and e.calmT > 7 and not e.mito then
+    e.enraged = e.hp
+    sfx("bat_screech", 1, 0.3)
+    effects.ring(cx, cy, 90 * sf, { 1, 0.6, 0.2 })
+    effects.popup(cx, cy - b.h / 2 - 8, "ENRAGED", { 1, 0.55, 0.2 })
+  end
+  queenAI.seals(e, dt, px, stage)
+  local timeScale = (1 + gen * 0.35) * (e.enraged and 0.7 or 1)
   local aimAng = math.atan2(py - cy, px - cx)
   e.aimAng = aimAng -- (her eyes follow the hunter)
   e.vulnerable = e.qs == "recover" and e.qt > 0.2 and not e.mito
@@ -2830,30 +2928,33 @@ local function updateQueen(e, dt, world, player, px, py)
     end
   elseif e.qs == "hover" then
     -- High over the arena, drifting along it after the hunter
-    local ax = px + math.sin(e.phase * 0.35 + (e.orbit or 0)) * 150
-    local ay = a and (a.top + 90 + math.sin(e.phase * 0.5) * 18) or (py - 130)
+    -- (she circles above him, so her drips fall where he stands and push him about)
+    local ax = px + math.sin(e.phase * 0.45 + (e.orbit or 0)) * 170
+    local ay = py - 150 + math.sin(e.phase * 0.5) * 20
     if a then
       ax = math.max(a.x0 + 100, math.min(a.x1 - 100, ax))
+      ay = math.max(a.top + 50, math.min(a.floorY - 150, ay))
     end
-    wantX, wantY, speed = ax, ay, 90 + 30 * (stage - 1)
+    wantX, wantY, speed = ax, ay, 120 + 30 * (stage - 1)
+    if cy > ay + 40 then
+      speed = speed * 1.7 -- (off the floor after a dash, quickly)
+    end
     e.qt = e.qt - dt
     if e.qt <= 0 then
-      local cycle = gen > 0 and REMNANT_CYCLE or QUEEN_CYCLES[stage]
-      e.atkI = (e.atkI or 0) % #cycle + 1
-      e.atk = cycle[e.atkI]
+      e.atk = queenAI.pick(e, gen > 0 and queenAI.remnantPool or queenAI.pools[stage], stage)
       e.qs = "windup"
       e.qt = QUEEN_WIND[e.atk] * timeScale
       e.qtTotal = e.qt
-      e.dashAng = aimAng
+      e.dashTx, e.dashTy = px, py
       sfx("bat_screech", 0.6, 0.55)
     end
   elseif e.qs == "windup" then
-    -- The telegraph: she stops and swells, glowing; a dash shows its line, which
-    -- follows the hunter until the last third of a second and then locks
+    -- The telegraph: she stops and swells, glowing (a dash takes where the hunter
+    -- stands until the last third of a second, then locks on it)
     e.qt = e.qt - dt
     e.novaWind = e.qt
     if e.atk == "dash" and e.qt > 0.3 then
-      e.dashAng = aimAng
+      e.dashTx, e.dashTy = px, py
     end
     b.vx, b.vy = b.vx * math.max(0, 1 - 8 * dt), b.vy * math.max(0, 1 - 8 * dt)
     if love.math.random() < dt * 30 then
@@ -2888,7 +2989,11 @@ local function updateQueen(e, dt, world, player, px, py)
     elseif e.atk == "dash" then
       dashing = true
       e.dashT = e.dashT - dt
-      b.vx, b.vy = math.cos(e.dashAng) * 560, math.sin(e.dashAng) * 560
+      local P = e.dashP
+      local u = math.min(1, (P.T - e.dashT + dt) / P.T)
+      local wx = P.x0 + (P.x2 - P.x0) * u
+      local wy = P.ty + (P.y0 - P.ty) * (2 * u - 1) ^ 2
+      b.vx, b.vy = (wx - cx) / dt, (wy - cy) / dt
       if love.math.random() < dt * 40 then
         effects.particle(cx, cy, 0, 0, 0.4, { 0.72, 0.85, 0.3 }, 0, true)
       end
@@ -2906,17 +3011,20 @@ local function updateQueen(e, dt, world, player, px, py)
     end
   end
   if e.qs == "recover" and not e.mito then
-    -- Spent: she sinks to the hunter's height, dazed and open to attack. The
+    -- Spent: she drops a little, still over the hunter, dazed and open to attack. The
     -- first instant after an attack sets how long this lasts.
     if e.qt <= 0.1 and not e.recoverSet then
       e.recoverSet = true
-      e.qt = (({ 2.8, 2.3, 1.9 })[stage] + (e.afterDash and 0.8 or 0)) * timeScale
+      e.qt = (({ 2.8, 2.3, 1.9 })[stage] + (e.afterDash and 0.8 or 0)) * timeScale * (e.enraged and 0.5 or 1)
       e.afterDash = nil
     end
     e.qt = e.qt - dt
     e.dazed = math.max(e.dazed or 0, e.qt)
     local side = px >= cx and -1 or 1
-    wantX, wantY, speed = px + side * 90 * (0.4 + sf), py - 40, 110
+    wantX, wantY, speed = px + side * 90 * (0.4 + sf), py - 110, 110 -- (still over his head: only a little lower, and to one side)
+    if a then
+      wantY = math.max(a.top + 50, wantY)
+    end
     if e.qt <= 0 then
       e.qs = "hover"
       e.qt = ({ 1.9, 1.5, 1.1 })[stage] * timeScale
@@ -2925,6 +3033,11 @@ local function updateQueen(e, dt, world, player, px, py)
     end
   end
 
+  -- Her place is over the hunter's head: whatever she was doing, if she is down at his level
+  -- (after a dash, a bloom, a knock) she is lifted back above him
+  if not dashing and not e.mito and cy > py - 70 and e.stun <= 0 then
+    b.vy = b.vy - 420 * dt
+  end
   if not dashing then
     local d = math.max(1, math.sqrt((wantX - cx) ^ 2 + (wantY - cy) ^ 2))
     local sp = math.min(speed, d * 2.2)
@@ -6450,6 +6563,7 @@ require("src.undermobs")
 require("src.hollowking")
 require("src.skymobs")
 require("src.starmobs")
+require("src.gasspirit")
 require("src.ethercrawler")
 
 -- The bosses and creatures in the modules above add their drawing functions after the

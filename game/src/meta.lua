@@ -807,6 +807,16 @@ function meta.boardOpen()
   return p.board == true or (meta.trophyTotal() > 0 and resets() >= 1) -- (older saves: the same rule from what they have)
 end
 
+-- The hat stand stands at camp once three bosses have fallen (the same one three times counts)
+meta.HAT_STAND_BOSSES = 3
+function meta.hatStandOpen()
+  local p = profile()
+  if not p then
+    return true
+  end
+  return ((p.stats and p.stats.bosses) or 0) >= meta.HAT_STAND_BOSSES
+end
+
 -- May this person's cage be there to find in the dungeon yet?
 function meta.canFind(id)
   local p = profile()
@@ -1180,7 +1190,7 @@ local activeHat = "plain" -- the hat this run was begun in (nothing changes it m
 
 -- The speed secret: moving this fast (px/s, all directions; the cap on a hunter's speed is 576, so only stacked
 -- recoil gets there) for a moment unlocks Redline Rounds for good
-meta.SPEED_FEAT = 500
+meta.SPEED_FEAT = 545
 local fastFor = 0
 function meta.speedFeat(player, dt)
   local b = player.body
@@ -1189,7 +1199,7 @@ function meta.speedFeat(player, dt)
   end
   if math.sqrt(b.vx * b.vx + b.vy * b.vy) >= meta.SPEED_FEAT then
     fastFor = fastFor + dt
-    if fastFor >= 0.15 then
+    if fastFor >= 0.25 then
       meta.findSecret("redline")
       local p = profile()
       p.unlocked.ammo = p.unlocked.ammo or {}

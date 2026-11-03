@@ -68,23 +68,20 @@ local function near(player)
   return math.abs(px - (plate.x0 + plate.x1) / 2) < REACH and py < plate.y0 and py > plate.y0 - 40
 end
 
+-- The Cork of Lerna is taken up into the hunter's bottle (src.hud draws it in the neck) the moment it is
+-- picked up: inv.cork. The seal spends it.
 local function carried(inv)
-  for i = 1, inventory.ITEM_SLOTS do
-    if inv.items[i] and inv.items[i].id == "sunkenkey" then
-      return i
-    end
-  end
+  return inv.cork == true
 end
 
 function deepseal.interact(player)
   if not near(player) then
     return false
   end
-  local slot = carried(player.inventory)
-  if not slot then
+  if not carried(player.inventory) then
     return false -- (nothing to say: it is only a locked floor)
   end
-  player.inventory.items[slot] = nil
+  player.inventory.cork = false
   opened = true
   meta.openUndercroft()
   carve()
@@ -98,7 +95,23 @@ function deepseal.interact(player)
   return true
 end
 
-function deepseal.update() end
+function deepseal.update(dt, player)
+  local inv = player and player.inventory
+  if not inv or inv.cork then
+    return
+  end
+  for i = 1, inventory.ITEM_SLOTS do
+    if inv.items[i] and inv.items[i].id == "sunkenkey" then
+      inv.items[i] = nil
+      inv.cork = true
+      local px, py = player:center()
+      audio.play("buy")
+      effects.ring(px, py, 24, { 0.85, 0.7, 0.35 })
+      effects.popup(px, py - 18, "The Cork of Lerna seals your bottle", { 0.9, 0.78, 0.45 })
+      return
+    end
+  end
+end
 
 local function R(c, a, x, y, w, h)
   love.graphics.setColor(c[1], c[2], c[3], a or 1)

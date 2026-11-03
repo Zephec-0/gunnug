@@ -51,3 +51,7 @@ Unlocked guns can be bought from the Gunsmith for gold, one per run, always B-gr
 ## Feats (new)
 
 Some ammo and attachments (`meta.FEATS`, about 30) also need a lifetime stat before they can drop, sit in a shop or be taught: elites slain, monsters killed, bosses slain, things bought in shops, gold gathered. Common and uncommon ones join the pool by themselves once the feat is done; rare and epic ones then still need seeing and teaching. The compendium and the Gunsmith's page show the feat and its progress.
+
+## Hat stand (2026-10-25)
+
+The hat stand at camp (and its hats) only appears once `stats.bosses` reaches 3 (`meta.HAT_STAND_BOSSES`; the same boss three times counts). Its page is the stand drawn on screen: hover a hat for its rule and first-win reward, click to take it (it hops to the hunter's head, the old hat hops back onto its peg).

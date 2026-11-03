@@ -432,14 +432,83 @@ end
 -- height from x - w/2 to x + w/2 for `life` seconds. Walking through it hurts
 -- a lot, so it walls off that part of the arena until it thins out. It is
 -- still gas: it can be burned.
-function fluids.addColumn(x, w, top, bottom, warn, life)
-  columns[#columns + 1] = { x0 = x - w / 2, x1 = x + w / 2, top = top, bottom = bottom, age = 0, warn = warn, life = life }
+-- Optional `rise`: seconds the gas takes to gush from the floor to the top (a
+-- wide section of the arena filling up, soft at its front). Once it has
+-- filled, nothing more is added: it only thins out over the rest of `life`
+-- (so burning gas is never fed). Without `rise` the column is held full for
+-- all of `life`.
+function fluids.addColumn(x, w, top, bottom, warn, life, rise)
+  local c = { x0 = x - w / 2, x1 = x + w / 2, top = top, bottom = bottom, age = 0, warn = warn, life = life, rise = rise, refill = 0 }
+  columns[#columns + 1] = c
+  return c
+end
+
+-- A rising column (a seal): the gas gushes up from the floor as one body at full
+-- strength with a short soft front (the same flat cloud the game draws for any
+-- dense gas), then thins out evenly by itself. Only the band the front crosses is written each step.
+local FRONT_FADE = 20
+local columnTop -- (below)
+function fluids.stepSeal(c, step)
+  local t = c.age - c.warn
+  local front = columnTop(c)
+  local x0, x1 = floor(c.x0 / C), floor(c.x1 / C)
+  if t <= c.rise + 0.05 then
+    local from = floor(front / C)
+    local to = floor(math.min(c.bottom, math.max((c.prevFront or c.bottom) + FRONT_FADE, front + FRONT_FADE)) / C)
+    for gy = from, to do
+      local depth = (gy * C - front) / FRONT_FADE
+      local conc = depth <= 0 and 0 or (depth >= 1 and 1 or depth)
+      if conc > 0 then
+        for gx = x0, x1 do
+          local k = key(gx, gy)
+          if not fire[k] and open(k) then
+            if conc > (gas[k] or 0) then
+              setGas(k, conc)
+            end
+          end
+        end
+      end
+    end
+    c.prevFront = front
+    -- the gush: streaks of gas shoot up ahead of the front
+    for _ = 1, 3 do
+      effects.particle(c.x0 + love.math.random() * (c.x1 - c.x0), front + 6, (love.math.random() - 0.5) * 20, -90 - love.math.random() * 120, 0.5, { 0.85, 0.92, 0.35 }, 0, true)
+    end
+    return
+  end
+  -- Filled: the whole body thins out evenly, and is gone by the end of its life
+  c.refill = c.refill - step
+  if c.refill > 0 then
+    return
+  end
+  c.refill = 0.15
+  local dec = 0.15 * 1.0 / math.max(1, c.life - c.rise)
+  for gy = floor(c.top / C), floor(c.bottom / C) do
+    for gx = x0, x1 do
+      local k = key(gx, gy)
+      local g = gas[k]
+      if g then
+        g = g - dec
+        setGas(k, g > 0.03 and g or nil)
+      end
+    end
+  end
+end
+
+-- The top of a column's gas right now (it climbs while `rise` runs)
+columnTop = function(c)
+  if c.rise and c.rise > 0 then
+    local u = math.max(0, math.min(1, (c.age - c.warn) / c.rise))
+    return c.bottom - (c.bottom - c.top) * (1 - (1 - u) * (1 - u)) -- (a gush: fast at first, easing off at the top)
+  end
+  return c.top
 end
 
 -- Is the point inside a column that is pouring?
 function fluids.inColumn(x, y)
   for _, c in ipairs(columns) do
-    if c.age >= c.warn and x >= c.x0 and x <= c.x1 and y >= c.top and y <= c.bottom then
+    local live = c.age >= c.warn and c.age <= (c.rise and c.warn + c.rise + 0.4 or c.warn + c.life)
+    if live and x >= c.x0 and x <= c.x1 and y >= columnTop(c) and y <= c.bottom then
       return true
     end
   end
@@ -1643,11 +1712,15 @@ function fluids.update(dt, player, enemies)
       local c = columns[i]
       c.age = c.age + step
       if c.age >= c.warn and c.age <= c.warn + c.life then
-        for gy = floor(c.top / C), floor(c.bottom / C) do
-          for gx = floor(c.x0 / C), floor(c.x1 / C) do
-            local k = key(gx, gy)
-            if open(k) then
-              setGas(k, 1)
+        if c.rise then
+          fluids.stepSeal(c, step)
+        else
+          for gy = floor(c.top / C), floor(c.bottom / C) do
+            for gx = floor(c.x0 / C), floor(c.x1 / C) do
+              local k = key(gx, gy)
+              if open(k) then
+                setGas(k, 1)
+              end
             end
           end
         end
@@ -2045,7 +2118,9 @@ function fluids.drawEmissive(view)
           if a > 0.4 then
             a = 0.4
           end
-          local level = floor(a * (0.55 + n * 0.9) * LEVEL_PER) + 1
+          -- (dense gas, a seal's wall of it, shimmers only a little: the full swirl made a tall wall look like stacked tiles)
+          local k = c > 0.5 and 1 - 1.6 * math.min(0.5, c - 0.5) or 1
+          local level = floor(a * (1 + (n - 0.5) * 0.9 * k) * LEVEL_PER) + 1
           if level > GAS_LEVELS then
             level = GAS_LEVELS
           end

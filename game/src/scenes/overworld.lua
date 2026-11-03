@@ -511,6 +511,25 @@ function overworld.build(opts)
   world:repaintRect(0, 0, SPINE_W - 1, CAVE_TOP + 40)
   require("src.airship").build(world) -- (a secret in the sky: nothing points to it)
   require("src.buriedvault").build(world) -- (a secret in the rock under the Needle: nothing points to it either)
+  -- A motherlode of gold buried in the desert between the lake and the camp: deep enough that nothing shows
+  -- until a hunter digs down to it
+  do
+    local lx = -250
+    local ly = world:findGround(lx, 160) + 220
+    local lr = 100
+    for oy = -lr, lr do
+      for ox = -lr, lr do
+        local a = math.atan2(oy, ox)
+        local rr = lr * (0.82 + 0.18 * math.sin(a * 3 + 1.3) + 0.1 * math.sin(a * 5 + 0.4))
+        if ox * ox + oy * oy <= rr * rr then
+          local id = world:get(lx + ox, ly + oy)
+          if id == SANDSTONE or id == SAND or id == materials.ROCK or id == materials.DIRT then
+            world:setRaw(lx + ox, ly + oy, materials.GOLDORE)
+          end
+        end
+      end
+    end
+  end
 
   local eclipse = require("src.meta").isSkyBeaten()
   ensureBackground(eclipse, require("src.meta").undercroftBeaten())
@@ -1440,6 +1459,7 @@ end
 local EARTH = { 0.10, 0.07, 0.07 }
 local EARTH_NEAR = { 0.30, 0.19, 0.15 }
 local CAVE_BACK = { 0.10, 0.08, 0.14 }
+local SCENERY_FADE = 110 -- px under CAVE_TOP over which the first area's far scenery fades in
 
 -- Colour of the backdrop behind the terrain at a depth: dark earth under the
 -- surface, turning to the catacombs' cold gloom, darker the deeper you go
@@ -1579,6 +1599,14 @@ function overworld.drawDecor(camX, camY)
   if vy1 > CAVE_TOP then
     local index = catacombs.levelAt((math.max(vy0, CAVE_TOP) + vy1) / 2, (vx0 + vx1) / 2) or 1
     depthblend.draw(index, camX, camY, vx0, vy0, vx1, vy1, CAVE_TOP)
+    -- (the first area's far scenery fades in over its first stretch instead of starting at a hard line at the
+    -- mouth of the caves: the earth's own backdrop is laid back over it, thinning out going down)
+    for y = math.max(math.floor(vy0 / 8) * 8, CAVE_TOP), math.min(vy1, CAVE_TOP + SCENERY_FADE), 8 do
+      local k = 1 - (y - CAVE_TOP) / SCENERY_FADE
+      local r, g, b = catacombs.backdropIn(index, y)
+      love.graphics.setColor(r, g, b, k * k * (3 - 2 * k))
+      love.graphics.rectangle("fill", vx0, y, vx1 - vx0, 8)
+    end
     -- (the caves' far backgrounds at half brightness)
     love.graphics.setColor(0, 0, 0, 0.5)
     love.graphics.rectangle("fill", vx0, math.max(vy0, CAVE_TOP), vx1 - vx0, vy1 - math.max(vy0, CAVE_TOP))

@@ -57,6 +57,39 @@ local EMIT = {
       effects.puff(x, y, (r() - 0.5) * 3, -2, 5, 14, { 0.3, 0.55, 0.6 }, { alpha = 0.08, grow = 0.6, drag = 0.3 })
     end },
   },
+  -- The Undercroft: bone dust in the beds, drifting grit and old lamplight in the city, thick embers and heat in the
+  -- Mesosphere and the Core
+  [14] = {
+    { 2.5, function(x, y)
+      effects.puff(x, y, (r() - 0.5) * 3, -1, 5, 3, { 0.62, 0.55, 0.42 }, { alpha = 0.12, grow = 0.4, drag = 0.3 })
+    end },
+  },
+  [15] = {
+    { 3, function(x, y)
+      effects.puff(x, y, 2 + r() * 4, -1, 6, 4, { 0.55, 0.5, 0.46 }, { alpha = 0.10, grow = 0.5, drag = 0.25 })
+    end },
+    { 1.2, function(x, y)
+      effects.particle(x, y, 3 + r() * 6, 3 + r() * 5, 4, { 0.45, 0.42, 0.40 }, 6)
+    end },
+  },
+  [16] = {
+    { 14, function(x, y)
+      effects.puff(x, y, (r() - 0.5) * 14, -18 - r() * 24, 2 + r() * 2, 3 + r() * 2, { 1, 0.5 + r() * 0.3, 0.15 }, { add = true, alpha = 0.85, grow = -0.4, drag = 0.4, rise = -6 })
+      effects.particle(x, y, (r() - 0.5) * 16, -22 - r() * 26, 2.5, { 1, 0.7 + r() * 0.2, 0.3 }, -12, true)
+    end },
+    { 2, function(x, y)
+      effects.puff(x, y, (r() - 0.5) * 4, -6 - r() * 5, 6, 6, { 0.9, 0.3, 0.1 }, { add = true, alpha = 0.10, grow = 0.8, drag = 0.3, rise = -3 })
+    end },
+  },
+  [17] = {
+    { 8, function(x, y)
+      effects.puff(x, y, (r() - 0.5) * 12, -14 - r() * 20, 2 + r() * 2, 3 + r() * 2, { 1, 0.45 + r() * 0.3, 0.12 }, { add = true, alpha = 0.8, grow = -0.4, drag = 0.4, rise = -6 })
+    end },
+    { 4, function(x, y)
+      local g = 0.3 + r() * 0.15
+      effects.particle(x, y, (r() - 0.5) * 10, 5 + r() * 6, 5, { g, g * 0.97, g * 0.95 }, 4)
+    end },
+  },
 }
 
 -- area: the area the hunter is in (nil on the surface)

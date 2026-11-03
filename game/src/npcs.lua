@@ -212,6 +212,16 @@ function npcs.update(dt, player)
       -- Rides the water's real surface (the lake settles and fills as the area
       -- streams in, so it isn't always where the area was planned to flood)
       c.y0 = c.y0 or c.y
+      local w = player.world
+      if w and w:isSolid(c.x, c.y - 4) then
+        -- (never in the rock: lifted to the open air above it)
+        for yy = c.y - 4, c.y - 120, -2 do
+          if not w:isSolid(c.x, yy) then
+            c.y, c.y0 = yy + 4, yy + 4
+            break
+          end
+        end
+      end
       local surf
       for yy = c.y0 - 40, c.y0 + 120, 2 do
         if fluids.waterAt(c.x, yy) then
@@ -346,7 +356,7 @@ local function nearBoard(player)
 end
 
 local function nearHatStand(player)
-  if not hatStand then
+  if not hatStand or not meta.hatStandOpen() then
     return false
   end
   local px, py = player:center()
@@ -946,7 +956,7 @@ function npcs.draw(view, player)
   if board and meta.boardOpen() and inView(view, board.x, board.y, 40) then
     drawBoard(view)
   end
-  if hatStand and inView(view, hatStand.x, hatStand.y, 40) then
+  if hatStand and meta.hatStandOpen() and inView(view, hatStand.x, hatStand.y, 40) then
     drawHatStand()
   end
   for _, c in ipairs(cages) do

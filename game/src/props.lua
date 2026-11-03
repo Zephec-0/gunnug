@@ -456,6 +456,45 @@ local function emitEmberPot(p, t)
 end
 
 
+-- The Undercroft's own: a street lamp of the buried city, a geode of cooling magma, a fossil ammonite
+local function drawStreetLamp(p)
+  local x, y = topLeft(p)
+  rects(x, y, { { 2, 8, 2, 14 } }, { 0.20, 0.19, 0.19 }) -- the post
+  rects(x, y, { { 0, 22, 6, 2 } }, { 0.16, 0.15, 0.15 }) -- the foot
+  rects(x, y, { { 2, 8, 1, 14 } }, { 0.34, 0.32, 0.30 })
+  rects(x, y, { { 0, 0, 6, 1 }, { 0, 7, 6, 1 }, { 0, 1, 1, 6 }, { 5, 1, 1, 6 } }, { 0.22, 0.20, 0.20 }) -- the cage
+  rects(x, y, { { 1, 1, 4, 6 } }, { 0.52, 0.34, 0.14 }) -- dim glass
+end
+
+local function emitStreetLamp(p, t)
+  local x, y = topLeft(p)
+  local f = math.sin(t * 7 + p.seed) > 0.4 and 1 or 0
+  rects(x, y, { { 2, 3 - f, 2, 3 + f } }, { 1, 0.74, 0.30 })
+  rects(x, y, { { 1, 2, 1, 4 }, { 4, 2, 1, 4 } }, { 1, 0.62, 0.24, 0.55 })
+end
+
+local function drawMagmaGeode(p)
+  local x, y = topLeft(p)
+  rects(x, y, { { 1, 4, 10, 6 }, { 3, 2, 6, 3 }, { 0, 6, 12, 3 } }, { 0.11, 0.07, 0.07 }) -- the cooled crust
+  rects(x, y, { { 1, 4, 10, 1 }, { 3, 2, 6, 1 } }, { 0.22, 0.14, 0.12 })
+  rects(x, y, { { 4, 3, 4, 2 }, { 3, 5, 2, 2 }, { 7, 5, 2, 2 } }, { 0.45, 0.12, 0.05 }) -- the cracks, dull
+end
+
+local function emitMagmaGeode(p, t)
+  local x, y = topLeft(p)
+  local pulse = 0.7 + 0.3 * math.sin(t * 2.4 + p.seed)
+  rects(x, y, { { 4, 3, 4, 2 }, { 3, 5, 2, 2 }, { 7, 5, 2, 2 }, { 5, 7, 2, 1 } }, { 1.0, 0.5, 0.12, pulse })
+  rects(x, y, { { 5, 3, 2, 1 }, { 3, 5, 1, 1 }, { 8, 5, 1, 1 } }, { 1.0, 0.9, 0.5, pulse * 0.9 })
+end
+
+local function drawAmmonite(p)
+  local x, y = topLeft(p)
+  rects(x, y, { { 2, 1, 7, 9 }, { 1, 2, 9, 7 }, { 3, 0, 5, 11 } }, { 0.66, 0.60, 0.48 })
+  rects(x, y, { { 2, 1, 7, 1 }, { 3, 0, 5, 1 } }, { 0.80, 0.74, 0.60 })
+  rects(x, y, { { 3, 3, 5, 1 }, { 7, 3, 1, 4 }, { 4, 6, 4, 1 }, { 4, 4, 1, 2 }, { 5, 4, 2, 1 } }, { 0.36, 0.31, 0.24 }) -- the spiral
+  rects(x, y, { { 1, 8, 9, 2 } }, { 0.50, 0.44, 0.35 })
+end
+
 -- Old TNT: a barrel of black powder, stencilled in red; it goes off on a short
 -- fuse once it takes enough damage
 local TNT_GLYPHS = {
@@ -617,6 +656,28 @@ props.defs = {
     ignites = true, -- the coals spill out in flames when it breaks
     gravityScale = 0.45, friction = 0.6, restitution = 0.1, linearDamping = 0.3, angularDamping = 0.5,
     showDamage = true, draw = drawEmberPot, emit = emitEmberPot,
+  },
+  streetLamp = {
+    width = 6, height = 24, mass = 0.9, hp = 14, gold = { 0, 4 }, itemChance = 0.06,
+    shard = { 0.55, 0.50, 0.42 },
+    light = { radius = 96, color = { 1, 0.72, 0.36 }, intensity = 0.72 },
+    gravityScale = 0.45, friction = 0.9, restitution = 0.05, linearDamping = 0.4, angularDamping = 1.6,
+    showDamage = true, draw = drawStreetLamp, emit = emitStreetLamp,
+    oil = 30, -- (the lamp's oil spills as it is shot, the rest when it breaks: src.fluids)
+  },
+  magmaGeode = {
+    width = 12, height = 10, mass = 3, hp = 30, gold = { 5, 14 }, itemChance = 0.18,
+    shard = { 0.20, 0.10, 0.08 },
+    light = { radius = 80, color = { 1, 0.45, 0.15 }, intensity = 0.78 },
+    ignites = true, -- (the molten heart spills out in flames when it breaks)
+    gravityScale = 0.6, friction = 0.8, restitution = 0.05, linearDamping = 0.3, angularDamping = 0.6,
+    showDamage = true, draw = drawMagmaGeode, emit = emitMagmaGeode,
+  },
+  ammonite = {
+    width = 11, height = 11, mass = 3, hp = 22, gold = { 3, 9 }, itemChance = 0.14,
+    shard = { 0.80, 0.74, 0.60 },
+    gravityScale = 0.6, friction = 0.8, restitution = 0.05, linearDamping = 0.3, angularDamping = 0.6,
+    showDamage = true, draw = drawAmmonite,
   },
   -- The old mine (area 1): a barrel of TNT that goes up on a short fuse, and an ore cart
   tntBarrel = {

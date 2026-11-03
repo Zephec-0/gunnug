@@ -1042,6 +1042,27 @@ function cavegen.generate(world, area, seed, tick)
       local dx, dy, dr = vein(materials.DIAMONDORE, 2.5 + rng:random() * 2.5)
       diamonds[#diamonds + 1] = { dx, dy, dr }
     end
+    -- Extra seams of gold in one stretch of rock (the Needle's, over the Buried Vault)
+    local gh = area.goldHint
+    if gh then
+      for _ = 1, gh.count do
+        tick()
+        local x = gh.x0 + rng:random() * (gh.x1 - gh.x0)
+        local y = gh.y0 + rng:random() * (gh.y1 - gh.y0)
+        local r = 3 + rng:random() * 4
+        for oy = -math.ceil(r), math.ceil(r) do
+          for ox = -math.ceil(r), math.ceil(r) do
+            if ox * ox + oy * oy <= r * r then
+              local px, py = math.floor(x + ox), math.floor(y + oy)
+              local id = world:get(px, py)
+              if id == ROCKID or id == DIRTID then
+                world:setRaw(px, py, GOLDORE)
+              end
+            end
+          end
+        end
+      end
+    end
   end
 
   fillBase()
@@ -1196,7 +1217,7 @@ function cavegen.generate(world, area, seed, tick)
     end
     local mx = (gx0 + gx1) / 2 + (h(1) - 0.5) * 80
     local my = Y0 + H * (0.3 + h(2) * 0.4)
-    local lr = 30 + h(3) * 8
+    local lr = (30 + h(3) * 8) * 3 -- (three times the size it was: a vein a long dig can be sure of)
     local lump = h(4) * 6.28
     for oy = -math.ceil(lr * 1.3), math.ceil(lr * 1.3) do
       for ox = -math.ceil(lr * 1.3), math.ceil(lr * 1.3) do
@@ -1377,6 +1398,13 @@ function cavegen.generate(world, area, seed, tick)
   end
   if counts.cairncrab then
     place("cairncrab", findFloorSpots(scaled(counts.cairncrab), 24, avoidForEnemies))
+  end
+  -- (the Undercroft's own, src.undermobs: slagbacks crawl the floor, ash shades drift down from the roof)
+  if counts.slagback then
+    place("slagback", findFloorSpots(scaled(counts.slagback), 22, avoidForEnemies))
+  end
+  if counts.ashshade then
+    place("ashshade", findCeilingSpots(scaled(counts.ashshade), 30, avoidForEnemies))
   end
   if counts.worm then
     -- Worms lie coiled in solid rock: spots with nothing but rock all round
@@ -1640,6 +1668,171 @@ function cavegen.generate(world, area, seed, tick)
       world:repaintRegion(x - base - 2, cy - 2, x + base + 2, cy + len + 2)
     end
   end
+
+  -- Set pieces (area.setpieces = { { kind, count per reference area } }): built shapes stamped into the caves
+  -- after the rock is carved, all of them real terrain that can be shot and dug apart. Fossil ribcages and
+  -- bone piles, ruined houses and archways of stone brick, basalt columns and glowing vents. (The ruins'
+  -- lamps and urns are props, added to result.breakables.)
+  do
+    local FOSSIL, SBRICK, BASALTID = materials.FOSSIL, materials.STONEBRICK, materials.BASALT
+    local function put(x, y, id)
+      if not world:isSolid(x, y) then
+        world:setRaw(x, y, id)
+      end
+    end
+    local pieces = {}
+    local function note(kind, x, y)
+      pieces[#pieces + 1] = { kind = kind, x = x, y = y }
+    end
+    local function propGroup(name, x, y)
+      for _, g in ipairs(result.breakables) do
+        if g.name == name then
+          g.spots[#g.spots + 1] = { x, y }
+          return
+        end
+      end
+      result.breakables[#result.breakables + 1] = { name = name, spots = { { x, y } } }
+    end
+    local stamps = {}
+    -- A ribcage lying on the floor: a spine of bone along the ground, ribs curving up from it, a skull at one end
+    function stamps.ribs(sx, g)
+      local dir = rng:random() < 0.5 and 1 or -1
+      local n = rng:random(5, 7)
+      for k = 0, n * 8 + 4 do
+        put(sx + dir * k, g - 1, FOSSIL)
+        put(sx + dir * k, g - 2, FOSSIL)
+        if k % 4 == 0 then
+          put(sx + dir * k, g - 3, FOSSIL) -- (a vertebra)
+        end
+      end
+      for r = 0, n - 1 do
+        local rx = sx + dir * (4 + r * 8)
+        local h = 13 + math.floor(15 * math.sin((r + 0.5) / n * math.pi))
+        if rng:random() < 0.15 then
+          h = math.floor(h * 0.45) -- (snapped off)
+        end
+        for d = 0, h do
+          local f = d / h
+          local x = rx + dir * math.floor(10 * f * f + 0.5)
+          put(x, g - 3 - d, FOSSIL)
+          put(x + dir, g - 3 - d, FOSSIL)
+        end
+      end
+      local kx = sx - dir * 9
+      for dy = 0, 6 do
+        for dx = 0, 8 do
+          local u, v = (dx - 4) / 4.5, (dy - 3) / 3.6
+          if u * u + v * v <= 1 and not (dy == 3 and (dx == 2 or dx == 5)) then
+            put(kx + dx * dir, g - 8 + dy, FOSSIL)
+          end
+        end
+      end
+      note("ribs", sx, g)
+    end
+    -- A heap of bones and rubble
+    function stamps.bonepile(sx, g)
+      for dx = -9, 9 do
+        local top = math.floor((9 - math.abs(dx)) * 0.5 * (0.6 + rng:random() * 0.8))
+        for dy = 1, top do
+          put(sx + dx, g - dy, (rng:random() < 0.6) and FOSSIL or ROCKID)
+        end
+      end
+      note("bonepile", sx, g)
+    end
+    -- A ruined house of stone brick: dug into the cave floor, walls and roof of breakable brick, a doorway on the
+    -- side that opens on the cave, a window on the other and a hole where the roof has fallen in. Lamps and urns inside.
+    function stamps.ruins(sx, g)
+      local w, h = rng:random(26, 36), rng:random(24, 30)
+      local x0, x1, y0 = sx - math.floor(w / 2), sx + math.floor(w / 2), g - h
+      local leftOpen = not world:isSolid(x0 - 6, g - 8) and not world:isSolid(x0 - 6, g - 14)
+      local rightOpen = not world:isSolid(x1 + 6, g - 8) and not world:isSolid(x1 + 6, g - 14)
+      if not leftOpen and not rightOpen then
+        return
+      end
+      local doorLeft = leftOpen and (not rightOpen or rng:random() < 0.5)
+      world:fillRect(x0 - 3, y0 - 3, x1 + 3, g + 2, SBRICK) -- (the shell)
+      world:fillRect(x0, y0, x1, g - 1, 0) -- (the room)
+      local hole = rng:random(x0 + 4, x1 - 12)
+      world:fillRect(hole, y0 - 3, hole + rng:random(7, 10), y0 - 1, 0) -- (the roof fallen in)
+      local dx0, dx1 = doorLeft and x0 - 3 or x1 + 1, doorLeft and x0 - 1 or x1 + 3
+      world:fillRect(dx0, g - 17, dx1, g - 1, 0) -- (the doorway)
+      local wx0, wx1 = doorLeft and x1 + 1 or x0 - 3, doorLeft and x1 + 3 or x0 - 1
+      world:fillRect(wx0, y0 + 6, wx1, y0 + 11, 0) -- (a window)
+      for k = 1, 5 do
+        put(doorLeft and x0 - 4 - rng:random(0, 5) or x1 + 4 + rng:random(0, 5), g - 1 - rng:random(0, 2), SBRICK) -- (rubble at the door)
+      end
+      propGroup("streetLamp", sx, g)
+      propGroup("urn", sx + (doorLeft and 7 or -7), g)
+      if rng:random() < 0.6 then
+        propGroup("pouch", sx + (doorLeft and -8 or 8), g)
+      end
+      result.ruins = result.ruins or {}
+      result.ruins[#result.ruins + 1] = { x0 = x0, y0 = y0, x1 = x1, g = g }
+      world:repaintRegion(x0 - 8, y0 - 8, x1 + 8, g + 6)
+      note("ruins", sx, g)
+    end
+    -- A stone arch over the way: two pillars and a lintel with a keystone
+    function stamps.arch(sx, g)
+      local half = rng:random(9, 13)
+      local top = g - rng:random(22, 28)
+      for y = top, g - 1 do
+        for t = 0, 3 do
+          put(sx - half - t, y, SBRICK)
+          put(sx + half + t, y, SBRICK)
+        end
+      end
+      for x = sx - half - 3, sx + half + 3 do
+        local sag = math.floor((1 - ((x - sx) / (half + 3)) ^ 2) * 4)
+        for dy = 0, 3 do
+          put(x, top - sag + dy, SBRICK)
+        end
+      end
+      note("arch", sx, g)
+    end
+    -- A cluster of basalt columns of different heights, like a causeway
+    function stamps.columns(sx, g)
+      local n = rng:random(5, 8)
+      local x = sx
+      for _ = 1, n do
+        local w, h = rng:random(3, 5), rng:random(6, 36)
+        for dx = 0, w - 1 do
+          for dy = 1, h - (dx == 0 and 2 or 0) do
+            put(x + dx, g - dy, BASALTID)
+          end
+        end
+        x = x + w + (rng:random() < 0.3 and 1 or 0)
+      end
+      note("columns", sx, g)
+    end
+    -- A vent: a low cone of basalt with a glowing mouth (it is lit like a glow cluster)
+    function stamps.vent(sx, g)
+      for dx = -8, 8 do
+        local top = math.floor(11 - math.abs(dx) * 1.2)
+        for dy = 1, top do
+          put(sx + dx, g - dy, BASALTID)
+        end
+      end
+      world:fillRect(sx - 2, g - 11, sx + 2, g - 8, 0)
+      result.glows[#result.glows + 1] = { sx, g - 9 }
+      note("vent", sx, g)
+    end
+    local reach = { ribs = 34, bonepile = 20, ruins = 44, arch = 30, columns = 30, vent = 22 }
+    for _, sp in ipairs(area.setpieces or {}) do
+      local stamp = stamps[sp[1]]
+      if stamp then
+        for _, s in ipairs(findFloorSpots(scaled(sp[2]), reach[sp[1]] or 24, avoidForEnemies)) do
+          tick()
+          stamp(s[1], s[2])
+        end
+      end
+    end
+    for _, p in ipairs(pieces) do
+      local r = 56
+      world:repaintRegion(p.x - r, p.y - 60, p.x + r, p.y + 8)
+    end
+    result.setpieces = pieces
+  end
+
 
   -- The old mine's furnishings (area.mine): rail tracks with ore carts, timber
   -- shoring (standing, half fallen and collapsed), oil lamps, skeletal remains

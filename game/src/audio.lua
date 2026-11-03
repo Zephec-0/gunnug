@@ -2934,8 +2934,17 @@ local MAX_HEARD = 420 -- px: beyond this a positional sound is silent
 -- To change one: replace the file (or point this at a different one). Its
 -- volume is set automatically from how loud the recording is (AREA_GAIN is
 -- filled in at load), so a new file needs no tuning.
-local AREA_FILES = { [1] = "audio/caves.wav", [2] = "audio/saxo.wav" }
+local AREA_FILES = { [1] = "audio/caves.wav", [2] = "audio/saxo.wav", [8] = "audio/the_deep.mp3", [9] = "audio/the_deep.mp3", [11] = "audio/clouds.mp3" }
 local SHOP_FILE = "audio/shop.wav" -- the shop's music (the synthesised piano if it is missing)
+-- The Deep plays the Flooded Caverns' source (one recording, so crossing between the two never doubles it up), and
+-- a recorded theme has no synthesised tension layer under it
+local AREA_ALIAS = { [9] = 8 }
+local NO_TENSION = { [8] = true, [9] = true, [11] = true }
+local SURFACE_FILE = "audio/overworld.mp3" -- the Barrens' theme, over the surface (the wind alone if it is missing)
+local surfaceMusic
+local surfaceGain = 1
+local SURFACE_DELAY = 2 -- seconds of quiet after stepping out onto the surface before its theme begins
+local surfaceWait = SURFACE_DELAY
 local shopGain = 1
 local AREA_GAIN = {}
 local TARGET_RMS = 0.126 -- the loudness (RMS, 0..1) a recorded theme is brought to
@@ -2969,6 +2978,22 @@ function audio.load()
       shopGain = rms > 0.001 and math.max(0.3, math.min(1.5, TARGET_RMS / rms)) or 1
       return love.audio.newSource(data, "static")
     end)
+    local surfOk, surfSrc = pcall(function()
+      local data = love.sound.newSoundData(SURFACE_FILE)
+      local sum, n = 0, 0
+      for k = 0, data:getSampleCount() * data:getChannelCount() - 1, 40 do
+        local v = data:getSample(k)
+        sum, n = sum + v * v, n + 1
+      end
+      local rms = math.sqrt(sum / math.max(1, n))
+      surfaceGain = rms > 0.001 and math.max(0.3, math.min(1.5, TARGET_RMS / rms)) or 1
+      return love.audio.newSource(data, "static")
+    end)
+    if surfOk then
+      surfaceMusic = surfSrc
+      surfaceMusic:setLooping(true)
+      surfaceMusic:setVolume(0)
+    end
     music = shopOk and shopSrc or love.audio.newSource(composeShopMusic(), "static")
     music:setLooping(true)
     music:setVolume(0)
@@ -2976,6 +3001,11 @@ function audio.load()
       -- A recorded track takes the place of an area's synthesised theme
       local file = AREA_FILES[i]
       local src
+      if AREA_ALIAS[i] and areaMusic[AREA_ALIAS[i]] then
+        src = areaMusic[AREA_ALIAS[i]]
+        areaMusic[i] = src
+        goto continue
+      end
       if file and love.filesystem.getInfo(file) then
         local ok, loaded = pcall(function()
           local data = love.sound.newSoundData(file)
@@ -2995,6 +3025,7 @@ function audio.load()
       src:setLooping(true) -- (it starts over as soon as it finishes)
       src:setVolume(0)
       areaMusic[i] = src
+      ::continue::
     end
     for i, def in ipairs(TRACKS) do
       local made, data = pcall(function()
@@ -3178,7 +3209,7 @@ local playCheck = 0 -- (looping music never stops by itself: whether it is playi
 
 local eventTimers = {}
 local lastArea
-local AREA_TRACK = { [14] = 6, [15] = 12, [16] = 13, [17] = 9 } -- areas that borrow another area's music (the Undercroft borrows the Quarry's, the Foundry's, the Silt Vaults' and the Deep's)
+local AREA_TRACK = { [14] = 6, [15] = 13, [16] = 12, [17] = 9 } -- areas that borrow another area's music (the Undercroft borrows the Quarry's, the Silt Vaults', the Foundry's and the Deep's)
 
 -- Fades the wind, the area themes and the shop's piano: underground is 0 (open
 -- air) to 1; area is the number of the area the hunter is in (nil on the
@@ -3189,6 +3220,7 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
     return
   end
   area = area and (AREA_TRACK[area] or area) -- (a side branch plays another area's theme)
+  area = area and (AREA_ALIAS[area] or area)
   -- The weapon panel: the same sounds, but as if through a wall (a low-pass
   -- filter on everything playing; without effects support, just quieter)
   if (muffle and true or false) ~= muffled then
@@ -3201,6 +3233,7 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
     end
     apply(ambient.wind)
     apply(music)
+    apply(surfaceMusic)
     for _, src in ipairs(areaMusic) do
       apply(src)
     end
@@ -3260,6 +3293,21 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
       setVol(src, 0)
     end
     setVol(music, 0)
+    if surfaceMusic then
+      setVol(surfaceMusic, 0)
+    end
+    if menuMode or recapMode then
+      -- (a fight left by dying, or the title: nothing of it may play on into the next run)
+      surfaceWait = SURFACE_DELAY
+      tension, tensionTarget = 0, 0
+      for kind, src in pairs(bossMusic) do
+        bossFade[kind] = 0
+        if src:isPlaying() then
+          src:stop()
+        end
+      end
+      bossMix = 0
+    end
     return
   end
   playCheck = playCheck - dt
@@ -3283,6 +3331,9 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
     if not music:isPlaying() then
       music:play()
     end
+    if surfaceMusic and not surfaceMusic:isPlaying() then
+      surfaceMusic:play()
+    end
   end
   local fade = math.min(1, dt * 1.2)
   -- A boss fight's theme takes over from the area's, and its tension layer
@@ -3301,13 +3352,26 @@ function audio.update(dt, underground, paused, area, inShop, muffle)
     bossMix = math.max(bossMix, f)
   end
   local wind = ambient.wind
-  setVol(wind, vol(wind) + (0.10 * windGain * (1 - underground) * MASTER * 2 * volMaster * volSfx - vol(wind)) * math.min(1, dt * 1.5))
+  if surfaceMusic then
+    if area or inShop or underground > 0.5 then
+      surfaceWait = SURFACE_DELAY
+    else
+      surfaceWait = math.max(0, surfaceWait - dt)
+    end
+    local target = (inShop and 0 or surfaceWait > 0 and 0 or 0.05 * (1 - underground) * (1 - bossMix)) * surfaceGain
+    setVol(surfaceMusic, vol(surfaceMusic) + (target * MASTER * 2 * volMaster * volMusic - vol(surfaceMusic)) * fade)
+  end
+  setVol(wind, vol(wind) + ((surfaceMusic and 0.04 or 0.10) * windGain * (1 - underground) * MASTER * 2 * volMaster * volSfx - vol(wind)) * math.min(1, dt * 1.5))
   for i, src in ipairs(areaMusic) do
+    if AREA_ALIAS[i] then
+      goto skip -- (it is the source of the area it is an alias of)
+    end
     local target = ((i == area and not inShop) and 0.10 * underground * (1 - bossMix) or 0) * (AREA_GAIN[i] or 1)
     setVol(src, vol(src) + (target * MASTER * 2 * volMaster * volMusic - vol(src)) * fade)
+    ::skip::
   end
   for i, src in pairs(tensionMusic) do
-    local target = ((i == area and not inShop) and 0.09 * underground * tension * (1 - bossMix) or 0) * (AREA_GAIN[i] or 1)
+    local target = ((i == area and not inShop and not NO_TENSION[i]) and 0.09 * underground * tension * (1 - bossMix) or 0) * (AREA_GAIN[i] or 1)
     setVol(src, vol(src) + (target * MASTER * 2 * volMaster * volMusic - vol(src)) * math.min(1, dt * 2))
   end
   setVol(music, vol(music) + ((inShop and 0.13 * shopGain or 0) * MASTER * 2 * volMaster * volMusic - vol(music)) * fade)

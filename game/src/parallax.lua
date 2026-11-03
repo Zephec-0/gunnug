@@ -753,11 +753,205 @@ end
 
 local STYLES = { mineStyle, hollowsStyle, ventsStyle, warrensStyle, drownedStyle, quarryStyle, oceanStyle, oceanStyle, needleStyle }
 
+-- The Undercroft's four zones (docs/undercroft-design.md): STYLES 10 to 13
+do
+  local BONE, BONE_D = { 0.62, 0.55, 0.42 }, { 0.30, 0.26, 0.20 }
+  local STRATA_A, STRATA_B = { 0.14, 0.11, 0.08 }, { 0.20, 0.15, 0.10 }
+  local SLATE, SLATE_L, SLATE_D = { 0.07, 0.065, 0.065 }, { 0.22, 0.20, 0.19 }, { 0.035, 0.03, 0.03 }
+  local WINDOW, WINDOW_HALO = { 1.0, 0.72, 0.36 }, { 1.0, 0.6, 0.25 }
+  local LAVA, LAVA_HOT, LAVA_CORE = { 1.0, 0.32, 0.06 }, { 1.0, 0.55, 0.14 }, { 1.0, 0.88, 0.5 }
+  local BASALT, BASALT_L, BASALT_D = { 0.05, 0.03, 0.03 }, { 0.30, 0.13, 0.08 }, { 0.02, 0.012, 0.012 }
+  local HAZE = { 0.9, 0.25, 0.05 }
+
+  -- 10: the Fossil Beds. Layers of sediment in tan bands, columns of calcite, and the far ribcages of things that
+  -- lie in the rock: tall curved ribs along a spine, some of them cracked off short
+  local function fossilStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
+    local oy = camY * 0.4
+    for y = math.floor((vy0 - oy) / 26) * 26, vy1 - oy, 26 do
+      local k = hash(y, 5)
+      rect(k < 0.5 and STRATA_A or STRATA_B, 0.35 + 0.2 * k, vx0, y + oy, vx1 - vx0, 3 + math.floor(k * 5))
+    end
+    -- giant ribcages, far
+    cells(0.38, 480, 420, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
+      if hash(i, j + 50) < 0.45 then
+        return
+      end
+      local bx = x + 40 + math.floor(hash(i, j) * 200)
+      local by = y + 250 + math.floor(hash(i, j + 3) * 90)
+      local n = 5 + math.floor(hash(i, j + 7) * 3)
+      rect(BONE_D, 0.55, bx - 6, by, n * 30 + 14, 6) -- (the spine)
+      for v = 0, n * 5 do
+        rect(BONE, 0.32, bx + v * 6, by - 2, 4, 3)
+      end
+      for k = 0, n - 1 do
+        local rx = bx + 6 + k * 30
+        local h = 70 + 80 * math.sin((k + 0.5) / n * math.pi)
+        if hash(i + k, j + 9) < 0.15 then
+          h = h * 0.4 -- (snapped short)
+        end
+        for d = 0, h, 3 do
+          local f = d / h
+          rect(BONE_D, 0.5, rx + 22 * f * f + 2, by - d, 6, 3)
+          rect(BONE, 0.4, rx + 22 * f * f, by - d, 4, 3)
+        end
+      end
+    end)
+    -- calcite columns, nearer
+    local p, spacing = 0.58, 96
+    local off = camX * (1 - p)
+    for i = math.floor((vx0 - off) / spacing) - 1, math.floor((vx1 - off) / spacing) + 1 do
+      if hash(i, 21) > 0.35 then
+        local w = 8 + math.floor(hash(i, 22) * 12)
+        local x = math.floor(i * spacing + off + hash(i, 23) * spacing * 0.6)
+        rect(BONE_D, 0.28, x, vy0, w, vy1 - vy0)
+        rect(BONE, 0.16, x, vy0, 2, vy1 - vy0)
+      end
+    end
+  end
+
+  -- 11: the Buried City. A skyline of ruined buildings a long way off, their windows still lit here and there,
+  -- and a street of lamps along the far wall
+  local function cityStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
+    for rank = 1, 2 do
+      local p = rank == 1 and 0.34 or 0.5
+      local a = rank == 1 and 0.55 or 0.8
+      cells(p, 150, 400, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
+        local seed = i + rank * 50
+        if hash(seed, j + 60) < 0.2 then
+          return
+        end
+        local w = 56 + math.floor(hash(seed, j) * 70)
+        local h = 110 + math.floor(hash(seed, j + 4) * 170)
+        local bx = x + math.floor(hash(seed, j + 2) * 40)
+        local by = y + 380 - h
+        -- dilapidated: most lean over (the top shifted sideways), some are upright; the top is broken off on a slant
+        local lean = hash(seed, j + 11) < 0.3 and 0 or math.floor((hash(seed, j + 12) - 0.5) * 80)
+        local cut = math.floor(hash(seed, j + 13) * w * 0.55) -- (how much of the top corner has gone)
+        local cutLeft = hash(seed, j + 14) < 0.5
+        local cutH = math.floor(h * (0.18 + 0.2 * hash(seed, j + 15)))
+        local STEP = 4
+        for dy = 0, h - 1, STEP do
+          local k = 1 - dy / h -- (1 at the top, 0 at the base)
+          local off = math.floor(lean * k * k + 0.5) -- (bends more toward the top, as if it were buckling)
+          local rowW, rowX = w, bx + off
+          if dy < cutH then
+            local c = math.floor(cut * (1 - dy / cutH))
+            rowW = w - c
+            if cutLeft then
+              rowX = rowX + c
+            end
+          end
+          rect(SLATE, a, rowX, by + dy, rowW, STEP)
+          rect(SLATE_L, a * 0.5, rowX, by + dy, 2, STEP)
+          rect(SLATE_D, a * 0.6, rowX + rowW - 3, by + dy, 3, STEP)
+        end
+        -- windows in rows (which is lit is fixed by the building's own indices, not where it is on screen)
+        local row = 0
+        for wy = 14, h - 18, 26 do
+          row = row + 1
+          local k = 1 - wy / h
+          local off = math.floor(lean * k * k + 0.5)
+          local col = 0
+          for wx = 8, w - 14, 16 do
+            col = col + 1
+            local inside = not (wy < cutH and (cutLeft and wx < cut * (1 - wy / cutH) or (not cutLeft and wx > w - 14 - cut * (1 - wy / cutH))))
+            if inside then
+              local sx, sy = bx + off + wx, by + wy
+              rect(SLATE_D, a * 0.9, sx, sy, 7, 11)
+              if hash(seed * 7 + row, j * 13 + col) < 0.1 then
+                rect(WINDOW_HALO, 0.10 * a, sx - 3, sy - 3, 13, 17)
+                rect(WINDOW, 0.55 * a, sx + 1, sy + 2, 5, 7)
+              end
+            end
+          end
+        end
+      end)
+    end
+    -- a street of lamps along the far wall: little amber points with a halo, in a row (steady: no flicker)
+    cells(0.62, 220, 500, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
+      if hash(i, j + 70) < 0.5 then
+        return
+      end
+      for k = 0, 3 do
+        local lx, ly = x + 20 + k * 46, y + 300 + math.floor(math.sin(k * 1.3 + i) * 6)
+        rect(WINDOW_HALO, 0.10, lx - 6, ly - 6, 14, 14)
+        rect(SLATE_L, 0.7, lx + 1, ly + 2, 1, 24)
+        rect(WINDOW, 0.6, lx, ly, 3, 3)
+      end
+    end)
+  end
+
+  -- 12: the Mesosphere. Wide lava falls down the far walls, basalt islands floating in a red haze, embers
+  -- rising in thick drifts, the whole backdrop breathing slowly
+  local function mesoStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
+    rect(HAZE, 0.05 + 0.03 * math.sin(t * 0.8), vx0, vy0, vx1 - vx0, vy1 - vy0)
+    cells(0.3, 300, 340, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
+      if hash(i, j + 90) < 0.5 then
+        return
+      end
+      local bx, by = x + math.floor(hash(i, j) * 180), y + math.floor(hash(i, j + 3) * 200)
+      local w = 70 + math.floor(hash(i, j + 5) * 110)
+      rect(BASALT, 0.55, bx, by, w, 18)
+      rect(BASALT, 0.55, bx + 10, by + 18, w - 20, 14)
+      rect(BASALT, 0.55, bx + 24, by + 32, w - 48, 12)
+      rect(BASALT_L, 0.5, bx, by, w, 2)
+      rect(LAVA, 0.12, bx + 14, by + 44, w - 28, 3)
+    end)
+    cells(0.5, 190, 420, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
+      if hash(i, j + 40) < 0.35 then
+        return
+      end
+      local fx = x + 20 + math.floor(hash(i, j) * 120)
+      local len = 140 + math.floor(hash(i, j + 6) * 240)
+      local w = 7 + math.floor(hash(i + 3, j) * 7)
+      local glow = 0.42 + 0.14 * math.sin(t * 1.3 + i * 3 + j)
+      rect(LAVA, glow * 0.45, fx - 5, y, w + 10, len)
+      rect(LAVA_HOT, glow, fx, y, w, len)
+      rect(LAVA_CORE, glow * 0.6, fx + 2, y, math.max(1, w - 4), len)
+      for k = 0, 10 do
+        local age = ((t * 0.22 + k / 11 + hash(i, j) * 7) % 1)
+        rect(LAVA_HOT, 0.7 * (1 - age), fx + w / 2 + math.sin(age * 9 + k * 2) * 8, y + len - age * 200, 1, 2)
+      end
+    end)
+  end
+
+  -- 13: the Core. Dark hexagonal columns of basalt with magma showing through their cracks, and a slow pulse of
+  -- red from far below, like something large breathing
+  local function coreStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
+    local beat = 0.5 + 0.5 * math.sin(t * 1.1)
+    rect(HAZE, 0.04 + 0.05 * beat * beat, vx0, vy0, vx1 - vx0, vy1 - vy0)
+    for rank = 1, 2 do
+      local p, spacing = rank == 1 and 0.4 or 0.58, rank == 1 and 70 or 90
+      local off = camX * (1 - p)
+      for i = math.floor((vx0 - off) / spacing) - 1, math.floor((vx1 - off) / spacing) + 1 do
+        local w = 16 + math.floor(hash(i, rank * 11) * 22)
+        local x = math.floor(i * spacing + off + hash(i, rank * 13) * spacing * 0.4)
+        rect(BASALT, rank == 1 and 0.6 or 0.8, x, vy0, w, vy1 - vy0)
+        rect(BASALT_L, 0.5, x, vy0, 1, vy1 - vy0)
+        rect(BASALT_D, 0.7, x + w - 3, vy0, 3, vy1 - vy0)
+        -- magma in the cracks between and across them
+        for y = math.floor(vy0 / 60) * 60, vy1, 60 do
+          local k = hash(i + y, rank)
+          if k < 0.5 then
+            local cy = y + math.floor(k * 100)
+            local fl = (0.35 + 0.35 * beat) * (rank == 1 and 0.7 or 1)
+            rect(LAVA, fl * 0.5, x + 2, cy - 1, w - 4, 4)
+            rect(LAVA_HOT, fl, x + 3 + math.floor(k * 6), cy, math.max(2, w - 8), 1)
+          end
+        end
+        rect(LAVA, (0.10 + 0.14 * beat) * (rank == 1 and 0.6 or 1), x + w - 1, vy0, 1, vy1 - vy0)
+      end
+    end
+  end
+
+  STYLES[10], STYLES[11], STYLES[12], STYLES[13] = fossilStyle, cityStyle, mesoStyle, coreStyle
+end
+
 -- Draws area `index`'s far scenery over the view (world pixels vx0..vx1, vy0..vy1).
 -- colors: the area's three pillar colours (for the mine's far rock).
 function parallax.draw(index, camX, camY, vx0, vy0, vx1, vy1, colors)
   -- (the boss arenas have named styles of their own: src.bossbg)
-  local style = type(index) == "string" and require("src.bossbg").styles[index] or STYLES[index] or STYLES[#STYLES]
+  local style = type(index) == "string" and require("src.bossbg").styles[index] or STYLES[index] or STYLES[9]
   style(camX, camY, vx0, vy0, vx1, vy1, colors, love.timer.getTime())
   flush()
 end

@@ -809,17 +809,6 @@ function fig.glow(e)
     return
   end
   local g = layout(e)
-  if e.qs == "windup" and e.atk == "dash" and e.dashAng then
-    -- Where she will go: a dotted line that flickers faster once it locks
-    local lock = (e.qt or 0) < 0.3
-    local qx, qy = b.x + b.w / 2, b.y + b.h / 2
-    for d = b.w * 0.6, 800, 7 do
-      if floor(t * (lock and 30 or 9) + d / 7) % 2 == 0 then
-        gfx.setColor(1, lock and 0.35 or 0.8, 0.2, lock and 0.9 or 0.55)
-        gfx.rectangle("fill", floor(qx + cos(e.dashAng) * d), floor(qy + sin(e.dashAng) * d), 2, 2)
-      end
-    end
-  end
   glowFace(g, e, t)
   if e.novaWind then
     -- Swelling up for an attack: the whole body glows, row by row, in its own outline

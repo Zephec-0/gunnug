@@ -90,6 +90,9 @@ local ITEMS = {
   sledge = { ".cccccc.", "clllcccd", "clccccdd", ".cccccd.", "...cd...", "...cd...", "..gggg..", "..gddg.." },
   shrapnel = { "c..c...c", ".c.cc.c.", "..clcc..", "cclllcc.", "..cclc..", ".c.cc.c.", "c...c..c", "...c...." },
   birdshot = { "......cc", ".c...ccc", "....ccc.", "..cccc..", ".clcd.c.", "cdd..c..", "d..c...c", "........" },
+  aceofspades = { ".wwwwww.", ".wkwwwwd", ".wwwkwwd", ".wwkkkwd", ".wkkkkkd", ".wwwkwwd", ".wwwwwwd", ".dddddd." },
+  redline = { "o..o....", "...ccc..", "oo.cllc.", "...cllcd", "oo.cllc.", "...ccc..", "o..o....", "........" },
+  sunkenkey = { "..dddd..", ".dlccld.", ".dcyycd.", ".dcycyd.", ".dcyycd.", "..dcccd.", "..dcccd.", "...dd..." },
   sungold = { "y..y..y.", ".yggggy.", "yggyygg.", ".gyywgy.", "ygyyygy.", ".gggggy.", "y.ggg..y", "...y...." },
   corkscrew = { "...cc...", "..cddc..", ".cd..dc.", "...cdc..", "..cd....", ".cdddc..", "...cd...", "....d..." },
   marksman = { "..SSS...", ".SuuS...", "SSSSSSSS", "sssssssS", "SSSSSSSS", ".bb.....", ".bbb....", "........" },
@@ -168,6 +171,8 @@ local ITEMS = {
 }
 
 local PERKS = {
+  skybound = { "c......c", "cc....cc", "ccc..ccc", ".cccccc.", "..cllc..", "...cc...", "...dd...", "........" },
+  regular = { ".wwwww..", ".ccccc..", ".clccc.c", ".clcccdc", ".cccccdc", ".cccccd.", ".cccccd.", ".dddddd." },
   thick_skin = { ".cccccc.", ".cllccc.", ".cllccd.", ".cccccd.", "..cccd..", "..cccd..", "...cd...", "........" },
   iron_will = { "ssssssss", "sSSsSSss", "sSssssSs", "sSssssSs", ".sSssSs.", "..sSSs..", "...ss...", "........" },
   second_wind = { ".cccc...", "c....c..", ".....c..", ".ccccc..", "c.......", "c....c..", ".cccc...", "........" },

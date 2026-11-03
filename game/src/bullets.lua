@@ -94,8 +94,9 @@ local function explode(b, w, x, y)
   npcs.explosion(x, y, radius)
   minedecor.explosion(x, y, radius)
   -- The hunter is caught in it too
+  -- (not if a perk makes monsters explode: the hunter is used to it)
   local player = bullets.player
-  if player and not player.dead then
+  if player and not player.dead and not require("src.perks").has("death_burst") then
     local px, py = player:center()
     local dx, dy = px - x, py - y
     local dist = math.sqrt(dx * dx + dy * dy)

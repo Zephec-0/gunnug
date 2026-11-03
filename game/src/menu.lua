@@ -2656,34 +2656,162 @@ PAGES.board = function()
   end
 end
 
+-- The hat stand: the stand on screen, a hat on each peg but the one being worn. Hover a hat and its card fades in
+-- below the stand; click to take it: that hat lifts and fades away, and the hat that was being worn fades onto
+-- the peg it left, dropping into place.
+local HAT_CX = 200 -- (the stand's middle, in menu units)
+local HAT_PEGS = { { 164, 66 }, { 236, 66 }, { 164, 106 }, { 236, 106 } } -- (where each hat of meta.HATS hangs)
+local HAT_SWAP = 0.7 -- seconds the swap takes
+local hatAnim -- { id, prev, t0 } while a swap is under way
+local hatFade = {} -- hat id -> how far its card is faded in (0..1)
+local hatLast = 0
+local hatAlpha = 1
+
+local function hatRect(color, x, y, w, h)
+  love.graphics.setColor(color[1], color[2], color[3], (color[4] or 1) * hatAlpha)
+  love.graphics.rectangle("fill", X(x), Y(y), math.max(1, math.ceil(w * u)), math.max(1, math.ceil(h * u)))
+end
+
+-- One hat, centred at (cx, cy) in menu units
+local function drawHatSprite(h, cx, cy, lift)
+  cy = cy - (lift or 0)
+  local band = h.band
+  local crown = { band[1] * 0.3 + 0.07, band[2] * 0.3 + 0.06, band[3] * 0.3 + 0.07 }
+  local tall = h.id == "glass" and 3 or 0
+  hatRect({ 0, 0, 0, 0.3 }, cx - 12, cy + 4, 26, 2) -- (a little shadow under the brim)
+  hatRect(crown, cx - 7, cy - 8 - tall, 15, 9 + tall) -- crown
+  hatRect({ 1, 1, 1, 0.12 }, cx - 7, cy - 8 - tall, 15, 1)
+  hatRect(crown, cx - 13, cy + 1, 27, 3) -- brim
+  hatRect({ 1, 1, 1, 0.1 }, cx - 13, cy + 1, 27, 1)
+  hatRect(band, cx - 7, cy - 2, 15, 3) -- band
+  if h.id == "glass" then
+    hatRect({ 0.85, 0.95, 1, 0.9 }, cx - 5, cy - 9 - tall + 2, 2, 5) -- a glint on the glass
+  elseif h.id == "lone" then
+    hatRect(band, cx + 6, cy - 7, 2, 5) -- a feather
+    hatRect(band, cx + 8, cy - 10, 2, 4)
+  elseif h.id == "manual" then
+    hatRect({ 1, 0.9, 0.55 }, cx - 1, cy - 1, 3, 1) -- a brass cog on the band
+    hatRect({ 1, 0.9, 0.55 }, cx, cy - 2, 1, 3)
+  end
+end
+
 PAGES.hats = function()
   local ww, wh = love.graphics.getDimensions()
   love.graphics.setColor(0.015, 0.01, 0.025, 0.93)
   love.graphics.rectangle("fill", 0, 0, ww, wh)
   litBackdrop()
   pageTitle("The Hat Stand", X(14), Y(9))
-  shadowPrint("The hat you wear into a run sets a rule for all of it. Beat a boss in one for the first time and it pays: an item taught for free, and marks. No house rules under a hat.", X(14), Y(26), F.small, FAINT)
+  shadowPrint("The hat you wear into a run sets a rule for all of it. Beat a boss in one for the first time and it pays. No house rules under a hat.", X(14), Y(26), F.small, FAINT)
+  local dt = math.min(0.1, math.max(0, clock - hatLast))
+  hatLast = clock
+  hatAlpha = 1
+
   local worn = meta.hat()
-  local bw, bh = math.floor(60 * u), math.floor(12 * u)
-  for i, h in ipairs(meta.HATS) do
-    local y = Y(44 + (i - 1) * 36)
-    local won = meta.hatWon(h.id)
-    -- the hat, as a little swatch of its band
-    love.graphics.setColor(0.11, 0.09, 0.11)
-    love.graphics.rectangle("fill", X(14), y + 2 * u, 16 * u, 10 * u)
-    love.graphics.setColor(h.band[1], h.band[2], h.band[3])
-    love.graphics.rectangle("fill", X(14), y + 8 * u, 16 * u, 3 * u)
-    shadowPrint(h.name .. (won and "   (won)" or ""), X(38), y, F.body, TEXT)
-    shadowPrint(h.rule, X(38), y + F.body:getHeight() * 1.15, F.small, DIM)
-    if h.reward then
-      local def = require("src.items").defs[h.reward.id]
-      shadowPrint("First win: " .. (def and def.name or h.reward.id) .. " and " .. h.reward.marks .. " marks", X(38), y + F.body:getHeight() * 1.15 + F.small:getHeight() * 1.2, F.small, won and FAINT or meta.SIGIL_COLOR)
+  local WOOD_A, WOOD_B = { 0.30, 0.20, 0.12 }, { 0.20, 0.13, 0.08 }
+  -- the floor, the stand's post and base, four pegs
+  hatRect({ 0.07, 0.05, 0.07, 0.9 }, 60, 152, 280, 3)
+  hatRect(WOOD_B, HAT_CX - 3, 34, 6, 118)
+  hatRect(WOOD_A, HAT_CX - 3, 34, 2, 118)
+  hatRect(WOOD_B, HAT_CX - 26, 146, 52, 6)
+  hatRect(WOOD_A, HAT_CX - 26, 146, 52, 2)
+  hatRect(WOOD_B, HAT_CX - 5, 30, 10, 4)
+  for _, peg in ipairs(HAT_PEGS) do
+    local left = peg[1] < HAT_CX
+    local x0, x1 = left and peg[1] + 7 or HAT_CX + 3, left and HAT_CX - 3 or peg[1] - 7
+    hatRect(WOOD_B, x0, peg[2] + 5, x1 - x0, 3)
+    hatRect(WOOD_A, x0, peg[2] + 5, x1 - x0, 1)
+  end
+  printCentered("Wearing: " .. meta.hatDef(worn).name, X(HAT_CX), Y(40), F.body, WARM)
+
+  -- a swap under way: how far along (0..1)
+  local k
+  if hatAnim then
+    k = (clock - hatAnim.t0) / HAT_SWAP
+    if k >= 1 then
+      hatAnim, k = nil, nil
     end
-    local isWorn = worn == h.id
-    button("hat:" .. h.id, isWorn and "Worn" or "Wear", X(330), y + 2 * u, bw, bh, function()
-      meta.setHat(h.id)
-      audio.play("select")
-    end, { disabled = isWorn })
+  end
+  local function pegOf(id)
+    for i, h in ipairs(meta.HATS) do
+      if h.id == id then
+        return HAT_PEGS[i]
+      end
+    end
+  end
+
+  local focusedHat
+  for i, h in ipairs(meta.HATS) do
+    local peg = HAT_PEGS[i]
+    local swapping = hatAnim and (hatAnim.id == h.id or hatAnim.prev == h.id)
+    if worn ~= h.id and not swapping then
+      local rx, ry, rw, rh = X(peg[1] - 16), Y(peg[2] - 14), math.floor(32 * u), math.floor(26 * u)
+      local focused = widget({
+        id = "hat:" .. h.id, x = rx, y = ry, w = rw, h = rh,
+        activate = function()
+          if hatAnim then
+            return
+          end
+          local prev = worn
+          meta.setHat(h.id)
+          hatAnim = { id = h.id, prev = prev, t0 = clock }
+          audio.play("select")
+        end,
+      })
+      if focused then
+        focusedHat = h
+        focusFrame(rx, ry, rw, rh)
+      end
+      drawHatSprite(h, peg[1], peg[2], focused and 2 + math.sin(clock * 6) * 0.8 or 0)
+    end
+  end
+  if hatAnim and k then
+    -- the one taken lifts toward the front and fades out (the first 45% of the swap)...
+    local t1 = math.min(1, k / 0.45)
+    local from = pegOf(hatAnim.id)
+    hatAlpha = 1 - t1
+    if hatAlpha > 0 then
+      drawHatSprite(meta.hatDef(hatAnim.id), from[1], from[2], 16 * (1 - (1 - t1) ^ 2))
+    end
+    -- ...then the one that was worn appears on its peg, dropping onto it
+    local t2 = math.max(0, (k - 0.4) / 0.6)
+    if t2 > 0 then
+      local to = pegOf(hatAnim.prev)
+      hatAlpha = math.min(1, t2 * 2.2)
+      drawHatSprite(meta.hatDef(hatAnim.prev), to[1], to[2], 12 * (1 - t2) ^ 2)
+    end
+    hatAlpha = 1
+  end
+
+  -- What a hat does: its card fades in under the stand while it is hovered, and out again after
+  for _, h in ipairs(meta.HATS) do
+    local f = hatFade[h.id] or 0
+    local target = (focusedHat == h and not hatAnim) and 1 or 0
+    f = f + (target - f) * math.min(1, dt * 9)
+    hatFade[h.id] = f
+    if f > 0.02 then
+      local won = meta.hatWon(h.id)
+      local def = h.reward and require("src.items").defs[h.reward.id]
+      local rewardText = h.reward and ("First win: " .. (def and def.name or h.reward.id) .. " and " .. h.reward.marks .. " marks") or "Nothing to win: the plain way."
+      local cw = math.floor(230 * u)
+      local pad = math.floor(5 * u)
+      local _, rl = F.small:getWrap(h.rule, cw - 2 * pad)
+      local _, wl = F.small:getWrap(rewardText, cw - 2 * pad)
+      local ch = pad * 2 + F.body:getHeight() + (#rl + #wl) * F.small:getHeight() + math.floor(5 * u)
+      local cx0, cy0 = math.floor(X(HAT_CX) - cw / 2), Y(162)
+      love.graphics.setColor(0.05, 0.04, 0.08, 0.95 * f)
+      love.graphics.rectangle("fill", cx0, cy0, cw, ch)
+      love.graphics.setColor(0.5, 0.42, 0.3, 0.8 * f)
+      love.graphics.rectangle("line", cx0 + 0.5, cy0 + 0.5, cw - 1, ch - 1)
+      shadowPrint(h.name .. (won and "  (won)" or ""), cx0 + pad, cy0 + pad, F.body, TEXT, f)
+      local yy = cy0 + pad + F.body:getHeight() + math.floor(2 * u)
+      love.graphics.setFont(F.small)
+      love.graphics.setColor(DIM[1], DIM[2], DIM[3], f)
+      love.graphics.printf(h.rule, cx0 + pad, math.floor(yy), cw - 2 * pad, "left")
+      yy = yy + #rl * F.small:getHeight() + math.floor(1 * u)
+      local rc = won and FAINT or meta.SIGIL_COLOR
+      love.graphics.setColor(rc[1], rc[2], rc[3], f)
+      love.graphics.printf(rewardText, cx0 + pad, math.floor(yy), cw - 2 * pad, "left")
+    end
   end
 end
 

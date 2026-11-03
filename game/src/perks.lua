@@ -205,7 +205,7 @@ perks.defs = {
     short = "DB",
     color = { 1.0, 0.45, 0.20 },
     rarity = "rare",
-    desc = "Enemies you kill explode, hurting others nearby (never you).",
+    desc = "Enemies you kill explode, hurting others nearby. You are immune to explosion damage.",
     fx = { deathBurst = 1 },
   },
   juggler = {

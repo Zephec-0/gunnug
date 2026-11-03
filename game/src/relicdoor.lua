@@ -1,7 +1,7 @@
 -- The Buried Vault's door (src.buriedvault, docs/undercroft-design.md): a plate in the wall between the
 -- antechamber and the Relic's room, with a socket for each of three fused items. Pressing E beside it sets a
 -- carried item in its socket (the item is spent); with all three set the door gives and the wall behind it opens.
--- The sockets are shown by the two-letter code of the item each one takes. Nothing else says what they are.
+-- Nothing says what the sockets take until the mouse rests on one: then the item it wants shows, greyed out.
 local audio = require("src.audio")
 local effects = require("src.effects")
 local input = require("src.input")
@@ -13,8 +13,6 @@ local relicdoor = {}
 
 -- The three fused items the door takes (all fused from common items, so there is no unlocking in the way)
 relicdoor.RECIPE = { "thermal", "sungold", "shrapnel" }
--- The one that lies in the vault's sealed pocket instead of being fused
-relicdoor.POCKET_ITEM = "sungold"
 
 local REACH = 38
 
@@ -32,14 +30,11 @@ function relicdoor.setup(w)
   set, open = {}, false
 end
 
--- The item in the pocket (the pickups are made after the world is built)
+-- The Cork on its pedestal (the pickups are made after the world is built)
 function relicdoor.populate()
   if not world then
     return
   end
-  local p = buriedvault.info.pocket
-  local item = items.new(relicdoor.POCKET_ITEM)
-  require("src.pickups").dropItem((p.x0 + p.x1) / 2, p.y0 + 2, item, 0, 0)
   local ped = buriedvault.info.pedestal
   require("src.pickups").dropItem((ped.x0 + ped.x1) / 2, ped.y0 - 6, items.new("sunkenkey"), 0, 0)
 end
@@ -149,6 +144,9 @@ end
 
 function relicdoor.update() end
 
+local AMBER = { 1.0, 0.62, 0.18 }
+local GOLD_SOCKET = { 1.0, 0.84, 0.32 }
+
 local function R(c, a, x, y, w, h)
   love.graphics.setColor(c[1], c[2], c[3], a or 1)
   love.graphics.rectangle("fill", math.floor(x), math.floor(y), w, h)
@@ -160,7 +158,6 @@ local function inView(view, m)
   return view.x + view.w >= a.x0 - m and view.x <= d.x1 + m and view.y + view.h >= a.y0 - m and view.y <= a.y1 + m
 end
 
--- The plate and its three sockets, drawn over the wall
 function relicdoor.draw(view)
   if not world or open or not inView(view, 40) then
     return
@@ -175,12 +172,12 @@ function relicdoor.draw(view)
     R({ 0.07, 0.07, 0.10 }, 1, d.x0, y, 6, 8)
     R({ 0.30, 0.31, 0.38 }, 1, d.x0 + 1, y + 1, 4, 6)
     if set[i] then
-      local c = items.defs[relicdoor.RECIPE[i]].color
-      R(c, 1, d.x0 + 1, y + 1, 4, 6)
+      R(GOLD_SOCKET, 1, d.x0 + 1, y + 1, 4, 6)
     end
   end
 end
 
+-- The rock round each socket glows amber, and gold once its item is set
 function relicdoor.drawEmissive(view)
   if not world or open or not inView(view, 40) then
     return
@@ -188,10 +185,15 @@ function relicdoor.drawEmissive(view)
   local d = door()
   local t = love.timer.getTime()
   for i = 1, #relicdoor.RECIPE do
+    local y = socketY(i)
+    local pulse = 0.5 + 0.5 * math.sin(t * 2.2 + i * 1.7)
     if set[i] then
-      local c = items.defs[relicdoor.RECIPE[i]].color
-      R({ 1, 1, 1 }, 0.35 + 0.25 * math.sin(t * 3 + i), d.x0 + 2, socketY(i) + 3, 2, 2)
-      R(c, 0.5, d.x0 + 1, socketY(i) + 1, 4, 6)
+      R(GOLD_SOCKET, 0.16 + 0.08 * pulse, d.x0 - 2, y - 2, 10, 12) -- (a halo on the rock)
+      R(GOLD_SOCKET, 0.55 + 0.25 * pulse, d.x0 + 1, y + 1, 4, 6)
+      R({ 1, 1, 1 }, 0.35 + 0.25 * pulse, d.x0 + 2, y + 3, 2, 2)
+    else
+      R(AMBER, 0.08 + 0.05 * pulse, d.x0 - 2, y - 2, 10, 12)
+      R(AMBER, 0.22 + 0.12 * pulse, d.x0 + 1, y + 1, 4, 6)
     end
   end
 end
@@ -203,8 +205,9 @@ function relicdoor.addLights(lighting, view)
   local d = door()
   for i = 1, #relicdoor.RECIPE do
     if set[i] then
-      local c = items.defs[relicdoor.RECIPE[i]].color
-      lighting.add(d.x0 - 2, socketY(i) + 4, 30, c[1], c[2], c[3], 0.5)
+      lighting.add(d.x0 - 2, socketY(i) + 4, 34, GOLD_SOCKET[1], GOLD_SOCKET[2], GOLD_SOCKET[3], 0.6)
+    else
+      lighting.add(d.x0 - 2, socketY(i) + 4, 20, AMBER[1], AMBER[2], AMBER[3], 0.28)
     end
   end
 end
@@ -226,27 +229,59 @@ local function prompt(font, toScreen, wx, wy, parts)
   end
 end
 
--- The sockets by their codes, the ones that are filled in their item's colour; and the key when the hunter
--- carries an item that fits one
+-- The key when the hunter carries an item that fits a socket; and, with the mouse resting on a socket, the item
+-- it takes, as its icon greyed out
+local hoverT = {} -- socket -> how far its icon is faded in (0..1)
+
 function relicdoor.drawScreen(toScreen, font, player)
+  if not world or open then
+    return
+  end
+  local d = door()
+  local mx, my = love.mouse.getPosition()
+  local dt = math.min(0.1, love.timer.getDelta())
+  for i, id in ipairs(relicdoor.RECIPE) do
+    local x0, y0 = toScreen(d.x0, socketY(i))
+    local x1, y1 = toScreen(d.x0 + 6, socketY(i) + 8)
+    local pad = math.max(3, (y1 - y0) * 0.4)
+    local over = mx >= x0 - pad and mx <= x1 + pad and my >= y0 - pad and my <= y1 + pad
+    local f = hoverT[i] or 0
+    f = math.max(0, math.min(1, f + (over and 1 or -1) * dt / 0.18))
+    hoverT[i] = f
+    if f > 0.01 then
+      local def = items.defs[id]
+      local img = require("src.icons").get({ id = id, color = def.color })
+      if img then
+        local scale = math.max(1, math.floor((y1 - y0) * 1.5 / 8 + 0.5))
+        local w = 8 * scale
+        local ix, iy = math.floor(x0 - w - pad * 2), math.floor((y0 + y1) / 2 - w / 2)
+        love.graphics.setColor(0.04, 0.04, 0.07, 0.8 * f)
+        love.graphics.rectangle("fill", ix - 3, iy - 3, w + 6, w + 6)
+        love.graphics.setColor(0.45, 0.46, 0.52, 0.8 * f)
+        love.graphics.rectangle("line", ix - 3, iy - 3, w + 6, w + 6)
+        local g = set[i] and 0.9 or 0.38
+        love.graphics.setColor(g, g, g * 1.05, (set[i] and 1 or 0.7) * f)
+        love.graphics.draw(img, ix, iy, 0, scale, scale)
+      end
+    end
+  end
   if not near(player) then
     return
   end
   local inv = player.inventory
-  local parts = {}
-  local fits = false
-  for i, id in ipairs(relicdoor.RECIPE) do
-    local def = items.defs[id]
-    parts[#parts + 1] = { def.short .. "  ", set[i] and def.color or { 0.45, 0.46, 0.52 } }
-    if not set[i] and carried(inv, id) then
-      fits = true
+  for _, id in ipairs(relicdoor.RECIPE) do
+    local fit = false
+    for i, rid in ipairs(relicdoor.RECIPE) do
+      if rid == id and not set[i] and carried(inv, id) then
+        fit = true
+      end
+    end
+    if fit then
+      local cx = center()
+      prompt(font, toScreen, cx - 14, door().y0 - 6, { { "[" .. input.label("interact") .. "]", { 1, 0.88, 0.6 } } })
+      return
     end
   end
-  if fits then
-    parts[#parts + 1] = { "[" .. input.label("interact") .. "]", { 1, 0.88, 0.6 } }
-  end
-  local cx, cy = center()
-  prompt(font, toScreen, cx - 14, door().y0 - 6, parts)
 end
 
 return relicdoor

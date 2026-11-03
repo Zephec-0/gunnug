@@ -216,6 +216,7 @@ local THEMES = {
     arenaH = 460,
     arenaWidth = 0.8, -- (of the Quarry's narrow width: the hall is as wide as ever)
     arenaShape = "rect", -- a walled hall: semi-flat rocky floor, stalactites overhead
+    oneShop = true, -- (nothing lies below it: one shop is enough)
     noPlatforms = true,
     arenaBanner = { "The Marble Hall", "A colossus of marble stands dormant at the middle of the hall. It guards the way into the flooded caverns" },
     boss = "golem",
@@ -319,6 +320,7 @@ local THEMES = {
     breakables = { { "urn", 8 }, { "pouch", 12 }, { "lantern", 10 }, { "skullCandle", 6 }, { "tntBarrel", 12 }, { "crate", 14 } },
     stalactites = 100,
     climb = true, -- the routes go up (see src.cavegen)
+    goldHint = require("src.buriedvault").goldHint, -- richer gold in the rock over the Buried Vault
     indoors = true, -- dark inside, though it stands above the ground
     profile = function(y)
       -- The mountain's silhouette: the plain's rock below the ground line, a
@@ -451,40 +453,21 @@ THEMES[14] = derive(THEMES[6], {
   mine = false,
   ambient = { 0.16, 0.12, 0.09 },
   glowCount = 140,
+  parallax = 10, -- (sediment, calcite and giant ribcages: src.parallax)
+  setpieces = { { "ribs", 16 }, { "bonepile", 20 } },
   spawnMul = 1.7,
   toughMul = 2.0,
   eliteMul = 3,
   monsters = { ghoul = 22, bat = 10, worm = 22, roller = 16, cairncrab = 26, wraith = 18, miner = 10, spitter = 8 },
-  breakables = { { "urn", 10 }, { "pouch", 14 }, { "lantern", 10 }, { "skullCandle", 14 }, { "crate", 14 } },
+  breakables = { { "ammonite", 26 }, { "urn", 10 }, { "pouch", 14 }, { "lantern", 6 }, { "skullCandle", 18 }, { "crate", 10 } },
   stalactites = 80,
 })
 
--- Under the Fossil Beds: lava, to the Foundry's measure, then a drowned-and-dusty city, then the core
-THEMES[15] = derive(THEMES[14], {
-  name = "The Greywacke",
-  decor = "greywacke",
-  subtitle = "Hard rock under the Fossil Beds",
-  palette = { rock = materials.GREYWACKE, dirt = materials.REDCLAY },
-  ambient = { 0.24, 0.25, 0.21 },
-  fx = { shadow = { 0.93, 1.0, 0.95 }, light = { 1.04, 1.02, 0.92 }, sat = 0.92, aberr = 0.5, vig = 0.45 },
-  glow = { 0.62, 0.86, 0.52 }, -- pale green stone
-  glowCount = 170,
-  glowRadius = 34,
-  stalk = { 0.46, 0.50, 0.38 },
-  backTop = { 0.075, 0.085, 0.065 },
-  backDeep = { 0.04, 0.05, 0.04 },
-  pillars = { { 0.025, 0.03, 0.02 }, { 0.20, 0.23, 0.17 }, { 0.12, 0.14, 0.10 } },
-  spawnMul = 1.8,
-  toughMul = 2.3,
-  waterPools = 16,
-  monsters = { ghoul = 20, bat = 8, cairncrab = 30, cragram = 22, roller = 22, miner = 18, worm = 22, gargoyle = 14 },
-  breakables = { { "urn", 10 }, { "pouch", 14 }, { "lantern", 10 }, { "crate", 14 }, { "tntBarrel", 14 } },
-  stalactites = 90,
-})
-THEMES[16] = derive(THEMES[5], {
+-- Under the Fossil Beds: a drowned-and-dusty city, then a sea of lava (the Mesosphere), then the core
+THEMES[15] = derive(THEMES[5], {
   name = "The Buried City",
   decor = "buriedcity",
-  subtitle = "Under the Greywacke",
+  subtitle = "Under the Fossil Beds",
   palette = { rock = materials.DUSTSLATE, dirt = materials.REDCLAY },
   fx = { shadow = { 1.0, 0.97, 0.94 }, light = { 1.06, 1.0, 0.9 }, sat = 0.88, aberr = 0.5, vig = 0.5 },
   glow = { 0.95, 0.78, 0.52 }, -- old lamplight
@@ -492,14 +475,37 @@ THEMES[16] = derive(THEMES[5], {
   backTop = { 0.095, 0.085, 0.08 },
   backDeep = { 0.05, 0.045, 0.045 },
   pillars = { { 0.035, 0.03, 0.03 }, { 0.26, 0.23, 0.21 }, { 0.15, 0.13, 0.12 } },
-  parallax = 5,
+  parallax = 11, -- (a skyline of ruined buildings with lit windows: src.parallax)
+  setpieces = { { "ruins", 12 }, { "arch", 10 } },
   ambient = { 0.22, 0.20, 0.19 },
   waterPools = 0,
   spawnMul = 1.9,
   toughMul = 2.6,
   eliteMul = 3,
-  monsters = { ghoul = 24, bat = 10, spitter = 14, wraith = 18, miner = 12, worm = 10, ashshade = 26, slagback = 12 },
-  breakables = { { "urn", 20 }, { "pouch", 16 }, { "lantern", 16 }, { "skullCandle", 20 }, { "crate", 10 } },
+  monsters = { ghoul = 24, bat = 10, spitter = 14, wraith = 26, miner = 12, worm = 10, cairncrab = 14, ashshade = 8 },
+  breakables = { { "streetLamp", 26 }, { "urn", 20 }, { "pouch", 16 }, { "skullCandle", 14 }, { "crate", 12 } },
+  stalactites = 70,
+})
+THEMES[16] = derive(THEMES[12], {
+  name = "The Mesosphere",
+  decor = "core",
+  subtitle = "Where the rock runs like water",
+  palette = { rock = materials.BASALT, dirt = materials.ASH },
+  parallax = 12, -- (wide lava falls, floating basalt, thick embers: src.parallax)
+  setpieces = { { "columns", 16 }, { "vent", 10 } },
+  glow = { 1.0, 0.55, 0.2 },
+  stalk = { 0.42, 0.26, 0.18 },
+  backTop = { 0.08, 0.045, 0.035 },
+  backDeep = { 0.045, 0.025, 0.02 },
+  pillars = { { 0.03, 0.02, 0.02 }, { 0.24, 0.12, 0.08 }, { 0.13, 0.07, 0.05 } },
+  ambient = { 0.30, 0.17, 0.12 },
+  glowCount = 260,
+  lavaPools = 130, -- (seas of it: the pools that make the Foundry hot, three times over)
+  spawnMul = 1.8,
+  toughMul = 2.8,
+  eliteMul = 3,
+  monsters = { ghoul = 10, bat = 6, spitter = 10, wisp = 30, worm = 12, miner = 14, slagback = 34, ashshade = 26 },
+  breakables = { { "magmaGeode", 36 }, { "emberPot", 20 }, { "urn", 8 }, { "pouch", 10 }, { "skullCandle", 10 } },
   stalactites = 70,
 })
 -- The last of them: the Hollow King's hall, and the one shop
@@ -513,7 +519,9 @@ THEMES[17] = derive(THEMES[4], {
   backTop = { 0.075, 0.045, 0.04 },
   backDeep = { 0.04, 0.025, 0.025 },
   pillars = { { 0.03, 0.02, 0.02 }, { 0.20, 0.11, 0.08 }, { 0.11, 0.06, 0.05 } },
-  parallax = 4,
+  parallax = 13, -- (basalt columns with magma in their cracks, a slow red pulse: src.parallax)
+  setpieces = { { "columns", 12 } },
+  breakables = { { "magmaGeode", 30 }, { "emberPot", 12 } },
   glowCount = 300,
   subtitle = "Where the world still burns",
   ambient = { 0.28, 0.18, 0.14 },
@@ -629,7 +637,7 @@ local firstArea, baseSeed
 local deadline = 0 -- os.clock() time the current slice of work must stop at
 local announced = {} -- the areas whose banner has been shown
 -- The bosses whose fights have a theme of their own (src.audio); the Dark Hunter's is played by src.darkhunter
-local BOSS_MUSIC = { queen = true, golem = true, bigfish = true, hollowking = true } -- (the Dark Hunter and the Champion play their own through src.audio.setBoss)
+local BOSS_MUSIC = { queen = true, golem = true, hollowking = true } -- (the Deep's bigfish has none: the area theme plays on; the Dark Hunter and the Champion play their own through src.audio.setBoss)
 
 function catacombs.count()
   return #levels
@@ -651,7 +659,7 @@ local TITLE_WORDS = {
   ["The Cloud Reaches"] = { { "Drifting", "Thin", "Silver", "Floating", "Breathless", "Pale", "Lofty", "Windblown" }, { "Isles", "Spires", "Shelves", "Banks", "Heights", "Steps", "Terraces", "Shoals" } },
   ["The Ember Foundry"] = { { "Roaring", "White-Hot", "Slag", "Forge", "Glowing", "Iron-Fed", "Choking", "Bellows" }, { "Floor", "Casting-Hall", "Foundry", "Crucible", "Works", "Pour", "Smelter", "Furnace-Row" } },
   ["The Fossil Beds"] = { { "Buried", "Ribbed", "Calcined", "Petrified", "Stooping", "Sunk", "Pale", "Long-Dead" }, { "Beds", "Seams", "Ossuary", "Strata", "Deposits", "Layers", "Cuttings", "Charnel" } },
-  ["The Greywacke"] = { { "Grey", "Hard", "Green-Veined", "Unyielding", "Red-Banded", "Cold", "Dense", "Heavy" }, { "Seams", "Faces", "Ledges", "Cuttings", "Strata", "Galleries", "Shelves", "Deeps" } },
+  ["The Mesosphere"] = { { "Molten", "Running", "Slow", "Glassy", "Red-Hot", "Sunk", "Pouring", "Bright" }, { "Sea", "Flows", "Shoals", "Banks", "Reach", "Pools", "Channels", "Tides" } },
   ["The Buried City"] = { { "Silent", "Ash-Choked", "Lost", "Fallen", "Terraced", "Empty", "Under", "Last" }, { "Streets", "Quarter", "Square", "Steps", "Market", "Gate", "Wards", "Rows" } },
   ["The Core"] = { { "Beating", "Searing", "Last", "First", "Hollow", "Glowing", "Bare", "Waiting" }, { "Heart", "Chamber", "Furnace", "Root", "Seat", "Throne", "Floor", "Center" } },
   ["The Silt Vaults"] = { { "Muddy", "Sinking", "Buried", "Murky", "Slumped", "Silted", "Rotting", "Croaking" }, { "Vaults", "Cellars", "Strongrooms", "Crypts", "Basements", "Bogs", "Sumps", "Undercroft" } },
@@ -895,6 +903,8 @@ local function areaFor(i)
   base.gasPools = lv.theme.gasPools
   base.grass = lv.theme.grass
   base.decor = lv.theme.decor
+  base.goldHint = lv.theme.goldHint
+  base.setpieces = lv.theme.setpieces
   base.waterPools = lv.theme.waterPools
   base.lavaPools = lv.theme.lavaPools
   base.acidPools = lv.theme.acidPools
@@ -1350,7 +1360,26 @@ function catacombs.spawnProps()
         -- right beside the neck that drops down into the caverns
         local x0, x1 = lv.entry.x - lv.entry.half + 6, lv.entry.x + lv.entry.half - 6
         local rim = math.min(world:findGround(x0, -400), world:findGround(x1, -400))
-        pr = { id = lv.theme.prisoner, x = x1 - 16, y = rim + 36, held = "float" } -- (out toward the lake's right edge, not mid-water)
+        -- (out toward the lake's right edge, not mid-water: but never where the bank or a ledge would have him in
+        -- the rock, so the first spot from there inward that has the room over it)
+        local px, py = x1 - 16, rim + 36
+        local function clearAt(x)
+          for dx = -16, 16, 4 do
+            for dy = -30, 2, 4 do
+              if world:isSolid(x + dx, py + dy) then
+                return false
+              end
+            end
+          end
+          return true
+        end
+        for x = x1 - 16, x0 + 24, -4 do
+          if clearAt(x) then
+            px = x
+            break
+          end
+        end
+        pr = { id = lv.theme.prisoner, x = px, y = py, held = "float" }
       end
       if pr and require("src.meta").canFind(pr.id) and not require("src.meta").atCamp(pr.id) then -- (once freed, their cage is gone for good)
         npcs.spawnCage(pr.id, pr.x, pr.y, pr.held, pr.top)
@@ -2231,11 +2260,32 @@ local function drawShopVoid(s, view)
   if b then
     -- (the pulsing blue oval belongs to the portal below the shop)
     drawVoidRect(s, b.x0, b.y0, b.x1 - b.x0 + 1, b.floorY - b.y0, view, nil, nil, nil, nil, false, true)
+    -- (and the little neck between the shop's floor and the room below it)
+    drawVoidRect(s, b.cx - 8, s.y + s.h, 17, b.y0 - (s.y + s.h) + 1, view, nil, nil, nil, nil, false, false)
+  end
+end
+
+-- The shaft under each shop's hatch, down to the top of the next area's entrance chamber: the shop's void runs
+-- down the whole of it, so the way between the shop and the next area is not a bare slot in the dark. (Drawn
+-- from the child's side too: the shaft lies mostly in the area below, where the parent is not the one in view.)
+local function drawHatchShafts(view)
+  for k, c in ipairs(levels) do
+    local parent = k > 1 and not c.entry and not c.seal and levels[c.parent or (k - 1)]
+    local info = parent and parent.info
+    local s = info and not info.exit and info.shops and info.shops[c.side == "right" and 2 or 1]
+    local h = s and s.hatch
+    if h then
+      local bottom = c.y0 + 96 - 30
+      if bottom > h.y1 and view.y < bottom and view.y + view.h > h.y1 and view.x < h.x1 + 40 and view.x + view.w > h.x0 - 40 then
+        drawVoidRect(s, h.x0, h.y1 + 1, h.x1 - h.x0 + 1, bottom - h.y1, view, nil, nil, nil, nil, false, true)
+      end
+    end
   end
 end
 
 function catacombs.drawDecor(view)
   fluids.drawDecor(view)
+  drawHatchShafts(view)
   for _, lv in ipairs(levels) do
     local info = inArea(lv, view) and lv.info
     if info then

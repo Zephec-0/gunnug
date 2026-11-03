@@ -645,6 +645,48 @@ function hud.drawBottle(player, u, cx, cy)
   return xL, yTop, xR, yBot
 end
 
+-- The Cork of Lerna: a rough grey stone wedged in the bottle's mouth, drawn on the same pixel grid as the glass. Blue runes
+-- glow on it, slowly pulsing.
+function hud.drawCork(u, cx, cy)
+  local v = VARIANTS[hud.bottleVariant]
+  local hl = v.L / 2
+  local c = hud.cell(u)
+  local a0 = -hl - v.NL - 1.6 -- (its outer end, along the bottle's axis: just proud of the lip)
+  local a1 = -hl - v.NL + 2.6 -- (its inner end, in the neck)
+  local half = v.NT / 2 - 0.4 -- (no wider than the neck's bore, so it sits in the glass rather than over it)
+  local glow = 0.65 + 0.35 * math.sin(love.timer.getTime() * 2.2)
+  local reach = math.ceil((a1 - a0 + half * 2) * K * u / c) + 2
+  local mx, my = cx + (a0 + a1) / 2 * K * u, cy + (a0 + a1) / 2 * K * u
+  for gx = math.floor((mx - reach * c) / c), math.floor((mx + reach * c) / c) do
+    for gy = math.floor((my - reach * c) / c), math.floor((my + reach * c) / c) do
+      local dx, dy = gx * c + c / 2 - cx, gy * c + c / 2 - cy
+      local a, b = (dx + dy) / (2 * K * u), (dy - dx) / (2 * K * u)
+      -- (a rough lump of stone: the outer end is chipped unevenly, a few cells of it knocked off)
+      local chip = ((gx * 7 + gy * 13) % 5) * 0.28
+      if a >= a0 + chip * (a < a0 + 1.6 and 1 or 0) and a <= a1 and math.abs(b) <= half then
+        local rr, gg, bb = 0.46, 0.48, 0.54
+        local edge = math.abs(b) > half - 0.9
+        if edge then
+          rr, gg, bb = 0.26, 0.28, 0.34
+        elseif b < -half * 0.4 then
+          rr, gg, bb = 0.60, 0.62, 0.68 -- (the lit side)
+        end
+        if (gx * 5 + gy * 11) % 4 == 0 then
+          rr, gg, bb = rr * 0.86, gg * 0.86, bb * 0.88 -- (flecks in the stone)
+        end
+        -- A rune cut across it, glowing blue
+        local bar = math.abs(a - (a0 + (a1 - a0) * 0.55)) < 0.6 and math.abs(b) < half - 0.9
+        love.graphics.setColor(rr, gg, bb, 1)
+        love.graphics.rectangle("fill", gx * c, gy * c, c, c)
+        if bar and not edge then
+          love.graphics.setColor(0.35, 0.72, 1.0, 0.45 + 0.4 * glow)
+          love.graphics.rectangle("fill", gx * c, gy * c, c, c)
+        end
+      end
+    end
+  end
+end
+
 function hud.font(scale)
   return font(math.max(10, math.floor(scale * 4)))
 end
@@ -699,6 +741,9 @@ function hud.draw(player, scale)
         end
       end
     end
+  end
+  if player.inventory.cork then
+    hud.drawCork(u, bcx, bcy)
   end
   local belowFlask = bb + 2 * u
   local meta = require("src.meta")

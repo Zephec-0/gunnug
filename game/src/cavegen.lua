@@ -327,6 +327,9 @@ function cavegen.generate(world, area, seed, tick)
         if v > threshold and inFunnel(x, y) then
           world:setRaw(x, y, AIR)
         end
+        if x % 64 == 0 then
+          tick() -- (a whole row ran 4-6 ms past the frame's budget)
+        end
       end
       tick()
     end
@@ -396,7 +399,7 @@ function cavegen.generate(world, area, seed, tick)
         cy = cy + (love.math.noise(cx * 0.01, wanderSeed) - 0.5) * 14
       end
       carveCircle(cx, cy, r + (love.math.noise(cx * 0.03, cy * 0.03, wanderSeed + 3) - 0.5) * 6)
-      if s % 30 == 0 then
+      if s % 6 == 0 then
         tick()
       end
     end

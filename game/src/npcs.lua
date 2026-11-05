@@ -416,8 +416,42 @@ end
 
 -- Drawing ------------------------------------------------------------------------------
 
+-- (fixed colours for the draw calls below, built once: a table written inline in R({...}) is new garbage every call)
+local KC = {
+  { 0.95, 0.8, 0.4 },
+  { 0.85, 0.82, 0.7 },
+  { 0.30, 0.22, 0.16 },
+  { 0.46, 0.34, 0.24 },
+  { 0.62, 0.56, 0.46 },
+  { 0.36, 0.34, 0.36 },
+  { 0.48, 0.46, 0.48 },
+  { 0.52, 0.44, 0.30 },
+  { 0.40, 0.33, 0.22 },
+  { 0.14, 0.12, 0.12 },
+  { 0.55, 0.48, 0.38 },
+  { 0.42, 0.36, 0.28 },
+  { 0.62, 0.55, 0.45 },
+  { 0.55, 0.78, 0.62 },
+  { 0.30, 0.45, 0.35 },
+  { 0.22, 0.22, 0.25 },
+  { 0.24, 0.24, 0.28 },
+  { 0.86, 0.76, 0.54 },
+  { 0.70, 0.58, 0.38 },
+  { 0.30, 0.18, 0.08 },
+  { 0.45, 0.32, 0.18 },
+  { 0.75, 0.12, 0.1 },
+  { 0.11, 0.09, 0.11 },
+  { 1, 0.88, 0.6 },
+}
+
 local function R(c, x, y, w, h)
   love.graphics.setColor(c[1], c[2], c[3], c[4] or 1)
+  love.graphics.rectangle("fill", x, y, w, h)
+end
+
+-- R with the colour as numbers (no table made for each call); m scales the alpha
+local function RA(r, g, b, a, x, y, w, h, m)
+  love.graphics.setColor(r, g, b, a * (m or 1))
   love.graphics.rectangle("fill", x, y, w, h)
 end
 
@@ -442,7 +476,7 @@ local function drawGunsmith(x, g, facing, pose, k, alpha)
   love.graphics.scale(facing, 1)
   local a = alpha or 1
   local function r(c, dx, dy, w, h)
-    R({ c[1], c[2], c[3], a }, dx, dy, w, h)
+    RA(c[1], c[2], c[3], a, dx, dy, w, h)
   end
   if pose == "sit" then
     -- Slumped against the bars, knees up, head down
@@ -528,7 +562,7 @@ local function drawProspector(x, g, facing, pose, k, alpha)
   love.graphics.scale(facing, 1)
   local a = alpha or 1
   local function r(c, dx, dy, w, h)
-    R({ c[1], c[2], c[3], a }, dx, dy, w, h)
+    RA(c[1], c[2], c[3], a, dx, dy, w, h)
   end
   local function head(oy)
     r(SKIN, -2, -19 + oy, 4, 4)
@@ -689,11 +723,11 @@ local function drawCage(c)
     R(IRON_L, x + 2, g - 15, 1, 2)
     R(IRON_L, x + 4, g - 15, 1, 2)
     R(BRASS, x + 1, g - 13, 5, 4)
-    R({ 0.95, 0.8, 0.4 }, x + 1, g - 13, 5, 1)
+    R(KC[1], x + 1, g - 13, 5, 1)
     R(EYE, x + 3, g - 12, 1, 2)
   end
   -- a stub of candle someone left on the floor outside
-  R({ 0.85, 0.82, 0.7 }, x - 18, g - 4, 2, 4)
+  R(KC[2], x - 18, g - 4, 2, 4)
 end
 
 -- The Gunsmith's stall at camp: an awning over a workbench, a gun rack, an
@@ -702,9 +736,9 @@ end
 -- a pick on a rock, a sack of samples and a lantern on a stake
 local function drawProspectorCamp(s)
   local x, g = s.x, s.y
-  R({ 0.30, 0.22, 0.16 }, x - 26, g - 2, 12, 2) -- bedroll
-  R({ 0.46, 0.34, 0.24 }, x - 26, g - 3, 12, 1)
-  R({ 0.62, 0.56, 0.46 }, x - 27, g - 4, 3, 2)
+  R(KC[3], x - 26, g - 2, 12, 2) -- bedroll
+  R(KC[4], x - 26, g - 3, 12, 1)
+  R(KC[5], x - 27, g - 4, 3, 2)
   -- the strongbox
   R(WOOD_D, x + 9, g - 8, 12, 8)
   R(WOOD, x + 9, g - 8, 12, 2)
@@ -713,13 +747,13 @@ local function drawProspectorCamp(s)
   R(IRON_D, x + 18, g - 8, 1, 8)
   R(BRASS, x + 14, g - 6, 2, 2)
   -- pick against a rock, a sack
-  R({ 0.36, 0.34, 0.36 }, x - 11, g - 4, 6, 4)
-  R({ 0.48, 0.46, 0.48 }, x - 11, g - 4, 6, 1)
+  R(KC[6], x - 11, g - 4, 6, 4)
+  R(KC[7], x - 11, g - 4, 6, 1)
   R(WOOD_D, x - 9, g - 13, 1, 9)
   R(IRON_L, x - 12, g - 14, 7, 1)
   R(IRON, x - 13, g - 13, 1, 1)
-  R({ 0.52, 0.44, 0.30 }, x + 23, g - 6, 5, 6)
-  R({ 0.40, 0.33, 0.22 }, x + 24, g - 7, 3, 1)
+  R(KC[8], x + 23, g - 6, 5, 6)
+  R(KC[9], x + 24, g - 7, 3, 1)
   -- the lantern on a stake
   R(WOOD_D, x - 18, g - 16, 1, 16)
   R(IRON_D, x - 19, g - 19, 3, 4)
@@ -787,7 +821,7 @@ local function drawMount(x, y, kind)
   R(WOOD_D, x - 4, y - 4, 9, 9) -- the plaque
   R(WOOD, x - 3, y - 3, 7, 7)
   R(look[1], x - 2, y - 2, 5, 5)
-  R({ look[1][1] * 0.7, look[1][2] * 0.7, look[1][3] * 0.7 }, x - 2, y + 1, 5, 2)
+  RA(look[1][1] * 0.7, look[1][2] * 0.7, look[1][3] * 0.7, 1, x - 2, y + 1, 5, 2)
   R(look[2], x - 1, y - 1, 1, 1)
   R(look[2], x + 1, y - 1, 1, 1)
 end
@@ -812,21 +846,21 @@ local function drawTaxidermistStall(s)
     if meta.isMounted(kind) then
       drawMount(mx + 1, g - 24, kind)
     else
-      R({ 0.14, 0.12, 0.12 }, mx + 1, g - 24, 1, 1)
+      R(KC[10], mx + 1, g - 24, 1, 1)
     end
   end
   -- table and a stuffed shape on it, jars on a shelf
   R(WOOD_L, x - 18, g - 10, 18, 2)
   R(WOOD_D, x - 17, g - 8, 2, 8)
   R(WOOD_D, x - 3, g - 8, 2, 8)
-  R({ 0.55, 0.48, 0.38 }, x - 14, g - 13, 8, 3)
-  R({ 0.42, 0.36, 0.28 }, x - 14, g - 11, 8, 1)
-  R({ 0.62, 0.55, 0.45 }, x - 7, g - 15, 3, 5)
+  R(KC[11], x - 14, g - 13, 8, 3)
+  R(KC[12], x - 14, g - 11, 8, 1)
+  R(KC[13], x - 7, g - 15, 3, 5)
   R(IRON_L, x - 12, g - 14, 4, 1)
   R(WOOD_D, x + 3, g - 17, 14, 1)
   for i = 0, 2 do
-    R({ 0.55, 0.78, 0.62 }, x + 4 + i * 4, g - 21, 3, 4)
-    R({ 0.30, 0.45, 0.35 }, x + 4 + i * 4, g - 21, 3, 1)
+    R(KC[14], x + 4 + i * 4, g - 21, 3, 4)
+    R(KC[15], x + 4 + i * 4, g - 21, 3, 1)
   end
   local near = s.near
   drawTaxidermist(x + 8, g, (near and s.facing) or -1, not near, s.hammer)
@@ -854,9 +888,9 @@ local function drawStall(s)
     end
   end
   -- long guns leaning on the left post
-  R({ 0.22, 0.22, 0.25 }, sx - 20, g - 22, 1, 14)
+  R(KC[16], sx - 20, g - 22, 1, 14)
   R(WOOD, sx - 20, g - 9, 2, 6)
-  R({ 0.22, 0.22, 0.25 }, sx - 18, g - 20, 1, 13)
+  R(KC[16], sx - 18, g - 20, 1, 13)
   R(WOOD_L, sx - 18, g - 8, 2, 5)
   -- the workbench, with a vise, a rifle being mended and a box of cartridges
   R(WOOD_L, sx - 16, g - 10, 15, 2)
@@ -866,7 +900,7 @@ local function drawStall(s)
   R(WOOD_D, sx - 15, g - 4, 13, 1)
   R(IRON, sx - 15, g - 13, 3, 3)
   R(IRON_D, sx - 16, g - 14, 5, 1)
-  R({ 0.24, 0.24, 0.28 }, sx - 11, g - 11, 8, 1)
+  R(KC[17], sx - 11, g - 11, 8, 1)
   R(WOOD, sx - 5, g - 12, 4, 2)
   R(BRASS, sx - 13, g - 6, 3, 2)
   -- the anvil on a stump
@@ -904,18 +938,18 @@ local function drawBoard(view)
     local px = bx - 11 + (i - 1) * 8
     if b then
       local tilt = (i % 2 == 0) and 1 or 0
-      R({ 0.86, 0.76, 0.54 }, px, g - 23 + tilt, 6, 9)
-      R({ 0.70, 0.58, 0.38 }, px, g - 15 + tilt, 6, 1)
-      R({ 0.30, 0.18, 0.08 }, px + 1, g - 22 + tilt, 4, 1) -- WANTED
-      R({ 0.45, 0.32, 0.18 }, px + 2, g - 20 + tilt, 2, 3) -- the picture
-      R({ 0.30, 0.18, 0.08 }, px + 1, g - 16 + tilt, 4, 1)
-      R({ 0.14, 0.12, 0.12 }, px + 3, g - 23 + tilt, 1, 1) -- the nail
+      R(KC[18], px, g - 23 + tilt, 6, 9)
+      R(KC[19], px, g - 15 + tilt, 6, 1)
+      R(KC[20], px + 1, g - 22 + tilt, 4, 1) -- WANTED
+      R(KC[21], px + 2, g - 20 + tilt, 2, 3) -- the picture
+      R(KC[20], px + 1, g - 16 + tilt, 4, 1)
+      R(KC[10], px + 3, g - 23 + tilt, 1, 1) -- the nail
       if b.taken then
-        R({ 0.75, 0.12, 0.1 }, px + 1, g - 19 + tilt, 4, 1)
-        R({ 0.75, 0.12, 0.1 }, px + 2, g - 18 + tilt, 2, 1)
+        R(KC[22], px + 1, g - 19 + tilt, 4, 1)
+        R(KC[22], px + 2, g - 18 + tilt, 2, 1)
       end
     else
-      R({ 0.14, 0.12, 0.12 }, px + 3, g - 23, 1, 1) -- just the nail
+      R(KC[10], px + 3, g - 23, 1, 1) -- just the nail
     end
   end
 end
@@ -934,11 +968,11 @@ local function drawHatStand()
       i = i + 1
       local px, py = hx + pegs[i][1], g + pegs[i][2]
       R(WOOD_D, px < hx and px or (px > hx and px - 4 or px), py, math.abs(px - hx) > 0 and 5 or 1, 1) -- the peg
-      R({ 0.11, 0.09, 0.11 }, px - 3, py - 2, 7, 1) -- brim
-      R({ 0.11, 0.09, 0.11 }, px - 2, py - 5, 5, 3) -- crown
+      R(KC[23], px - 3, py - 2, 7, 1) -- brim
+      R(KC[23], px - 2, py - 5, 5, 3) -- crown
       R(h.band, px - 2, py - 3, 5, 1)
       if worn == h.id then
-        R({ 1, 0.88, 0.6 }, px - 1, py - 8, 3, 1) -- a marker over the hat that is worn
+        R(KC[24], px - 1, py - 8, 3, 1) -- a marker over the hat that is worn
       end
     end
   end
@@ -984,12 +1018,12 @@ function npcs.drawEmissive(view)
   for _, c in ipairs(cages) do
     if inView(view, c.x, c.y, 40) then
       local fl = 0.75 + 0.25 * math.sin(t * 10 + c.x)
-      R({ 1, 0.75, 0.3, fl }, c.x - 18, c.y - 6, 2, 2)
-      R({ 1, 0.95, 0.7, fl }, c.x - 18, c.y - 5, 1, 1)
+      RA(1, 0.75, 0.3, fl, c.x - 18, c.y - 6, 2, 2)
+      RA(1, 0.95, 0.7, fl, c.x - 18, c.y - 5, 1, 1)
       if c.state == "locked" then
         -- the padlock catches the light, so it can be found and aimed at
         local glint = 0.35 + 0.35 * math.max(0, math.sin(t * 2.2 + c.x))
-        R({ 1, 0.85, 0.45, glint }, c.x + 1, c.y - 13, 1, 1)
+        RA(1, 0.85, 0.45, glint, c.x + 1, c.y - 13, 1, 1)
       end
     end
   end
@@ -999,14 +1033,14 @@ function npcs.drawEmissive(view)
       people.drawStallGlow(s, t)
       if people.glow(id) then
         local gl = people.glow(id)
-        R({ gl[3][1], gl[3][2], gl[3][3], 0.55 + 0.3 * fl }, s.x + gl[1], s.y + gl[2], 2, 2)
+        RA(gl[3][1], gl[3][2], gl[3][3], 0.55 + 0.3 * fl, s.x + gl[1], s.y + gl[2], 2, 2)
       elseif id == "taxidermist" then
-        R({ 0.7, 1, 0.8, 0.5 + 0.2 * fl }, s.x + 5, s.y - 20, 1, 1) -- a glint in a jar
+        RA(0.7, 1, 0.8, 0.5 + 0.2 * fl, s.x + 5, s.y - 20, 1, 1) -- a glint in a jar
       elseif id == "prospector" then
-        R({ 1, 0.78, 0.38, fl }, s.x - 18, s.y - 18, 1, 2)
+        RA(1, 0.78, 0.38, fl, s.x - 18, s.y - 18, 1, 2)
       else
         local sx, g = s.x - 4, s.y
-        R({ 1, 0.78, 0.38, fl }, sx + 17, g - 21, 1, 3)
+        RA(1, 0.78, 0.38, fl, sx + 17, g - 21, 1, 3)
       end
     end
   end

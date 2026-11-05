@@ -308,12 +308,24 @@ local EVICT_X, EVICT_Y = 1500, 1200
 local evictTimer = 0
 
 -- Registers a dynamic body for the cull above (every dynamic body must be, or it is never switched off)
+local lastPX, lastPY -- (where the hunter was on the last update: new bodies are judged against it at once)
+
 function physics.track(body)
   bodies[#bodies + 1] = body
+  if lastPX then
+    -- A whole area's props and monsters appear in one frame: left active until the next cull (up to 0.2 s) every one
+    -- of them, far or near, had the terrain traced round it (hundreds of chunks, 20-35 ms in one frame)
+    local x, y = body:getPosition()
+    if math.abs(x - lastPX) >= FAR_X or math.abs(y - lastPY) >= FAR_Y then
+      body:setActive(false)
+      return
+    end
+  end
   live[#live + 1] = body
 end
 
 function physics.update(dt, px, py)
+  lastPX, lastPY = px, py
   physics.flush()
   cullTimer = cullTimer - dt
   if cullTimer <= 0 or not px then

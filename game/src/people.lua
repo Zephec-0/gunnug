@@ -4,8 +4,38 @@
 -- figure (also used inside cages), people.drawStall for the stall at camp.
 local people = {}
 
+-- (fixed colours for the draw calls below, built once: a table written inline in R({...}) is new garbage every call)
+local KC = {
+  { 0.30, 0.22, 0.12 },
+  { 0.35, 0.80, 0.40 },
+  { 0.84, 0.76, 0.56 },
+  { 0.60, 0.48, 0.30 },
+  { 0.50, 0.62, 0.62 },
+  { 0.62, 0.20, 0.16 },
+  { 0.95, 0.95, 0.9 },
+  { 0.86, 0.78, 0.58 },
+  { 0.9, 0.85, 0.7 },
+  { 0.78, 0.76, 0.70 },
+  { 0.95, 0.80, 0.40 },
+  { 0.25, 0.2, 0.15 },
+  { 0.9, 0.8, 0.4 },
+  { 1, 1, 1 },
+  { 0.82, 0.80, 0.74 },
+  { 0.62, 0.60, 0.56 },
+  { 0.55, 0.14, 0.12 },
+  { 0.70, 0.68, 0.62 },
+  { 0.72, 0.84, 0.80 },
+  { 0.80, 0.50, 0.50 },
+}
+
 local function R(c, x, y, w, h, a)
   love.graphics.setColor(c[1], c[2], c[3], (c[4] or 1) * (a or 1))
+  love.graphics.rectangle("fill", x, y, w, h)
+end
+
+-- R with the colour as numbers (no table made for each call); m scales the alpha
+local function RA(r, g, b, a, x, y, w, h, m)
+  love.graphics.setColor(r, g, b, a * (m or 1))
   love.graphics.rectangle("fill", x, y, w, h)
 end
 
@@ -195,7 +225,7 @@ local function apothecaryStall(s)
   -- drying herbs
   for i = 0, 5 do
     local hx = x - 18 + i * 7
-    R({ 0.30, 0.22, 0.12 }, hx, g - 26, 1, 3)
+    R(KC[1], hx, g - 26, 1, 3)
     R({ 0.32 + (i % 2) * 0.2, 0.52, 0.28 }, hx - 1, g - 23, 3, 5)
   end
   -- the table and its bottles
@@ -205,7 +235,7 @@ local function apothecaryStall(s)
   local cols = { { 0.80, 0.30, 0.35 }, { 0.35, 0.60, 0.90 }, { 0.90, 0.80, 0.35 }, { 0.55, 0.85, 0.50 }, { 0.75, 0.45, 0.90 } }
   for i = 0, 4 do
     local c = cols[i + 1]
-    R({ c[1] * 0.6, c[2] * 0.6, c[3] * 0.6 }, x - 17 + i * 4, g - 15 - (i % 2), 3, 5 + (i % 2))
+    RA(c[1] * 0.6, c[2] * 0.6, c[3] * 0.6, 1, x - 17 + i * 4, g - 15 - (i % 2), 3, 5 + (i % 2))
     R(c, x - 16 + i * 4, g - 14 - (i % 2), 1, 3)
     R(WOOD, x - 17 + i * 4, g - 16 - (i % 2), 3, 1)
   end
@@ -213,10 +243,9 @@ local function apothecaryStall(s)
   R(IRON_D, x + 9, g - 9, 10, 8)
   R(IRON, x + 9, g - 9, 10, 1)
   R(IRON_D, x + 8, g - 10, 12, 1)
-  R({ 0.35, 0.80, 0.40 }, x + 10, g - 9, 8, 1)
+  R(KC[2], x + 10, g - 9, 8, 1)
   R(IRON_D, x + 9, g - 1, 2, 1)
   R(IRON_D, x + 17, g - 1, 2, 1)
-  people.draw("apothecary", x + 25, g, s.near and (s.facing or 1) or -1, s.near and "stand" or "work", s.hammer)
 end
 
 -- Cartographer: a slanted drafting table under a lean-to with a big map
@@ -228,28 +257,27 @@ local function cartographerStall(s)
     R(WOOD_D, x + 19, g - 24, 2, 24)
   end
   -- the pinned map: a big sheet with a coastline and dotted route
-  R({ 0.84, 0.76, 0.56 }, x - 18, g - 25, 22, 15)
-  R({ 0.60, 0.48, 0.30 }, x - 18, g - 25, 22, 1)
-  R({ 0.60, 0.48, 0.30 }, x - 18, g - 11, 22, 1)
-  R({ 0.50, 0.62, 0.62 }, x - 16, g - 23, 8, 6)
-  R({ 0.50, 0.62, 0.62 }, x - 10, g - 18, 6, 4)
+  R(KC[3], x - 18, g - 25, 22, 15)
+  R(KC[4], x - 18, g - 25, 22, 1)
+  R(KC[4], x - 18, g - 11, 22, 1)
+  R(KC[5], x - 16, g - 23, 8, 6)
+  R(KC[5], x - 10, g - 18, 6, 4)
   for i = 0, 5 do
-    R({ 0.62, 0.20, 0.16 }, x - 7 + i * 3, g - 22 + (i % 2) * 2, 1, 1)
+    R(KC[6], x - 7 + i * 3, g - 22 + (i % 2) * 2, 1, 1)
   end
-  R({ 0.62, 0.20, 0.16 }, x - 1, g - 17, 3, 3)
+  R(KC[6], x - 1, g - 17, 3, 3)
   -- the table, a compass, a barrel of rolled maps
   R(WOOD_L, x - 20, g - 10, 24, 2)
   R(WOOD_D, x - 19, g - 8, 2, 8)
   R(WOOD_D, x + 1, g - 8, 2, 8)
   R(BRASS, x - 14, g - 12, 3, 2)
-  R({ 0.95, 0.95, 0.9 }, x - 13, g - 12, 1, 1)
-  R({ 0.86, 0.78, 0.58 }, x - 8, g - 12, 5, 2)
+  R(KC[7], x - 13, g - 12, 1, 1)
+  R(KC[8], x - 8, g - 12, 5, 2)
   R(WOOD, x + 10, g - 9, 8, 9)
   R(WOOD_D, x + 10, g - 6, 8, 1)
   for i = 0, 2 do
-    R({ 0.86, 0.78, 0.58 }, x + 11 + i * 2, g - 13, 1, 4)
+    R(KC[8], x + 11 + i * 2, g - 13, 1, 4)
   end
-  people.draw("cartographer", x + 24, g, s.near and (s.facing or 1) or -1, s.near and "stand" or "work", s.hammer)
 end
 
 -- Bartender: a bar of planks and barrels, a row of bottles on a shelf and
@@ -267,7 +295,7 @@ local function bartenderStall(s)
   for i = 0, 7 do
     local c = cols[i % 4 + 1]
     R(c, x - 18 + i * 5, g - 26, 2, 4)
-    R({ 0.9, 0.85, 0.7 }, x - 18 + i * 5, g - 27, 2, 1)
+    R(KC[9], x - 18 + i * 5, g - 27, 2, 1)
     if i % 2 == 0 then
       R(c, x - 17 + i * 5, g - 20, 2, 4)
     end
@@ -281,8 +309,8 @@ local function bartenderStall(s)
     R(WOOD_D, x - 20 + i * 15, g - 6, 12, 1)
   end
   for i = 0, 2 do
-    R({ 0.78, 0.76, 0.70 }, x - 15 + i * 8, g - 14, 2, 3)
-    R({ 0.95, 0.80, 0.40 }, x - 15 + i * 8, g - 14, 2, 1)
+    R(KC[10], x - 15 + i * 8, g - 14, 2, 3)
+    R(KC[11], x - 15 + i * 8, g - 14, 2, 1)
   end
   -- a cask on the end, a hanging lantern
   R(WOOD, x + 22, g - 9, 8, 9)
@@ -290,7 +318,6 @@ local function bartenderStall(s)
   R(IRON_D, x + 22, g - 3, 8, 1)
   R(IRON_D, x + 12, g - 24, 1, 3)
   R(IRON_D, x + 11, g - 21, 3, 4)
-  people.draw("bartender", x - 4, g - 11 + 11, s.near and (s.facing or 1) or 1, s.near and "stand" or "work", s.hammer)
 end
 
 -- The saloon's house rules switched on fly as pennants from poles above the
@@ -316,20 +343,20 @@ function people.drawStallGlow(s, t)
   for rule, def in pairs(RULE_FLAGS) do
     if meta.ruleOn(rule) then
       local px, top = x + def.dx, g - 46
-      R({ 0.25, 0.2, 0.15 }, px, top, 1, 20) -- the pole
-      R({ 0.9, 0.8, 0.4 }, px - 1, top - 1, 3, 1)
+      R(KC[12], px, top, 1, 20) -- the pole
+      R(KC[13], px - 1, top - 1, 3, 1)
       local c = def.color
       for col = 0, 9 do
         local wave = math.floor(math.sin(t * 4 + col * 0.6 + px) * 1.2 + 0.5)
         local h = 9 - math.floor(col * 0.5)
-        R({ c[1] * 0.55, c[2] * 0.55, c[3] * 0.55 }, px + 1 + col, top + wave, 1, h)
+        RA(c[1] * 0.55, c[2] * 0.55, c[3] * 0.55, 1, px + 1 + col, top + wave, 1, h)
         R(c, px + 1 + col, top + wave + 1, 1, h - 2)
       end
       local icon = FLAG_ICONS[def.icon]
       for row = 1, 5 do
         for col = 1, 5 do
           if icon[row]:sub(col, col) == "1" then
-            R({ 1, 1, 1 }, px + 2 + col, top + 1 + row + math.floor(math.sin(t * 4 + (col + 2) * 0.6 + px) * 1.2 + 0.5), 1, 1, 0.92)
+            R(KC[14], px + 2 + col, top + 1 + row + math.floor(math.sin(t * 4 + (col + 2) * 0.6 + px) * 1.2 + 0.5), 1, 1, 0.92)
           end
         end
       end
@@ -360,28 +387,82 @@ local function sawboneStall(s)
   -- the cot
   R(WOOD_D, x - 14, g - 6, 2, 6)
   R(WOOD_D, x + 12, g - 6, 2, 6)
-  R({ 0.82, 0.80, 0.74 }, x - 15, g - 9, 30, 3)
-  R({ 0.62, 0.60, 0.56 }, x - 15, g - 7, 30, 1)
-  R({ 0.55, 0.14, 0.12 }, x - 5, g - 9, 6, 3)
-  R({ 0.70, 0.68, 0.62 }, x - 15, g - 11, 6, 2)
+  R(KC[15], x - 15, g - 9, 30, 3)
+  R(KC[16], x - 15, g - 7, 30, 1)
+  R(KC[17], x - 5, g - 9, 6, 3)
+  R(KC[18], x - 15, g - 11, 6, 2)
   -- jars on a shelf
   R(WOOD_D, x + 4, g - 20, 14, 1)
   for i = 0, 2 do
-    R({ 0.72, 0.84, 0.80 }, x + 5 + i * 4, g - 24, 3, 4)
-    R({ 0.80, 0.50, 0.50 }, x + 5 + i * 4, g - 22, 3, 2)
+    R(KC[19], x + 5 + i * 4, g - 24, 3, 4)
+    R(KC[20], x + 5 + i * 4, g - 22, 3, 2)
   end
-  people.draw("sawbone", x + 24, g, s.near and (s.facing or 1) or -1, s.near and "stand" or "work", s.hammer)
 end
 
 local STALLS = { apothecary = apothecaryStall, cartographer = cartographerStall, bartender = bartenderStall, sawbone = sawboneStall }
 
+-- The person behind each stall: drawn live every frame (he turns to the hunter and works)
+local STALL_PERSON = {
+  apothecary = function(s)
+    local x, g = s.x, s.y
+    people.draw("apothecary", x + 25, g, s.near and (s.facing or 1) or -1, s.near and "stand" or "work", s.hammer)
+  end,
+  cartographer = function(s)
+    local x, g = s.x, s.y
+    people.draw("cartographer", x + 24, g, s.near and (s.facing or 1) or -1, s.near and "stand" or "work", s.hammer)
+  end,
+  bartender = function(s)
+    local x, g = s.x, s.y
+    people.draw("bartender", x - 4, g - 11 + 11, s.near and (s.facing or 1) or 1, s.near and "stand" or "work", s.hammer)
+  end,
+  sawbone = function(s)
+    local x, g = s.x, s.y
+    people.draw("sawbone", x + 24, g, s.near and (s.facing or 1) or -1, s.near and "stand" or "work", s.hammer)
+  end,
+}
+
+-- The furniture never changes while the stall stands, so it is painted once into a canvas of its own and
+-- drawn as one picture after that; the person is drawn on top as before
+local BOX_X, BOX_Y, BOX_W, BOX_H = 64, 96, 128, 112 -- (from the stall's x and ground: how much of it is kept)
+local pics = {}
+people.noPictures = false -- (tests: draw the furniture straight)
+
 function people.drawStall(s)
   local f = STALLS[s.id]
-  if f then
-    f(s)
-    return true
+  if not f then
+    return false
   end
-  return false
+  if people.noPictures then
+    f(s)
+  else
+    local sig = s.x .. ":" .. s.y .. ":" .. tostring(s.bare)
+    local pic = pics[s.id]
+    if not pic then
+      pic = { canvas = love.graphics.newCanvas(BOX_W, BOX_H) }
+      pic.canvas:setFilter("nearest", "nearest")
+      pics[s.id] = pic
+    end
+    if pic.sig ~= sig then
+      pic.sig = sig
+      love.graphics.push("all")
+      love.graphics.setCanvas(pic.canvas)
+      love.graphics.clear(0, 0, 0, 0)
+      love.graphics.origin()
+      love.graphics.setScissor()
+      love.graphics.setShader()
+      love.graphics.setBlendMode("alpha")
+      love.graphics.translate(BOX_X - s.x, BOX_Y - s.y)
+      f(s)
+      love.graphics.pop()
+    end
+    local mode, alphaMode = love.graphics.getBlendMode()
+    love.graphics.setBlendMode("alpha", "premultiplied")
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(pic.canvas, s.x - BOX_X, s.y - BOX_Y)
+    love.graphics.setBlendMode(mode, alphaMode)
+  end
+  STALL_PERSON[s.id](s)
+  return true
 end
 
 -- Where each stall's lantern/glow is (for lights and the emissive pass): {dx, dy}

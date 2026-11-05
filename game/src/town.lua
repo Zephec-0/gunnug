@@ -211,13 +211,47 @@ end
 
 -- Drawing ------------------------------------------------------------------------------
 
+-- (fixed colours for the draw calls below, built once: a table written inline in R({...}) is new garbage every call)
+local KC = {
+  { 0.22, 0.45, 0.2 },
+  { 0.30, 0.26, 0.20 },
+  { 0.52, 0.38, 0.28 },
+  { 0.50, 0.46, 0.42 },
+  { 0.36, 0.33, 0.30 },
+  { 0.30, 0.27, 0.25 },
+  { 0.42, 0.37, 0.28 },
+  { 0.20, 0.17, 0.14 },
+  { 0.62, 0.30, 0.30, 0.5 },
+  { 0, 0, 0, 0.18 },
+  { 0.2, 0.17, 0.14 },
+  { 0.75, 0.2, 0.18 },
+}
+
 local function R(c, x, y, w, h, a)
   love.graphics.setColor(c[1], c[2], c[3], (c[4] or 1) * (a or 1))
   love.graphics.rectangle("fill", x, y, w, h)
 end
 
+-- R with the colour as numbers (no table made for each call); m scales the alpha
+local function RA(r, g, b, a, x, y, w, h, m)
+  love.graphics.setColor(r, g, b, a * (m or 1))
+  love.graphics.rectangle("fill", x, y, w, h)
+end
+
+-- (a building asks for the same few shades of its colour every frame: each is worked out once)
+local shades = setmetatable({}, { __mode = "k" })
 local function shade(c, k)
-  return { math.min(1, c[1] * k), math.min(1, c[2] * k), math.min(1, c[3] * k) }
+  local byK = shades[c]
+  if not byK then
+    byK = {}
+    shades[c] = byK
+  end
+  local out = byK[k]
+  if not out then
+    out = { math.min(1, c[1] * k), math.min(1, c[2] * k), math.min(1, c[3] * k) }
+    byK[k] = out
+  end
+  return out
 end
 
 local WOOD, WOOD_L, WOOD_D = { 0.45, 0.30, 0.16 }, { 0.60, 0.42, 0.22 }, { 0.28, 0.19, 0.10 }
@@ -297,7 +331,7 @@ local function flowerBox(x, y, w, id)
   local cols = { gunsmith = { 0.9, 0.35, 0.25 }, apothecary = { 0.95, 0.9, 0.4 }, cartographer = { 0.4, 0.6, 0.95 }, prospector = { 0.95, 0.65, 0.25 }, bartender = { 0.95, 0.4, 0.6 }, taxidermist = { 0.8, 0.5, 0.95 }, sawbone = { 0.95, 0.95, 0.95 } }
   local fc = cols[id] or { 0.95, 0.5, 0.5 }
   for fx = x + 1, x + w - 2 do
-    R({ 0.22, 0.45, 0.2 }, fx, y - 1, 1, 1)
+    R(KC[1], fx, y - 1, 1, 1)
     if hash2(fx, y) < 0.6 then
       R(fc, fx, y - 2, 1, 1)
     end
@@ -324,7 +358,7 @@ local function shack(l)
   -- two small windows in the gable wall above it
   for _, wx in ipairs({ cx - 16, cx + 8 }) do
     R(WOOD_D, wx - 1, P - 38, 9, 6)
-    R({ 0.30, 0.26, 0.20 }, wx, P - 37, 7, 4)
+    R(KC[2], wx, P - 37, 7, 4)
   end
   -- the sign, standing on the ridge
   R(WOOD_D, cx - 14, P - 47, 2, 6)
@@ -339,17 +373,17 @@ local function shack(l)
       if hsh < 0.3 then
         R(SHINGLE_D, sx, P - 42 + row, 1, 1)
       elseif hsh > 0.85 then
-        R({ 0.52, 0.38, 0.28 }, sx, P - 42 + row, 1, 1)
+        R(KC[3], sx, P - 42 + row, 1, 1)
       end
     end
   end
-  R({ 0.50, 0.46, 0.42 }, cx + 17, P - 50, 5, 9)
-  R({ 0.36, 0.33, 0.30 }, cx + 17, P - 50, 1, 9)
-  R({ 0.30, 0.27, 0.25 }, cx + 16, P - 51, 7, 2)
+  R(KC[4], cx + 17, P - 50, 5, 9)
+  R(KC[5], cx + 17, P - 50, 1, 9)
+  R(KC[6], cx + 16, P - 51, 7, 2)
   for _, wx in ipairs({ cx - 16, cx + 8 }) do
     shutter(wx - 4, P - 38, 6, a)
     shutter(wx + 9, P - 38, 6, a)
-    R({ 0.42, 0.37, 0.28 }, wx + 3, P - 37, 1, 4) -- the muntin
+    R(KC[7], wx + 3, P - 37, 1, 4) -- the muntin
   end
   emblem(l.id, cx - 5, P - 39)
   R(shade(a, 0.5), cx - 27, P - 33, 54, 1) -- (a shadow line under the eaves)
@@ -377,7 +411,7 @@ local function facade(l)
   -- the windows (their glass lights up at night in drawEmissive)
   for _, wx in ipairs({ cx - 21, cx + 9 }) do
     R(CREAM, wx - 1, P - 49, 12, 14)
-    R({ 0.20, 0.17, 0.14 }, wx, P - 48, 10, 12)
+    R(KC[8], wx, P - 48, 10, 12)
     R(CREAM, wx + 5, P - 48, 1, 12)
     R(CREAM, wx, P - 43, 10, 1)
   end
@@ -415,8 +449,8 @@ local function facade(l)
   shutter(cx + 21, P - 48, 12, a)
   for _, wx in ipairs({ cx - 21, cx + 9 }) do
     flowerBox(wx - 1, P - 35, 12, l.id)
-    R({ 0.62, 0.30, 0.30, 0.5 }, wx, P - 48, 3, 12) -- (a curtain drawn back)
-    R({ 0.62, 0.30, 0.30, 0.5 }, wx + 7, P - 48, 3, 12)
+    R(KC[9], wx, P - 48, 3, 12) -- (a curtain drawn back)
+    R(KC[9], wx + 7, P - 48, 3, 12)
   end
   emblem(l.id, cx - 5, P - 46)
   for fx = cx - 24, cx + 22, 6 do
@@ -427,7 +461,7 @@ local function facade(l)
     local sx = cx - 31 + i * 4
     R(i % 2 == 0 and shade(a, 0.8) or CREAM_D, sx + 1, P - 25, 1, 1)
   end
-  R({ 0, 0, 0, 0.18 }, cx - 27, P - 24, 54, 2) -- (the awning's shadow on the wall)
+  R(KC[10], cx - 27, P - 24, 54, 2) -- (the awning's shadow on the wall)
 end
 
 -- The hall's clock tells the computer's time. The hands (a few pixels, on the world's own pixel grid) are
@@ -544,15 +578,15 @@ local function hall(l)
   for k = 0, 11 do
     local ang = k / 12 * math.pi * 2
     local r1 = k % 3 == 0 and 4.4 or 4.9
-    R({ 0.2, 0.17, 0.14 }, ccx + math.floor(math.sin(ang) * r1 + 0.5), ccy + math.floor(-math.cos(ang) * r1 + 0.5), 1, 1)
+    R(KC[11], ccx + math.floor(math.sin(ang) * r1 + 0.5), ccy + math.floor(-math.cos(ang) * r1 + 0.5), 1, 1)
     if k % 3 == 0 then
-      R({ 0.2, 0.17, 0.14 }, ccx + math.floor(math.sin(ang) * (r1 - 1) + 0.5), ccy + math.floor(-math.cos(ang) * (r1 - 1) + 0.5), 1, 1)
+      R(KC[11], ccx + math.floor(math.sin(ang) * (r1 - 1) + 0.5), ccy + math.floor(-math.cos(ang) * (r1 - 1) + 0.5), 1, 1)
     end
   end
   drawClockHands(ccx, ccy) -- (the computer's time, redrawn when the minute changes)
-  R({ 0.75, 0.2, 0.18 }, ccx, ccy, 1, 1) -- the pin
+  R(KC[12], ccx, ccy, 1, 1) -- the pin
   R(WOOD_D, cx, P - 76, 1, 8)
-  R({ 0.75, 0.2, 0.18 }, cx + 1, P - 76, 6, 4)
+  R(KC[12], cx + 1, P - 76, 6, 4)
   -- tall double doors, shut, and two shuttered windows
   R(WOOD_D, cx - 7, P - 24, 14, 24)
   R(WOOD, cx - 6, P - 23, 6, 23)
@@ -599,6 +633,45 @@ local function inView(view, x0, x1)
   return x1 > view.x - 20 and x0 < view.x + view.w + 20
 end
 
+-- A shack or facade never changes once it stands (its lit windows and lanterns are drawn separately, in
+-- drawEmissive), so each is painted once into a canvas of its own and drawn as one picture after that
+-- instead of a few hundred rectangles every frame. It is painted again if the stage or the lot moves.
+local BOX_X, BOX_Y, BOX_W, BOX_H = 56, 120, 112, 130 -- (from the lot's x and top: how much of it is kept)
+local lotPics = {}
+town.noPictures = false -- (tests: draw the buildings straight)
+
+local function drawPicture(l, kind, paint)
+  if town.noPictures then
+    paint(l)
+    return
+  end
+  local sig = kind .. ":" .. l.x .. ":" .. l.top
+  local pic = lotPics[l.id]
+  if not pic then
+    pic = { canvas = love.graphics.newCanvas(BOX_W, BOX_H) }
+    pic.canvas:setFilter("nearest", "nearest")
+    lotPics[l.id] = pic
+  end
+  if pic.sig ~= sig then
+    pic.sig = sig
+    love.graphics.push("all")
+    love.graphics.setCanvas(pic.canvas)
+    love.graphics.clear(0, 0, 0, 0)
+    love.graphics.origin()
+    love.graphics.setScissor()
+    love.graphics.setShader()
+    love.graphics.setBlendMode("alpha")
+    love.graphics.translate(BOX_X - l.x, BOX_Y - l.top)
+    paint(l)
+    love.graphics.pop()
+  end
+  local mode, alphaMode = love.graphics.getBlendMode()
+  love.graphics.setBlendMode("alpha", "premultiplied")
+  love.graphics.setColor(1, 1, 1, 1)
+  love.graphics.draw(pic.canvas, l.x - BOX_X, l.top - BOX_Y)
+  love.graphics.setBlendMode(mode, alphaMode)
+end
+
 -- Everything the town adds behind the hunter. surface(x): the street's ground.
 function town.draw(view, surface)
   local stage = town.stage()
@@ -609,9 +682,9 @@ function town.draw(view, surface)
         hall(l)
       elseif l.id ~= "board" then
         if stage == 2 then
-          shack(l)
+          drawPicture(l, "shack", shack)
         elseif stage == 3 then
-          facade(l)
+          drawPicture(l, "facade", facade)
         end
       end
     end
@@ -636,17 +709,17 @@ function town.drawEmissive(view)
       local glass = l.id == "bartender" and { 0.35, 0.6, 1 } or { 1, 0.74, 0.36 }
       if stage == 3 then
         for _, wx in ipairs({ cx - 21, cx + 9 }) do
-          R({ glass[1], glass[2], glass[3], 0.38 + 0.1 * fl }, wx + 1, P - 47, 4, 10)
-          R({ glass[1], glass[2], glass[3], 0.38 + 0.1 * fl }, wx + 6, P - 47, 3, 10)
+          RA(glass[1], glass[2], glass[3], 0.38 + 0.1 * fl, wx + 1, P - 47, 4, 10)
+          RA(glass[1], glass[2], glass[3], 0.38 + 0.1 * fl, wx + 6, P - 47, 3, 10)
         end
-        R({ lamp[1], lamp[2], lamp[3], fl }, cx - 30, P - 22, 1, 3)
-        R({ lamp[1], lamp[2], lamp[3], fl }, cx + 29, P - 22, 1, 3)
+        RA(lamp[1], lamp[2], lamp[3], fl, cx - 30, P - 22, 1, 3)
+        RA(lamp[1], lamp[2], lamp[3], fl, cx + 29, P - 22, 1, 3)
       else
         for _, wx in ipairs({ cx - 16, cx + 8 }) do
-          R({ glass[1], glass[2], glass[3], 0.5 + 0.15 * fl }, wx + 1, P - 36, 5, 3)
+          RA(glass[1], glass[2], glass[3], 0.5 + 0.15 * fl, wx + 1, P - 36, 5, 3)
         end
-        R({ lamp[1], lamp[2], lamp[3], fl }, cx - 28, P - 26, 1, 3)
-        R({ lamp[1], lamp[2], lamp[3], fl }, cx + 27, P - 26, 1, 3)
+        RA(lamp[1], lamp[2], lamp[3], fl, cx - 28, P - 26, 1, 3)
+        RA(lamp[1], lamp[2], lamp[3], fl, cx + 27, P - 26, 1, 3)
       end
     end
   end

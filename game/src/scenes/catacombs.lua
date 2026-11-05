@@ -1053,7 +1053,7 @@ function catacombs.step(budget, px, py, spare)
       -- begins (a good slice of every frame, more as the hunter nears the shaft), so it is standing before he
       -- gets there, not built on the spot when he steps in
       i = 1
-      least = needed(py, px, 700) and 0.012 or 0.008
+      least = needed(py, px, 700) and 0.008 or 0.004
     elseif not i then
       i = nextUnfinished()
       if i and levels[i].entry and py < firstArea.y0 and not catacombs.levelAt(py, px) then -- (not while inside one of them)

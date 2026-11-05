@@ -76,8 +76,9 @@ materials.defs = {
     density = 2.0,
     color = { 0.54, 0.32, 0.25 },
     topColor = { 0.68, 0.44, 0.32 },
-    variation = 0.07,
-    bands = 0.06, -- horizontal strata
+    variation = 0.03, -- (was 0.07: the per-pixel grain, halved to calm the speckle; the beds and patches carry the look now)
+    bands = 0.06, -- horizontal strata (the sine bands: used where a material has no `texture`)
+    texture = "stratamottle", -- the painted pattern, src.groundtex
   },
   [6] = {
     name = "wood",

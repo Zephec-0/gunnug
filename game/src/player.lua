@@ -4,6 +4,8 @@ local audio = require("src.audio")
 local bullets = require("src.bullets")
 local config = require("src.config")
 local controls = require("src.input")
+local edgecue = require("src.edgecue")
+local status = require("src.status")
 local effects = require("src.effects")
 local juice = require("src.juice")
 local enemies = require("src.enemies")
@@ -64,6 +66,8 @@ function Player.new(x, y, world, inv)
   self.hp = self.maxHp
   self.airJumps = 0 -- Double Jump: mid-air jumps left
   self.haste = 0 -- Adrenaline: seconds of extra speed left
+  self.status = {} -- conditions on him (src.status): soaked, oiled, burning, poisoned, shocked
+  self.statusSeen = {}
   self.streak = 0 -- Momentum: recent kills
   self.streakTimer = 0
   self.regenAcc = 0
@@ -385,6 +389,7 @@ function Player:hurtOverTime(amount, color, source)
   self.lastSource, self.lastEnemy = source, nil
   amount = self:loseHealth(amount)
   self.hurtFlash = math.max(self.hurtFlash, 0.35)
+  edgecue.hit(amount, self.maxHp, 0, true) -- (a faint haze while it lasts)
   local cx = self:center()
   effects.popup(cx, self.body.y - 4, "-" .. amount, color or { 1, 0.3, 0.3 })
   if self.hp <= 0 then
@@ -406,12 +411,14 @@ function Player:hurt(amount, fromX, fromY, source)
   local b = self.body
   local cx, cy = self:center()
   amount = self:loseHealth(amount)
+  status.fromSource(self, source) -- (a spitter's venom, a flame's burn, a jellyfish's shock)
   audio.play(self.hp <= 0 and "death" or "hurt")
   juice.hurt(amount)
   self.invuln = cfg.hurtInvulnerability
   self.hurtFlash = 1
   effects.popup(cx, b.y - 4, "-" .. amount, { 1, 0.3, 0.3 })
   local dir = cx >= (fromX or cx) and 1 or -1
+  edgecue.hit(amount, self.maxHp, fromX and -dir or 0) -- (the red haze at the screen edge, leaning toward the blow)
   playeranim.onHurt(self, dir)
   b.vx = dir * cfg.hurtKnockback
   b.vy = math.min(b.vy, -cfg.hurtLift)
@@ -498,6 +505,7 @@ function Player:updateHurt(dt)
   end
   self.invuln = math.max(0, self.invuln - dt)
   self.hurtFlash = math.max(0, self.hurtFlash - dt * 3)
+  edgecue.update(dt)
 end
 
 -- Resizes the hitbox (and its physics stand-in), keeping the feet in place
@@ -612,6 +620,7 @@ function Player:update(dt, aimX, aimY)
     self.airJumps = perks.sum("airJumps")
   end
   self:updatePerks(dt)
+  status.update(self, dt)
 
   -- Horizontal movement. Momentum above walk speed (from recoil) is kept and
   -- only bled off by friction, so walking never cancels a recoil jump.
@@ -625,7 +634,7 @@ function Player:update(dt, aimX, aimY)
 
   -- Dodge roll: starts on the ground (or just off it), runs its course, then
   -- he stands back up (or stays crouched under a low ceiling)
-  if self.rollBuffer > 0 and not self.rollT and self.rollCooldown <= 0 and (self.grounded or self.coyoteTimer > 0) and not self.inWater and not self.dead then
+  if self.rollBuffer > 0 and not self.rollT and self.rollCooldown <= 0 and (self.grounded or self.coyoteTimer > 0) and not self.inWater and not self.dead and status.canRoll(self) then
     self:startRoll(input ~= 0 and input or self.facing)
   end
   if self.rollT then
@@ -639,9 +648,9 @@ function Player:update(dt, aimX, aimY)
   end
 
   local held = self.gun and self.gun:stats().moveSpeed or 0 -- (Redline Rounds: faster while the gun is in his hand)
-  local walk = cfg.walkSpeed * perks.prod("speed") * (1 + held) * (self.haste > 0 and 1.35 or 1) * (self.inWater and 0.6 or 1)
+  local walk = cfg.walkSpeed * perks.prod("speed") * (1 + held) * (self.haste > 0 and 1.35 or 1) * (self.inWater and 0.6 or 1) * status.speedMult(self)
   local maxSpeed = (self.crouched and self.grounded) and cfg.crouchSpeed or walk
-  local friction = self.grounded and cfg.groundFriction or cfg.airFriction
+  local friction = self.grounded and cfg.groundFriction * status.gripMult(self) or cfg.airFriction -- (oil: the boots slide)
   if self.rollT then
     -- Rolling ignores steering: fast at first, easing off toward the end
     local k = self.rollT / cfg.rollTime
@@ -666,7 +675,7 @@ function Player:update(dt, aimX, aimY)
       effects.particle(b.x + b.w / 2 - sign(b.vx) * 3, b.y + b.h - 1, -b.vx * 0.2, -10 - love.math.random() * 25, 0.4, { c, c * 0.9, c * 1.05 }, 120)
     end
   elseif input ~= 0 and not (sign(b.vx) == input and math.abs(b.vx) > maxSpeed) then
-    local accel = self.grounded and cfg.groundAccel or cfg.airAccel
+    local accel = self.grounded and cfg.groundAccel * status.gripMult(self) or cfg.airAccel
     b.vx = approach(b.vx, input * maxSpeed, accel * dt)
   elseif input ~= 0 then
     b.vx = approach(b.vx, input * maxSpeed, friction * dt)
@@ -676,7 +685,7 @@ function Player:update(dt, aimX, aimY)
 
   -- Jumping. Jumping out of a slide springs higher and further.
   local jumped = false
-  if self.jumpBufferTimer > 0 and self.coyoteTimer > 0 then
+  if self.jumpBufferTimer > 0 and self.coyoteTimer > 0 and status.canJump(self) then
     self.rollT = nil -- jumping out of a roll keeps its speed
     if self.crouched and self:canStand() then
       self.crouched = false

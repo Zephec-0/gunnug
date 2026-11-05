@@ -799,6 +799,32 @@ function meta.onDeath()
   end
 end
 
+-- The death marker (src.story): where the hunter last fell in each area, and what he dropped there. One per area:
+-- dying in an area again puts the new marker in place of an unclaimed one; walking up to it claims it.
+function meta.leaveMarker(areaName, gold, gunId)
+  local p = profile()
+  if not p or not areaName then
+    return
+  end
+  p.markers = type(p.markers) == "table" and p.markers or {}
+  p.markers[areaName] = { gold = math.max(0, math.floor(gold or 0)), gun = gunId or "" }
+  save.touch()
+end
+
+function meta.markerFor(areaName)
+  local p = profile()
+  local m = p and areaName and type(p.markers) == "table" and p.markers[areaName]
+  return type(m) == "table" and m or nil
+end
+
+function meta.clearMarker(areaName)
+  local p = profile()
+  if p and type(p.markers) == "table" and p.markers[areaName] then
+    p.markers[areaName] = nil
+    save.touch()
+  end
+end
+
 function meta.boardOpen()
   local p = profile()
   if not p then

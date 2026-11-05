@@ -56,6 +56,7 @@ local Player = require("src.player")
 local props = require("src.props")
 local render = require("src.render")
 local save = require("src.save")
+local edgecue = require("src.edgecue")
 local settings = require("src.settings")
 local shop = require("src.shop")
 local targets = require("src.targets")
@@ -505,6 +506,21 @@ local function track(area)
     meta.tithe(inv.gold) -- (the Miner's Tithe banks a share of what he carried)
     save.stat("deaths")
     meta.onDeath()
+    -- The death marker: half the gold he carried and one of his guns wait for him where he fell (src.story)
+    local cat = require("src.scenes.catacombs")
+    local dx, dy = player:center()
+    local at = cat.levelAt(dy, dx)
+    local areaName = at and cat.levelName(at)
+    if areaName then
+      local held = {}
+      for i = 1, 3 do
+        if inv.weapons[i] then
+          held[#held + 1] = inv.weapons[i]
+        end
+      end
+      local gun = #held > 0 and held[love.math.random(1, #held)] or nil
+      meta.leaveMarker(areaName, math.floor(inv.gold * 0.5), gun and gun.id or nil)
+    end
     save.flush()
   end
 end
@@ -1299,6 +1315,7 @@ drawFrame = function()
     love.graphics.setColor(0.7, 0.05, 0.05, 0.28 * player.hurtFlash)
     love.graphics.rectangle("fill", 0, 0, config.VIRTUAL_W, config.VIRTUAL_H)
   end
+  edgecue.draw(config.VIRTUAL_W, config.VIRTUAL_H) -- (the red haze closing in from the edges, bigger for a bigger hit)
   if fade > 0 then
     love.graphics.setColor(0, 0, 0, fade)
     love.graphics.rectangle("fill", 0, 0, config.VIRTUAL_W, config.VIRTUAL_H)

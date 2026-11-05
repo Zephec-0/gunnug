@@ -3,6 +3,7 @@
 local input = require("src.input")
 local fontFace = require("src.fonts")
 local coinstack = require("src.coinstack")
+local status = require("src.status")
 
 local hud = {}
 
@@ -38,6 +39,7 @@ local LIQUID_BOTTOM = { 0.17, 0.01, 0.035 }
 -- the blood boils: the surface churns, bubbles are big and constant, spray
 -- flies, the flask shakes and glows.
 local bubbles, drops = {}, {}
+local statusFx = {} -- what the hunter's conditions throw off the bottle (sparks, smoke, drips)
 local lastBarTime
 
 -- The liquid's vertices and mesh are kept and refilled every frame (a new
@@ -145,6 +147,7 @@ function hud.drawBottle(player, u, cx, cy)
   local dt = math.min(0.1, lastBarTime and now - lastBarTime or 0)
   lastBarTime = now
   local v = VARIANTS[hud.bottleVariant]
+  local st = status.hud(player) -- the hunter's conditions, as what is in the bottle (nil: none)
   local frac = math.max(0, math.min(1, player.hp / player.maxHp))
   local low = frac < 0.3 and (1 - frac / 0.3) or 0 -- 0 = fine, 1 = nearly dead
 
@@ -524,6 +527,9 @@ function hud.drawBottle(player, u, cx, cy)
         local r = math.min(1, c1[1] + (c2[1] - c1[1]) * kk + flare * (1 - k))
         local g = c1[2] + (c2[2] - c1[2]) * kk + flare * 0.6 * (1 - k)
         local bl = c1[3] + (c2[3] - c1[3]) * kk + flare * 0.6 * (1 - k)
+        if st then
+          r, g, bl = st.liquid(r, g, bl, (py - surface) / c, now)
+        end
         local row = cache.rows[gy]
         local runStart, runEnd
         local lines
@@ -549,8 +555,18 @@ function hud.drawBottle(player, u, cx, cy)
           end
         end
         if lines then
-          setColor(0.95, 0.30, 0.32, 0.55)
+          local sc = st and st.surface or nil
+          if sc then
+            setColor(sc[1], sc[2], sc[3], sc[4])
+          else
+            setColor(0.95, 0.30, 0.32, 0.55)
+          end
           for _, gx in ipairs(lines) do
+            if st and st.oiled then
+              -- (the sheen of oil: a rainbow sliding along the surface)
+              local hr, hg, hb = status.hue(gx * 0.09 + now * 0.25)
+              setColor(hr * 0.85 + 0.1, hg * 0.85 + 0.1, hb * 0.85 + 0.1, 0.75)
+            end
             rect("fill", gx * c, gy * c, c, c)
           end
         end
@@ -568,8 +584,14 @@ function hud.drawBottle(player, u, cx, cy)
   local function inside(bx, by)
     return probe(cx + bx, cy + by) == 1 and probe(cx + bx + 2 * c, cy + by + 2 * c) == 1 and probe(cx + bx - 2 * c, cy + by - 2 * c) == 1
   end
+  local RING, FILL, GLINT = RING, FILL, GLINT
+  if st and st.poisoned then
+    RING, FILL, GLINT = { 0.55, 0.9, 0.3 }, { 0.16, 0.42, 0.08 }, { 0.85, 1.0, 0.6 }
+  elseif st and st.burning then
+    RING, FILL, GLINT = { 1.0, 0.62, 0.2 }, { 0.5, 0.15, 0.02 }, { 1.0, 0.92, 0.55 }
+  end
   if frac > 0.08 then
-    local rate = 0.8 + low * 14
+    local rate = 0.8 + low * 14 + (st and st.boil * 16 or 0)
     if love.math.random() < rate * dt then
       local kind = love.math.random() < (0.35 + low * 0.35) and 3 or (love.math.random() < 0.5 and 2 or 1)
       local a, b = (love.math.random() - 0.5) * (v.L - 4) * u, (love.math.random() - 0.5) * (v.T - 4) * u
@@ -627,6 +649,65 @@ function hud.drawBottle(player, u, cx, cy)
     local hx, hy = cx + (hole[1] - hole[2]) * K * u, cy + (hole[1] + hole[2]) * K * u
     if hy > surfaceAt(hx) and love.math.random() < 2.5 * dt then
       drops[#drops + 1] = { x = hx + (love.math.random() - 0.5) * u, y = hy + 2 * u, vx = (love.math.random() - 0.5) * 6 * u, vy = 4 * u, life = 0.6 }
+    end
+  end
+  if st then
+    -- (conditions throw little things off the bottle: sparks and smoke from the neck for fire, drips for water, oil
+    -- and venom, and a crackle of white arcs across the glass under a shock)
+    local neckX, neckY = cx + (-hl - v.NL) * K * u, cy + (-hl - v.NL) * K * u
+    local rnd = love.math.random
+    local function emit(x, y, vx, vy, life, col, grav, size)
+      statusFx[#statusFx + 1] = { x = x, y = y, vx = vx, vy = vy, life = life, max = life, col = col, grav = grav or 0, size = size or 1 }
+    end
+    if st.burning then
+      if rnd() < 16 * dt then
+        emit(neckX + (rnd() - 0.5) * 3 * c, neckY, (rnd() - 0.5) * 8 * u, -(10 + rnd() * 20) * u, 0.5 + rnd() * 0.5, rnd() < 0.5 and { 1, 0.6, 0.15 } or { 1, 0.85, 0.35 }, 0)
+      end
+      if rnd() < 5 * dt then
+        emit(neckX + (rnd() - 0.5) * 2 * c, neckY - c, (rnd() - 0.5) * 4 * u, -(6 + rnd() * 6) * u, 1.1, { 0.45, 0.43, 0.46 }, 0, 2)
+      end
+    end
+    if st.soaked and rnd() < 3 * dt then
+      emit(cx + (rnd() - 0.5) * 6 * u, yBot - u, (rnd() - 0.5) * 3 * u, 4 * u, 0.7, { 0.55, 0.8, 1 }, 90 * u)
+    end
+    if st.oiled and rnd() < 1.5 * dt then
+      emit(cx + (rnd() - 0.5) * 6 * u, yBot - u, 0, 3 * u, 0.9, { 0.1, 0.07, 0.14 }, 70 * u)
+    end
+    if st.poisoned and rnd() < (1.5 + st.stacks) * dt then
+      emit(neckX + (rnd() - 0.5) * 2 * c, neckY, (rnd() - 0.5) * 3 * u, -(4 + rnd() * 5) * u, 0.9, { 0.62, 0.9, 0.3 }, 0)
+    end
+    for i = #statusFx, 1, -1 do
+      local f = statusFx[i]
+      f.life = f.life - dt
+      f.vy = f.vy + f.grav * dt
+      f.x, f.y = f.x + f.vx * dt, f.y + f.vy * dt
+      if f.life <= 0 then
+        table.remove(statusFx, i)
+      else
+        love.graphics.setColor(f.col[1], f.col[2], f.col[3], math.min(1, f.life / f.max * 1.6) * (f.size > 1 and 0.6 or 1))
+        love.graphics.rectangle("fill", math.floor(f.x / c) * c, math.floor(f.y / c) * c, c * f.size, c * f.size)
+      end
+    end
+    if st.shocked then
+      local flick = math.floor(now * 30) -- (new arcs about thirty times a second)
+      for a = 1, 3 do
+        local ang = (flick * 12.9898 + a * 78.233)
+        local rx = (math.sin(ang) * 43758.5453) % 1
+        local ry = (math.sin(ang * 1.7) * 43758.5453) % 1
+        local x0, y0 = xL + rx * (xR - xL), yTop + ry * (yBot - yTop)
+        local dx = ((math.sin(ang * 2.3) * 43758.5453) % 1 - 0.5) * 14 * u
+        local dy = ((math.sin(ang * 3.1) * 43758.5453) % 1 - 0.5) * 14 * u
+        for k = 0, 6 do
+          local t = k / 6
+          local jx = ((math.sin(ang + k * 5.1) * 43758.5453) % 1 - 0.5) * 3 * c
+          local jy = ((math.sin(ang + k * 3.7) * 43758.5453) % 1 - 0.5) * 3 * c
+          local bx2, by2 = x0 + dx * t + jx, y0 + dy * t + jy
+          if probe(bx2, by2) == 1 then
+            love.graphics.setColor(0.8, 0.92, 1, 0.9)
+            love.graphics.rectangle("fill", math.floor(bx2 / c) * c, math.floor(by2 / c) * c, c, c)
+          end
+        end
+      end
     end
   end
   for i = #drops, 1, -1 do

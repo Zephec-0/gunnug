@@ -3,7 +3,7 @@
 -- Add a module here and it joins the lot.
 local secrets = {}
 
-local MODULES = { "relicdoor", "deepseal" }
+local MODULES = { "relicdoor", "deepseal", "journal", "sluice", "cavein", "gasline", "livewire" }
 local mods = {}
 
 for i, name in ipairs(MODULES) do

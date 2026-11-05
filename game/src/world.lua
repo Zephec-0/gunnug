@@ -7,6 +7,7 @@
 -- something is written in it; a tile that was filled as a whole (unexplored
 -- rock) is just one material id. So a very big world costs only what has
 -- actually been generated, dug or built.
+local groundtex = require("src.groundtex")
 local materials = require("src.materials")
 
 local AIR = materials.AIR
@@ -562,7 +563,14 @@ local function applyTint(tint, x, y, id, r, g, b)
       -- (a layer for part of the area's height fades in and out at its edges, no hard line)
       fade = math.min(1, math.max(0, math.min(y - L.y0, L.y1 - y) / L.ramp))
     end
-    if fade <= 0 then
+    if k == "wash" then
+      -- (a flat colour wash that deepens along x from xa to xb, mottled a little: a gradient in the ground)
+      local t = math.max(0, math.min(1, (x - L.xa) / (L.xb - L.xa)))
+      local a = t * L.amount * fade * (0.7 + 0.6 * tnoise(x * 0.04, y * 0.05 + L.seed))
+      local c = L.color
+      r, g, b = r + (c[1] - r) * a, g + (c[2] - g) * a, b + (c[3] - b) * a
+      m = -1
+    elseif fade <= 0 then
       m = -1
     elseif k == "strata" then
       m = math.sin(y * L.freq + tnoise(x * 0.015, y * 0.01 + L.seed) * 5) - L.cut
@@ -599,6 +607,7 @@ function World:addTint(x0, y0, x1, y1, layers, ids)
       y1 = L.y1 or y1,
       ramp = L.y0 and math.max(1, math.min(300, (L.y1 - L.y0) * 0.3)) or nil,
       seed = (L.seed or 0) + i * 17.3,
+      xa = L.xa, xb = L.xb,
     }
   end
   self.tints = self.tints or {}
@@ -659,7 +668,15 @@ baseColorAt = function(self, x, y, depth)
     base = def.topColor
   end
   local v = (noise(x, y) - 0.5) * 2 * def.variation
-  if def.bands then
+  if def.texture then
+    -- a painted pattern (src.groundtex) in place of the plain colour and the one-sine bands
+    local tr, tg, tb = groundtex[def.texture](x, y)
+    if base ~= def.color then -- (the exposed top edge keeps its lighter lip)
+      local k = base[1] / def.color[1]
+      tr, tg, tb = tr * k, tg * (base[2] / def.color[2]), tb * (base[3] / def.color[3])
+    end
+    base = { tr, tg, tb }
+  elseif def.bands then
     v = v + math.sin(y * 0.7 + math.sin(x * 0.05) * 2) * def.bands
   end
   if def.flecks and noise(x * 3.1, y * 1.7) > (def.fleckMin or 0.58) then

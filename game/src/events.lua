@@ -85,6 +85,29 @@ function events.spawnArea(w, info, index, tier, elites, chests)
       keys[#keys + 1] = { x = (info.relicSpots and info.relicSpots[3] or { v.x + 20 })[1], y = (info.relicSpots and info.relicSpots[3] or { 0, v.y })[2] - 4, vy = 0, vault = #vaults }
     end
   end
+  require("src.journal").setupArea(index, info.pageSpots)
+  require("src.livewire").setup(w, info)
+  if info.gaslines and #info.gaslines > 0 then
+    -- gas lines (src.gasline): the chest in the gas chamber, two oil barrels by the slit
+    require("src.gasline").setup(w, info)
+    for _, gl in ipairs(info.gaslines) do
+      chests.spawn(gl.x, gl.y, 1)
+      for _, b in ipairs(gl.barrels) do
+        local def = require("src.props").defs.oilBarrel
+        require("src.props").spawn("oilBarrel", b[1], b[2] - def.height / 2 - 0.5)
+      end
+    end
+  end
+  for _, z in ipairs(info.caveins or {}) do
+    require("src.cavein").addZone(w, { x0 = z.x0, y0 = z.y0, x1 = z.x1, y1 = z.y1, supports = z.supports, x = z.x, y = z.y })
+  end
+  if info.sluices and #info.sluices > 0 then
+    -- sluice caches (src.sluice): the chest at the bottom of each flooded chamber, not locked (the water is the lock)
+    require("src.sluice").setup(w, info)
+    for _, sl in ipairs(info.sluices) do
+      chests.spawn(sl.x, sl.y, 1)
+    end
+  end
   if info.wounded and not (events.quest() or {}).done then
     wounded = { x = info.wounded[1], y = info.wounded[2], say = nil, age = 0 }
   end

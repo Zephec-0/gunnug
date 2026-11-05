@@ -620,6 +620,35 @@ function fluids.fireBurst(x, y, radius)
   fluids.addSmoke(x, y - radius, 0.5)
 end
 
+-- Water splashed out of a jug: `cells` cells of it round (x, y) that run down and spread like any water, and that
+-- put out whatever is burning there. Returns how many were placed.
+function fluids.addWater(x, y, cells)
+  if not world or cells <= 0 then
+    return 0
+  end
+  local cx, cy = floor(x / C), floor(y / C)
+  local placed = 0
+  for ring = 0, 7 do
+    for dy = -ring, ring do
+      for dx = -ring, ring do
+        if placed < cells and (math.abs(dx) == ring or math.abs(dy) == ring) then
+          local k = key(cx + dx, cy + dy)
+          if not water[k] and not oil[k] and not lava[k] and not acid[k] and open(k) then
+            fire[k] = nil
+            setWater(k, true)
+            active[k] = true
+            placed = placed + 1
+          end
+        end
+      end
+    end
+    if placed >= cells then
+      break
+    end
+  end
+  return placed
+end
+
 function fluids.oilAt(x, y)
   return oil[cellOf(x, y)] == true
 end
@@ -738,7 +767,9 @@ function fluids.zap(x, y, damage)
   end
   local p = lastPlayer
   if p and not p.dead and wet(p.body) then
-    p:hurtOverTime(math.max(2, math.floor(dmg / 3)), { 0.65, 0.8, 1 }, "shock")
+    local st = require("src.status")
+    p:hurtOverTime(math.max(2, math.floor(dmg / 3 * st.shockMult(p) + 0.5)), { 0.65, 0.8, 1 }, "shock")
+    st.apply(p, "shocked", 0.8)
   end
 end
 
@@ -1500,6 +1531,7 @@ function fluids.updateLiquids(dt, player, enemies, px, py, b, gx0, gy0, gx1, gy1
     if player.lavaTimer <= 0 then
       player.lavaTimer = 0.3
       player:hurtOverTime(LAVA_DAMAGE, { 1, 0.5, 0.15 }, "lava")
+      require("src.status").apply(player, "burning", 5)
       audio.play("hurt", 0.35)
       for _ = 1, 6 do
         effects.particle(px + (r() - 0.5) * 6, py + (r() - 0.5) * 8, (r() - 0.5) * 60, -30 - r() * 60, 0.5, { 1, 0.55 + r() * 0.3, 0.15 }, 200, true)
@@ -1510,6 +1542,7 @@ function fluids.updateLiquids(dt, player, enemies, px, py, b, gx0, gy0, gx1, gy1
     if player.acidTimer <= 0 then
       player.acidTimer = 0.4
       player:hurtOverTime(ACID_DAMAGE, { 0.7, 1, 0.3 }, "acid")
+      require("src.status").apply(player, "poisoned", 4)
       audio.play("hurt", 0.3)
       for _ = 1, 5 do
         effects.particle(px + (r() - 0.5) * 6, py + (r() - 0.5) * 8, (r() - 0.5) * 30, -20 - r() * 40, 0.5, { 0.7, 1, 0.3 }, -20, true)
@@ -1776,6 +1809,7 @@ function fluids.update(dt, player, enemies)
       local c = math.max(gas[headK] or 0, gas[midK] or 0)
       local ramp = 1 + (fluids.gasDwell or 0) * 0.25
       player:hurtOverTime(math.floor((inCol and COLUMN_DAMAGE or GAS_DAMAGE * (0.6 + c)) * ramp + 0.5), GAS_COLOR, "gas")
+      require("src.status").apply(player, "poisoned", 3, { stacks = 1 + math.floor((fluids.gasDwell or 0) / 2.5) }) -- (the longer he breathes it, the deeper it sets)
       audio.play("hurt", 0.35)
     end
     if love.math.random() < dt * 6 then
@@ -1794,6 +1828,7 @@ function fluids.update(dt, player, enemies)
     end
   end
   if inFire and not player.dead and not player.inWater then
+    require("src.status").apply(player, "burning", 4)
     fireTimer = fireTimer - dt
     if fireTimer <= 0 then
       fireTimer = TICK
@@ -1806,6 +1841,12 @@ function fluids.update(dt, player, enemies)
   local wasIn = player.inWater
   player.inWater = water[midK] == true
   player.submerged = water[headK] == true
+  if player.inWater or player.submerged then
+    require("src.status").apply(player, "soaked", 12) -- (it puts out fire, washes oil off)
+  end
+  if not player.dead and (oil[midK] or oil[headK] or oil[cellOf(px, b.y + b.h - 2)]) then
+    require("src.status").apply(player, "oiled", 30)
+  end
 
   -- Breath: with his head under, the bubbles above him pop one a second; with
   -- none left he drowns, a tick of damage every half second. Out of the water

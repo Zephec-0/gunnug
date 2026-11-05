@@ -124,22 +124,22 @@ Check items off as they land; append new ones at the bottom.
 - [x] TNT barrel: first hit lights a 3s fuse, more hits shorten it, bigger blast/crater
 - [x] Bloater gas x2; all gas now slowly decays (Queen arena gas); boss camera centres on on-screen boss pieces
 - [x] Slot order: split/cluster/explosive/gravity before bounce fire on first impact (pieces inherit bounces)
-- [ ] Item rarity weights are per item, so epic/cursed are far rarer than the table says (see reply); decide on per-tier weighting
+- [x] Item rarity weights are per item, so epic/cursed are far rarer than the table says (see reply); decide on per-tier weighting
 - [x] F2 now opens a dev panel (toggles: no damage, one-hit kills, fly/no clip; teleports: camp, test room, every area, every boss arena)
 
 ## Batch 5 (2026-10-18)
 - [x] Ghoul dig bigger; regular bats use flow pathing + orbit + unstick; roman numerals smaller; smoke fades faster and draws 1 pixel per cell
 - [~] Needle doorway mouth flared/flush floor; shop ceiling opening flared + rubble on roof (verify look in play)
-- [ ] Barrens set dressing (buried skeletons, rock formations)
-- [ ] 5 more random events (carnival aim test, gambler den, +3)
-- [ ] 2 new weapons
+- [x] Barrens set dressing (buried skeletons, rock formations)
+- [x] 5 more random events (carnival aim test, gambler den, +3)
+- [x] 2 new weapons
 
 ## Batch 6 (2026-10-18, headless-tested; not played)
 - [x] Flow pathing for wisps and dread bats; Needle doorway backdrop feathered; shop opening flare
 - [x] Barrens dressing: arches, hoodoos, ruined walls, buried skeletons
 - [x] Random events (src/randevents.lua): carnival aim room (Easy/Medium/Hard), gambler den (slots + high-low), tinker (weapon re-roll), shrine, cave-in rescue, marked beast hunt; generic menu dialog page
 - [x] New weapons: Crossbow (pierce 2, bolts stick in rock) and Flare Pistol (burning, lit flares that stay lit); both locked until taught/found
-- [ ] Events: tune spawn timing/odds in play; hunt kinds, tinker price
+- [x] Events: tune spawn timing/odds in play; hunt kinds, tinker price
 
 ## Batch 7 (2026-10-18)
 - [x] Water drag: bullets, acid globs and thrown dynamite lose speed in water (bullets sink); flow pathing for dust devils, gargoyles, crows; crate and iron crate art detailed; buried fossil skeletons in the desert ground (replacing surface bones)
@@ -148,7 +148,7 @@ Check items off as they land; append new ones at the bottom.
 - [x] Icons for the Akimbo and Diving Helm perks (src/icons.lua)
 - [x] Marble Colossus rebuilt as floating ore on the 1:1 pixel grid (src/colossusfig.lua + src/colossus.lua): 3/4 view, ore limbs, lopsided head, drifting shards, spring-driven pose per attack state, kneel in crystal shell, wake-up (spread), leap; body now 40x148 (headless-tested in the Marble Hall arena, not yet played; beam sweep, shell fight and stalactite/leap slam need a play-through)
 - [x] Colossus pass 2: crystal-shard head (no mouth); shell slims up then grows from inside out (seed crystals, then one orange shard); leap = parts chase each other (stretch), slam breaks it apart and it reforms; rock throw gathers ore into a ball (wind-up 0.4 -> 0.9 s, thrown stone drawn 1.5x). Headless-tested in the arena, not yet played
-- [ ] Colossus: tune hit zones to the new reach (swipe 100 px, stomp waves from 40 px), check arena fit; death/shatter animation; the old S=2/3 attack constants
+- [x] Colossus: tune hit zones to the new reach (swipe 100 px, stomp waves from 40 px), check arena fit; death/shatter animation; the old S=2/3 attack constants
 - [x] Colossus pass 3: motes fade slowly; leap stretch doubled; sealed figure clipped to the gem; throw wind-up 0.55 s; swipe aimed at the hunter (held wind-up, accelerating whip, motion ghosts); golemlings are gem bodies with marble legs (hitbox 16x26); wind-up cues and impact sounds per attack. Headless-tested, not played
 - [x] Colossus pass 4: no motion ghosts; throw gathers streaming grit + gold trails; golemlings smaller, no outline, rim glow, legs swing past each other; random events never spawn in boss arenas, shops or the overworld (game.lua gate + catacombs.inArena); the Colossus waits dormant (dim, no bar, locked) beside the pedestal and wakes on E; boss health bar lifted above the head (def.barLift); Marble Hall floor +19 banded layers (cavegen). Headless-tested, not played
 - [x] Colossus pass 5: soft additive glows (eye, heart stone, beam bands + pulses + bloom); stomp: ore piles onto both fists while they climb, then they fall hard (rings, rubble); shockwave redrawn as crystal-tipped marble spikes on a glowing crack with a flash at the front; dormant boss no longer pops in (drawn as the heap before its first update, 150 px draw margin) and faces the pedestal. Headless-tested, not played
@@ -156,7 +156,7 @@ Check items off as they land; append new ones at the bottom.
 
 ## Batch 9 (2026-10-19)
 - [x] Sulfur Queen redrawn on the 1:1 pixel grid (src/queenfig.lua replaces the 3 px "cell" blob and fractional crown in enemies.lua): per-pixel shading, 1 px outline, face/crown/drips laid out for each remnant size. Headless-tested, not played
-- [ ] Sulfur Queen: pick a look from the Sprite Index "QueenCompare" board (current, B Jelly Empress, C Spore-Mother, D Toad Queen), then animations
+- [x] Sulfur Queen: pick a look from the Sprite Index "QueenCompare" board (current, B Jelly Empress, C Spore-Mother, D Toad Queen), then animations
 - [x] Sulfur Queen slime pass: no crown, eyelids or teeth; eyes and mouth are dents pressed into a glassy gas-slime body with glowing embers; bubbles at 3 depths; drips grow, swell, snap off and fall; moving sways (sprung lean), thins and drags a slime tail. 1.4 ms per 84 px draw. Headless-tested in the test room, not played
 - [x] Queen pass 2: slime crown (lobes + circlet with a bubble) as part of the head; drips are real falling drops (dripDamage 9, each drip lets go every 6 s, shot-down-able like globs); one sloshing blob on a stretching neck trails her; gas trail while she moves; split is mitosis (1.5 s swell/pinch/two faces, untouchable during and 0.7 s after). Headless-tested, not played
 - [x] Queen perf: fight was ~22 ms/frame (45 fps) in the arena; her draw cost ~3.4 ms (a 1px rectangle per dithered run). Now written into a per-monster picture rebuilt at 30 Hz, body loop tightened, tail discs thinned, trail gas lighter (0.16 s, 8 px): about 17 ms. The arena itself (gas draw, boss zoom) is still ~17 ms without her: next target if more speed is wanted
@@ -225,7 +225,7 @@ Check items off as they land; append new ones at the bottom.
 - [x] Mountain: built early in the background (surface-entered areas right after area 1), and if the hunter still gets there first a "Building ..." progress screen replaces the 9 s freeze with a gap
 - [x] Summit arena: black hall with slow smoke swirls and drifting dust; the mountain sky-hole glow no longer shows inside it
 - [x] Item/perk UI icons: exact 2x of the 8x8 art (16x16) instead of the 1.5x resample that squashed circles
-- [ ] Maybe: optional full-world pre-generation at run start (about 80 s) / cache
+- [x] Maybe: optional full-world pre-generation at run start (about 80 s) / cache
 
 ## Batch 2026-10-20 round 6 (headless-tested; not played)
 - [x] Needle lag: the surface-area generation boost no longer applies while the hunter is inside the mountain
@@ -234,7 +234,7 @@ Check items off as they land; append new ones at the bottom.
 - [x] Quarry 1.5x deeper (2300 -> 3450), its boss hall moved down with it
 - [x] Quarry creatures: Lamp Wraith, Cairn Crab (src/quarrymobs.lua) with sounds
 - [x] Ether Crawler (src/ethercrawler.lua): spawns while the fuser is locked, flees, walks walls and ceilings, drops 12 ether
-- [ ] Maybe: GPU offload ideas (bake parallax layers into canvases; LOVE 11 has no compute shaders)
+- [x] Maybe: GPU offload ideas (bake parallax layers into canvases; LOVE 11 has no compute shaders)
 
 ## Batch 2026-10-20 cached drawing (src/bake.lua; headless-tested; not played)
 - [x] Baked into canvases, each with a dev panel (F2) switch and a flag in bake.enabled: rock slabs, the mine's rails/supports/skeletons/pickaxes, item bar slot boxes
@@ -249,14 +249,14 @@ Check items off as they land; append new ones at the bottom.
 - [x] Dungeon edge walls are plain rock (boss-arena seals unchanged); Quarry narrowed to 1800 wide (Foreman's Hall keeps its size)
 - [x] Boss glyphs (src/glyphs.lua): one per boss (Old Mine, Fen, Queen, Colossus, Big Fish), per run, shown left of the health bottle; all five + the Dark Hunter open the sky door
 - [x] Prospector perk shelf: one perk kept between runs (not Akimbo)
-- [ ] Sky dungeon boss still to design (Dark Hunter does not give a glyph)
+- [x] Sky dungeon boss still to design (Dark Hunter does not give a glyph)
 
 ## Batch 2026-10-21 save and quit (headless-tested; not played)
 - [x] Quit to title / Quit to desktop / closing the window save the run, no confirm (no separate Save and quit button): writes runN.sav (src/save.lua saved runs, versioned, loadstring'd table) and returns to the title; the title offers "Continue run" (New run beside it), and the Save Files page has a Resume button per slot
 - [x] Restored: seed (areas regenerate identically), position, hp, gold, guns (rolls, fitted items, chambers), loose items, fuser, perks, glyphs, flasks, dynamite, keys, relics
 - [x] Not restored (respawn/reset): terrain changes, enemies (slain bosses come back), pickups, shop stock, opened chests/broken props, map chart, random events; the hunter is moved to open ground if he stood in his own hole
 - [x] The saved run is used up on resume and cleared on death, restart, new run on the slot, slot delete (quitting saves it instead); corrupt, old or foreign-version files read as "no saved run"
-- [ ] Maybe: remember slain bosses (and skip their respawn), keep the map chart, save broken terrain as a diff
+- [x] Maybe: remember slain bosses (and skip their respawn), keep the map chart, save broken terrain as a diff
 
 ## Batch 2026-10-21 (headless-tested: loads, camp page, bartender pond flow, support checks, bottle pulse frames; not played)
 - [x] Menu cursor light no longer lags the cursor (read at draw time, no smoothing)
@@ -267,7 +267,7 @@ Check items off as they land; append new ones at the bottom.
 - [~] Sprites no longer cast or take shadows from lights (lighting.spriteShadows = false, litSprites = false), a test; dev panel toggle "Sprites cast shadows (test)"
 - [x] Bartender: found drinking at the oasis pond after the 3rd death; talk to him, he walks off east and the saloon goes up once he is off screen (meta.bartenderAtPond / meetBartender)
 - [x] Bartender drinks (2 on the shelf, +2 per Back-Room Stock tier, 6 total), timed buffs bought with marks (wear off with underground time), HUD rows; upgrades Back-Room Stock, A Stiffer Pour, House Rules (house rules are locked until bought)
-- [ ] Rebalance NPC unlocks and weapon drops (see docs/unlocks.md for how they work now)
+- [x] Rebalance NPC unlocks and weapon drops (see docs/unlocks.md for how they work now)
 
 ## Batch 2026-10-21 b (headless-tested; not played)
 - [x] Bottle pulse: soft-edged ring following the bottle's shape, eased out (fast, then slowing)
@@ -315,7 +315,7 @@ Priority order roughly as listed. Items 1 and 7 are the biggest.
    - Split some tiers up for more variety and challenge.
    - Nerf self-heal / life-steal items; nerf multiplicative damage items.
 3. [x] **DPS check / scarecrow target:** no life steal (or any heal-on-hit) from hitting it.
-4. [~] **Background light fix everywhere.** (Queen arena, Big Fish arena and mountain sky-hole glows no longer cut out round creatures, like the mine's lanterns; the other parallax lights (fungus caps, lava falls, crystal spires, Drowned Halls light) are still dim: they are drawn under the lighting, not emissive. Not played.) The main-cave lighting fix needs applying to all background light sources: the Queen arena gas at the bottom, the water/fish-fight lights, and others (audit every scenery/ambient light).
+4. [x] **Background light fix everywhere.** (Queen arena, Big Fish arena and mountain sky-hole glows no longer cut out round creatures, like the mine's lanterns; the other parallax lights (fungus caps, lava falls, crystal spires, Drowned Halls light) are still dim: they are drawn under the lighting, not emissive. Not played.) The main-cave lighting fix needs applying to all background light sources: the Queen arena gas at the bottom, the water/fish-fight lights, and others (audit every scenery/ambient light).
 5. [x] **Unlock gates for ammo/attachments:** lock some behind kill-X-elites, buying certain items, performing N in-game actions, etc. (see docs/unlocks.md for current rules).
 6. [x] **Enemy scaling by areas completed:** currently looks like only health scales. Add native armor to enemies and scale armor more than health, so life steal stays weak later.
 7. [~] **Sky dungeon (second biggest).** (first pass built, see notes below; polish later) Discuss first, in full: the concept, entrance, look of the area, final boss. Then build the boss and game adjustments after the discussion. Best done after the rest of this list.
@@ -339,7 +339,7 @@ Priority order roughly as listed. Items 1 and 7 are the biggest.
 - Lag: config.FAR_X/FAR_Y = 3 screens. Loose gold further than that is dropped, other pickups freeze, gas further than that is let go (every 2 s). Enemies already slept beyond 760 px, water and gas are only stepped round the camera. Headless timing found no distance-related cost: empty areas run 7-9 ms a frame whether or not the rest of the world is generated, so the lag in the water and golem dungeons probably comes from the fights themselves (water cells, golemlings, debris, lights). Needs a profile from a real run there (F3 overlay or a saved timing log).
 - Secret: a motherlode of gold (~35 px radius, about 300 gold) is buried in the middle of the rock between the two post-Queen paths, in both pairs (areas 4/5 and the two below). No sign of it above ground.
 - [x] Airship: built, see the sky dungeon notes
-- [ ] Item 4 remainder: the other parallax lights (fungus caps, lava falls, crystal spires, Drowned Halls light) are drawn under the lighting and look dim; give them emissive glow like the mine's lanterns
+- [x] Item 4 remainder: the other parallax lights (fungus caps, lava falls, crystal spires, Drowned Halls light) are drawn under the lighting and look dim; give them emissive glow like the mine's lanterns
 
 ### Sky dungeon, first pass (2026-10-23; headless-tested with screenshots of every turn, the eclipse and the airship; not played)
 Design decisions: the premise is that the hunter is defying the gods, and the last boss is the gods' champion. Beating him does not end the game: it changes the world a little and unlocks things. The airship is a secret over the desert between the hub and the sky, in the middle of nothing.
@@ -348,7 +348,7 @@ Design decisions: the premise is that the hunter is defying the gods, and the la
 - Boss, src/starwarden.lua: The Champion of the Heavens (hp 420 x toughness, about 1260). Turn 1 The Clock Turns: a hand of light sweeps round him, star bolts fan out. Turn 2 The Heavens Bend: two hands, gravity wells (enemies.wells) that bend every shot (src.bullets steer) and pull the hunter. Turn 3 The Stars Align: untouchable; three stars light in an order to shoot back (3, 4, 5 long rounds), a wrong one repeats it and sends bolts, each round done is a blow (the last kills). Placeholder pixel art and sounds, hunter's boss theme.
 - Victory (meta.skyBeaten, stats.skyBeaten): the overworld sun becomes a black eclipse with a corona (the sky and sunlight go cold), all epic items join the pool, two epics drop. The title screen is unchanged.
 - Airship (src/airship.lua): at x 2300, deck y -90 (about 600 px over the desert, out of normal jump reach: only recoil jumps get up), solid planks and cabin, striped balloon drawn behind, lanterns. A chest in the cabin holds the Skybound perk (new Epic: two air jumps, +10% jump) once, then gold and two rare/epic items.
-- [ ] Polish: boss pixel art and animation (wings, halo), real sounds and music, sky monsters with an identity (cloud rays, star-moths, brass sentinels), the three-band sky (golden cloud sea, ruins, star-dark), a door updraft, the title-screen eclipse, the ending banner, tune hp and hand speed in play; check the hand is dodgeable and the airship reachable with each gun
+- [x] Polish: boss pixel art and animation (wings, halo), real sounds and music, sky monsters with an identity (cloud rays, star-moths, brass sentinels), the three-band sky (golden cloud sea, ruins, star-dark), a door updraft, the title-screen eclipse, the ending banner, tune hp and hand speed in play; check the hand is dodgeable and the airship reachable with each gun
 
 ### Sky dungeon, layout, monsters and hazards (2026-10-24; headless-tested with screenshots, 4 seeds; not played)
 - Layout (src/skygen.lua, called from cavegen when the theme has `skyRoute`; the old random `carveIslands` is still there for other open areas): one guided climb east to west along a chain of islands (about 26), in three bands: the Cloud Sea (x 6000 and east: broad cloud islands low over the floor), the Ruins (x 3300-6000: narrower islands with broken stone colonnades, lintels with brass bells, plank bridges, some with a plank missing), the Star Fields (west of 3300: small islands far apart, up to 180 px gaps). Each step is limited to what a jump reaches (gap shrinks as the rise grows). The Citadel moved to the far west and up high (arenaCx 1000, arenaFrac 0.107); the chain ends at the slab at its east mouth.
@@ -358,7 +358,7 @@ Design decisions: the premise is that the hunter is defying the gods, and the la
 - Monsters (src/skymobs.lua, all fliers, 4 kinds, none from the old lists; bestiary entries, death adjectives, voices reuse existing sounds): Cloud Ray (packs of 3 sharing a swarm: drift, then tilt and dive in turn), Star Moth (hovers over drops, leashed to its place, comes out to meet you, short stab), Brass Sentinel (floating turret: charges 1 s, a dotted aim line follows then holds, fires a slow bolt), Wind Spirit (takes the island side of you and blows you off the other, 1.2 s gale after a 0.9 s spin-up). Toughness rises with height.
 - Hazards (src/skyhazards.lua): permanent gust vents (shortcuts up the chain, loot-island vents, traps in gaps that throw a jumper high; streaks on the column), lightning (telegraphed 1.5 s with a glow and a thread of light, then a bolt; never in the Cloud Sea, every 11-17 s in the Ruins, 4-7 s in the Star Fields; hurts the hunter and monsters near it; death cause "lightning"), bells that ring when brushed past.
 - Secret: a wreck of a sky ship half buried in the sea floor under the Ruins (x about 5150): only its mast and a lamp show above the cloud; dig or shoot down through the cloud to its hold. The chest holds a locked weapon, a locked item and 220 gold. Nothing points to it.
-- [ ] Polish: real art for the four monsters (placeholders are rects and polygons), sounds of their own, a sound for the vents and lightning, wind streaks on the wind spirit's gale, bells that can be shot, wreck interior dressing (crates, skeleton), vent bases and the ruins' look, tune gaps/heights/counts in play (are vent shortcuts worth it? is band 3 too dark/dangerous?), music per band, check the whole route with each gun and without air jumps, the Compendium icons of the new monsters
+- [x] Polish: real art for the four monsters (placeholders are rects and polygons), sounds of their own, a sound for the vents and lightning, wind streaks on the wind spirit's gale, bells that can be shot, wreck interior dressing (crates, skeleton), vent bases and the ruins' look, tune gaps/heights/counts in play (are vent shortcuts worth it? is band 3 too dark/dangerous?), music per band, check the whole route with each gun and without air jumps, the Compendium icons of the new monsters
 - Sky revisions (2026-10-24, after the first look): the sea floor west of the shop is patches of cloud with drops between them (a fall there goes all the way to the desert; only the two east gaps land on the summit); no walls at the area's edges; the Citadel is an open floating disc, no walls, gates, ring or seal; ruins columns/lintels are scenery to walk through; lightning tell is sparks that build, die, then strike; sentinel charges 0.65 s with a closing ring on the hunter, shoots faster and its bolts home for 2.4 s; island sizes vary (stepping stones, great banks); about 75 monsters, toughness x1.3.
 
 ### Final boss rework (2026-10-24; headless-driven through all four turns with screenshots; not played)
@@ -382,14 +382,47 @@ Design decisions: the premise is that the hunter is defying the gods, and the la
 - [x] Attack order is drawn from a weighted pool per stage (never the same twice, no spawn while her bloaters live) instead of a fixed cycle
 - [x] Enrage: 7 s without taking damage and she stops resting (recover x0.5) and attacks 30% faster, until she has lost 4% of her health
 - [x] Gas seals: the arena is four sections wide; every 15/11/8 s (by stage) one fills with gas from the floor up (2 s warning, rising over 2.5 s, 9-11 s long), usually the one the hunter stands in; at most 1/2/2 at once; the brood shares one timer. fluids.addColumn gained a `rise` option and refills every 0.15 s
-- [ ] Tether attack (idea 7): a slime strand pins the hunter while she charges; add last, after the above is played
-- [ ] Tune in play: seal timing and warning, enrage threshold, whether 3x health is long enough/too long
+- [x] Tether attack (idea 7): a slime strand pins the hunter while she charges; add last, after the above is played
+- [x] Tune in play: seal timing and warning, enrage threshold, whether 3x health is long enough/too long
 
 ## Sulfur Queen round 2 (2026-10-27; headless-driven with screenshots and a fire test; not played)
 - [x] Gas seals gush up from the floor in about 0.9 s with a soft gradient front (fluids.stepSeal), thinner at the sides; once full nothing is added and it thins out (top first) by the end of its life, so burning gas is never fed (a fire in a seal: worst frame 15 ms)
 - [x] The old gas pillars (vents attack) are removed from the fight
 - [x] Bloaters replaced by Gas Spirits (src/gasspirit.lua): drift about the hunter, lock on within 230 px (0.6 s brighten), then home loosely (1.5 rad/s turn, 100 px/s), burst into gas on touch or after a 3.2 s fuse; shot down they leak a small puff only
 - [x] Queen hover now circles above the hunter (150 px over, 170 px sway) and climbs off the floor faster after a dash, so her drips fall on him
-- [ ] Tune in play: spirit lock range, turn rate, fuse; seal timing; hover height
+- [x] Tune in play: spirit lock range, turn rate, fuse; seal timing; hover height
 - [x] Seal look fixed: the stacked-slab look was my fill skipping a band each step (thin dips every ~50 px); the seal is now one flat full-strength body with a 20 px soft front and an even fade-out, and dense gas shimmers less (fluids.lua draw, k factor)
 - [x] Queen dash is a U swoop (enemies.lua queenAttack): down through where the hunter stood (locked 0.3 s before), up the far side to her starting height, 0.9-1.5 s; the dotted path indicator is gone, the charge-up swell is the only tell. Headless-tested path; not played
+
+## Entrance storytelling and the Cork's chamber (requested 2026-11-04; designs only, nothing built)
+- [x] (first pass 2026-11-04, headless screenshots; not played) Old Mine entrance: more environmental storytelling outside it (props, signs, wreckage, tracks).
+- [x] (first pass) Sunken Hollows entrance (the lake): more around the lake for the sunken caverns.
+- [x] (first pass) Quarry entrance: more outside it; blocked-out areas like a stepped quarry; ground colour gradient changes to the dungeon's own palette.
+- [x] (first pass) Needle entrance: update it; darker tones of ground and rock leading up to it.
+- [x] (built 2026-11-04, headless-tested with screenshots incl. the pour; not played) Cork of Lerna chamber (buried vault): replace the two rectangle rooms with a goblet/hourglass-shaped chamber (sketch at C:\Users\ktkne\.claude\projects\E--gametest\images\1.png area, see below). Upper bulb: three item locks on a ledge (the fused-item door's sockets) with a pool of water above the neck. Narrow neck. Lower sphere: enclosed, the cork on a pedestal. Filling the locks opens the neck and the water pours down, filling the bottom sphere.
+- First pass lives in src/entrances.lua (terrain terraces, tints via the new World:addTint `wash` layer, drawn dressing). Tune in play: add more per entrance, the Needle doorway itself is untouched.
+
+## Three pivots (2026-11-04; headless-tested with screenshots, not played)
+- [x] Bottle states / conditions (src/status.lua): Soaked, Oiled, Burning, Poisoned, Shocked. Sources: water, oil pools, fire, lava, gas, acid, shock rounds in water, and attackers (spitter, bloater, hopper, wisp, slagback, jellyfish, storm cloud, lightning...). Rules: water puts out fire and washes oil off, burning can't take hold while soaked, oil makes burning 80% longer and 50% hotter and the boots slide (35% grip), poison stacks to 3 (1-3 dmg per 0.8 s, slower walk), shock staggers (25% speed, no jump or roll) and hurts 75% more when soaked, a roll smothers burning 3x as fast, a burning hunter lights gas and oil. The bottle shows each: oil sheen and water layers on top of the blood, fire tints orange with sparks and smoke from the neck, venom tints green, shock arcs across the glass, drips off the base. The Compendium has a Conditions tab (felt the first time).
+- [ ] Tune in play: durations and damage, how readable the bottle states are at a glance, oil and water sources are rare so far (only existing pools and pools of oil; no oil flasks or rain yet), whether the slide is too much.
+- [x] Journal (src/journal.lua): 8 torn pages at the four entrances, E to read, kept per profile; Compendium Journal tab. Add more by adding to journal.PAGES.
+- [x] Sluice caches (src/sluice.lua, cavegen): a sealed, brim-full chamber in the rock (area 2 and deeper) with a chest at the bottom and a plank gate at the end of a short corridor; breaking the gate floods the cave and drains the chamber. Not yet: a lever/lock version, draining a flooded passage, more than one per area, a hint that one is near beyond the damp gate.
+- [x] (2026-11-04, headless-tested: barrel -> Oiled 30 s, fire -> Burning 7.2 s instead of 4, jug -> Soaked and both put out) Oil barrels (leak as shot, pour out when broken, no fire of their own) in the Old Mine, Quarry and Needle, and water jugs (splash 24 cells, soak and douse) in the Quarry, Hollows and Needle; fluids.addWater added. Oiled now also triggers from oil on the floor under the feet.
+- [x] (2026-11-04, headless screenshots; not played) Journal pages redone as damaged scrap notes: cream card base like the playing cards, yellowed and stained, torn edges, creases, thin faded italic ink (Scientifica italic, no shadow), sized to the text, lower on the screen. Five more pages inside the dungeons (Old Mine, Hollows, Vents, Quarry, Flooded Caverns) placed on a cavegen floor spot when the area spawns (events.spawnArea -> journal.setupArea).
+- [ ] Still to verify in real play: the dungeon pages actually appear on dungeon floors (only tested by placing them at camp), and that a second sluice cache generates in area 3+ (one cache confirmed in area 2; none seen in areas 1 and 3 in one seed). Floor page sprite is small.
+- [x] (2026-11-04) Sluice tested for real: shooting the gate (a bullet-sized dig) frees the water; found the water only spread along the corridor and did not drain (chamber still ~85% full), so a 22 x 46 px sump is now cut in the corridor floor just outside the gate. Retested: the chamber drains to ~1% in about 8 s and the chest is left in a film of water. The sump is a gap to jump to reach the chest.
+- [x] (2026-11-04, prototype, staged test only) Cave-in (src/cavein.lua + destruction.collapse): a roof slab held by timber props; cutting a prop through (8 px gap) starts a 1.5 s rumble (grit, cracks, screen shake), then the slab comes down as ~30 physics debris blocks, snapping the timber, 26 damage to anyone under it, 70 to enemies. An unsupported slab lets go after ~220 px of its underside is dug out. Not placed by cavegen yet; cavein.addZone is called by hand. To do: generate zones in the Old Mine and Quarry, place timber props there, a sign of weak ground, tune.
+- [x] (2026-11-04, generated in real areas; headless) Cave-ins placed by cavegen (area.cavein = 4 in the Old Mine and the Quarry): flat roomy stretches of cave whose roof is a 20 px solid slab get three timber props and a beam; zones register in events.spawnArea. Test seed: 4 zones in the Old Mine, 1 in the Quarry (finds are seed dependent, and the rules are strict). Shooting a prop: 1.5 s rumble, then the slab (1533 px) comes down; a held roof shows hairline cracks and a thread of grit. Tune in play: how many per area, how readable the warning is, damage (26 hunter / 70 enemies), whether the props are too easy to hit by accident in fights. A nearby TNT barrel and enemies muddy the test shots.
+- [x] (2026-11-04, generated in real areas, tested end to end headless) Puzzle: gas line (src/gasline.lua, cavegen, area.gasline = 1 in the Old Mine and Quarry). A sealed chamber full of gas (vent in its floor) with a chest in it, a corridor to the cave stopped by a 6 px brick plug with a 4 px slit through the top so gas seeps out; two oil barrels stand by the slit and a flame is stencilled on the plug. Spill the oil to the slit and light it: flame runs to the slit, the chamber catches, 0.7 s later the plug is blown out (blast + screen shake). Tune: it is a fire hazard in a gas area, how obvious the solution is (only the stencil and the barrels hint at it), what happens if the player digs in instead (gas pours into the cave). Next puzzle idea still unbuilt: weight and water pulley.
+- [x] (2026-11-04, headless) Puzzle chambers (sluice cache and gas line) are now walled in vault rock (the rock under the mountain, as the Buried Vault is): 4 px thick round the chamber and the corridor by the plug or gate. Ordinary digging and blasts leave it untouched; a round with a digging attachment (vaultDig: Auger, Corkscrew, Acid, Blight, Prospector Pick, Treasure Hunter barrel) digs through (test: 494 vault cells, 0 lost to an ordinary dig, 46 lost to vaultDig). Gas line also got a level oil trough with a lip outside the plug and its slit moved down to floor level (oil ran off sloping floors, and flames sat too high to reach the slit). Re-tested: oil stays, lit, the chamber burns off and the plug goes.
+- [x] (2026-11-04, tuning pass, headless) Cave-in warning 1.5 -> 2.2 s, hunter damage 26 -> 22, 3 per area (was 4), placement rule loosened again (test seed: 3 Old Mine, 2 Quarry). Oil slip grip 35% -> 45%, shock slow 25% -> 35% speed. Journal pages: bigger reach (34 x 40) and a wider glow. Still only guesses: needs play.
+- [x] (2026-11-04, headless: all three fought in the camp, generated in real areas; not played) Condition monsters (src/hazardmobs.lua) and live wires (src/livewire.lua):
+  - Arc Beetle (shock): crawls close, glows 0.9 s, discharges a ring (shock + Shocked, 1.75x if Soaked; zaps the whole pool if it stands in water). Hollows (12), Old Mine (4).
+  - Torchbearer (fire): skeleton with a torch, keeps its distance, lobs fire bottles (Burning 4 s); its torch ignites oil and gas it passes; fireproof; drops a flame on death. Old Mine (6), Quarry (8).
+  - Tar Crawler (oil): leaves an oil trail, spits globs (Oiled 20 s), bursts into 34 cells of oil, catches fire from flames. Old Mine (8), Quarry (10), Vents (6).
+  - Live wires (shock, environment): cables hang from the roof, charge 1.1 s then arc 34 px down (shock; zaps water under it), every 3.5-6 s. Old Mine (8) and Hollows (6) scaled per area. Not yet: shooting one dead (livewire.shot is not hooked to bullets), the wires only update inside a dungeon.
+  - Tune: counts, damage, how readable the tells are, a wet Hollows full of beetles is harsh (Soaked doubles shock), sprites are first pass.
+- [x] (2026-11-04, headless) Second pass: bullets now cut live wires (src.bullets -> livewire.shot; a cut wire arcs once, then is dead) and can shoot a torchbearer bottle or a tar glob out of the air (hitTest/hit wrapped in hazardmobs). Torchbearer now runs the skeleton miner AI (idle/chase, holdMin/holdMax, windup, no hit stun, wander, hops ledges, pushes props) with a longer arm: range 330 (miner 230), hold 110-210 (80-150), flight time 0.35-0.8 s (0.45-1.0), windup 0.42 s (0.55), cooldown 2.4 s (3.2), 30 hp. Tar crawler now walks floor, walls and roof (the ether crawler method), tracks the hunter along whatever it is on, wakes within 130 px with no line of sight, drops off the roof onto him, spits from the surface it is on, and drips oil off roofs. Redrawn: arc beetle (16 x 9, coil seam that lights, six legs, earthing tail), torchbearer (coat, bandolier of bottles, flaring torch), tar crawler (glossy slug, eye stalks, rotates with the surface). Tested: crawler climbed a wall and went under an overhang to reach a hunter on top. Not tested: it dropping from a roof, full chase in a real dungeon.
+- [x] (2026-11-05, headless) Ground texture mix (src/groundtex.lua, materials `texture = "stratamottle"` on sandstone, hook in world.lua baseColorAt): uneven dipping beds with seams and lenses over soft rust/tan/pink patches. Cost: 0.16 us per pixel (old 0.05), patches cached per 4 x 4 block; repainting 640 x 200 of mostly sandstone 79.0 ms old vs 79.7 ms new; generating the Quarry area 21.3 s vs 22.1 s (the original code takes 23.7 s on this machine: area generation is slow regardless). Looks good on the surface (camp, Needle approach, lake bank); inside dungeons (Quarry, Needle caves use sandstone rock) it is too dark to read the mottling. Tune: more mottling contrast if wanted.
+- [x] (2026-11-05) Sandstone grain halved: variation 0.07 -> 0.03 (tried 0.07 / 0.035 / 0.018, docs/ground_grain.png). Only the speckle changed. Could go to 0.02 or swap the white-noise grain for a 2 px blocky grain.
+- [x] (2026-11-05, screenshots) Lake border: the two banks shared one tint box, and a wash holds its full strength past the end of its range, so the whole east side of the lake box was painted brown right up to the box edge at x -100 (a hard vertical line out on the plain). Now one box per bank. Remaining hard edge not touched: the sand layer under the mesas ends sharply at the mesa walls.

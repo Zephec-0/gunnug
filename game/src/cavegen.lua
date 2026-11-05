@@ -54,6 +54,9 @@ local SIZES = {
   gargoyle = { 14, 16, false, true },
   wraith = { 12, 18, false, true }, -- the Quarry's: wraiths hang from the ceiling, crabs stand
   cairncrab = { 16, 10, true },
+  arcbeetle = { 14, 8, true }, -- the condition makers (src.hazardmobs)
+  torchbearer = { 10, 19, true },
+  tarcrawler = { 14, 7, true },
   cloudray = { 26, 10 }, -- the Cloud Reaches' (src.skymobs): all of them fly
   starmoth = { 9, 8 },
   sentinel = { 16, 16 },
@@ -1399,6 +1402,11 @@ function cavegen.generate(world, area, seed, tick)
   if counts.cairncrab then
     place("cairncrab", findFloorSpots(scaled(counts.cairncrab), 24, avoidForEnemies))
   end
+  for _, kind in ipairs({ "arcbeetle", "torchbearer", "tarcrawler" }) do
+    if counts[kind] then
+      place(kind, findFloorSpots(scaled(counts[kind]), 24, avoidForEnemies))
+    end
+  end
   -- (the Undercroft's own, src.undermobs: slagbacks crawl the floor, ash shades drift down from the roof)
   if counts.slagback then
     place("slagback", findFloorSpots(scaled(counts.slagback), 22, avoidForEnemies))
@@ -2030,12 +2038,34 @@ function cavegen.generate(world, area, seed, tick)
     end
   end
 
+  -- Puzzle chambers are walled in the rock that lies under the mountain (VAULTROCK, as the Buried Vault is): nothing digs
+  -- it, no blast, no ordinary round, except one with a digging attachment (the vaultDig flag, see src.items). Without one
+  -- the way in is the puzzle. `rects` are the open spaces (the chamber, its corridor, the sump); every ordinary rock
+  -- cell within 4 px of them becomes vault rock. The gate, the plug and anything already special are left alone.
+  local function wallInVault(rects)
+    local SH = 4
+    local keep = { [materials.WOOD] = true, [materials.STONEBRICK] = true, [materials.BEDROCK] = true, [materials.IRON] = true }
+    for _, r in ipairs(rects) do
+      for yy = r[2] - SH, r[4] + SH do
+        for xx = r[1] - SH, r[3] + SH do
+          if (xx < r[1] or xx > r[3] or yy < r[2] or yy > r[4]) and world:isSolid(xx, yy) then
+            local id = world:get(xx, yy)
+            if not keep[id] and id ~= materials.VAULTROCK then
+              world:setRaw(xx, yy, materials.VAULTROCK)
+            end
+          end
+        end
+      end
+      world:repaintRegion(r[1] - SH - 1, r[2] - SH - 1, r[3] + SH + 1, r[4] + SH + 1)
+    end
+  end
   -- Events for the dungeon (src.events): altars, spots for a quest relic, a
   -- wounded hunter, and a sealed vault. Placed last, so the layout above is
   -- unchanged.
   if area.monsters and next(area.monsters) and not area.open and not area.arena then
     result.altars = findFloorSpots(level >= 3 and 2 or 1, 26, avoidForEnemies)
     result.relicSpots = findFloorSpots(3, 20, avoidForEnemies)
+    result.pageSpots = findFloorSpots(2, 20, avoidForEnemies) -- (a torn page of the journal lies on the first: src.journal)
     if area.wounded then
       result.wounded = findFloorSpots(1, 26, avoidForEnemies)[1]
     end
@@ -2123,6 +2153,270 @@ function cavegen.generate(world, area, seed, tick)
           break
         end
       end
+    end
+    -- A sluice cache (src.sluice): a chamber sealed in the rock, brim full of water, with a chest at the bottom of it.
+    -- A short corridor runs out to the nearest cave and is stopped by a plank gate: break the gate and the water
+    -- pours out into the cave, leaving the chest dry. It is a flood to get out of the way of, and a reward.
+    result.sluices = {}
+    for _cache = 1, (level >= 3 and 2 or 1) do
+    if level >= 2 then
+      local WOODID = materials.WOOD
+      for _ = 1, 120 do
+        tick()
+        local cx = math.floor(X0 + BORDER + 50 + rng:random() * (W - 2 * BORDER - 100))
+        local cy = math.floor(Y0 + 150 + rng:random() * (H - 450))
+        local solid = true
+        for yy = cy - 18, cy + 12, 3 do
+          for xx = cx - 24, cx + 24, 3 do
+            if not world:isSolid(xx, yy) or not inProfile(xx, yy, 6) or avoidForEnemies(xx, yy) or (result.vault and math.abs(xx - result.vault.x) < 40 and math.abs(yy - result.vault.y) < 50) or (result.sluices[1] and math.abs(xx - result.sluices[1].x) < 80 and math.abs(yy - result.sluices[1].y) < 60) then
+              solid = false
+            end
+          end
+        end
+        if solid then
+          -- the nearest cave to the left or the right, level with the chamber's floor
+          local bestD, dirx
+          for _, sx in ipairs({ 1, -1 }) do
+            for dist = 20, 90, 2 do
+              if not world:isSolid(cx + sx * dist, cy + 6) then
+                if not bestD or dist < bestD then
+                  bestD, dirx = dist, sx
+                end
+                break
+              end
+            end
+          end
+          if bestD and bestD <= 90 then
+            -- the room: 36 wide, 18 tall, floor at cy + 8
+            local x0, x1, y0, y1 = cx - 18, cx + 18, cy - 10, cy + 8
+            world:fillRect(x0, y0, x1, y1, 0)
+            -- the corridor out, 8 px tall, level with the floor, stopped by a three-px gate at the chamber's mouth
+            local gateX = dirx == 1 and x1 + 1 or x0 - 1
+            for dist = 1, 90 do
+              local xx = dirx == 1 and x1 + dist or x0 - dist
+              if dist > 4 and not world:isSolid(xx, cy + 4) then
+                break
+              end
+              world:fillRect(xx, y1 - 7, xx, y1, 0)
+            end
+            local gx0 = dirx == 1 and gateX or gateX - 2
+            world:fillRect(gx0, y1 - 8, gx0 + 2, y1 + 1, WOODID)
+            -- the sump: a pit cut in the corridor floor just outside the gate, deep enough to take the chamber's water
+            -- when the gate goes (the hunter jumps it to reach the chest afterwards)
+            local sx0 = dirx == 1 and gx0 + 3 or gx0 - 3 - 21
+            world:fillRect(sx0, y1 + 1, sx0 + 21, y1 + 46, 0)
+            world:repaintRegion(x0 - 8, y0 - 8, x1 + 100, y1 + 8)
+            world:repaintRegion(x0 - 100, y0 - 8, x1 + 8, y1 + 8)
+            -- the water: every cell of the room, as a pool
+            local pool = { cells = {}, level = y0 }
+            for yy = y0, y1, POOL_CELL do
+              for xx = x0, x1, POOL_CELL do
+                pool.cells[#pool.cells + 1] = math.floor(xx / POOL_CELL) * POOL_CELL
+                pool.cells[#pool.cells + 1] = math.floor(yy / POOL_CELL) * POOL_CELL
+              end
+            end
+            water[#water + 1] = pool
+            local cor0, cor1 = math.min(x0, x1 + (dirx == 1 and 1 or -1) * 3), math.max(x1, x0)
+            wallInVault({ { x0, y0, x1, y1 }, { dirx == 1 and x1 + 1 or gx0 - 3, y1 - 7, dirx == 1 and gx0 + 2 or x0 - 1, y1 + 1 } })
+            result.sluices[#result.sluices + 1] = { x = cx, y = y1 + 1, room = { x0 = x0, y0 = y0, x1 = x1, y1 = y1 }, gate = { x0 = gx0, y0 = y1 - 8, x1 = gx0 + 2, y1 = y1 + 1 }, dir = dirx }
+            break
+          end
+        end
+      end
+    end
+    end
+  end
+
+  -- A gas line (src.gasline): a sealed chamber full of gas with a chest in it. A short corridor leads from it to the
+  -- nearest cave and is stopped by a thick brick plug with one thin slit through the top, so the gas seeps out into the
+  -- cave. Two barrels of lamp oil stand by the slit. Spill the oil and set it alight and the flame runs to the slit,
+  -- lights the gas in the chamber, and the blast takes out the plug. Placed after the rest of the layout.
+  result.gaslines = {}
+  if (area.gasline or 0) > 0 and not area.open and not area.arena then
+    local BRICKID = materials.STONEBRICK
+    for _ = 1, 160 do
+      if #result.gaslines >= area.gasline then
+        break
+      end
+      tick()
+      local cx = math.floor(X0 + BORDER + 50 + rng:random() * (W - 2 * BORDER - 100))
+      local cy = math.floor(Y0 + 150 + rng:random() * (H - 450))
+      local solid = true
+      for yy = cy - 16, cy + 12, 3 do
+        for xx = cx - 24, cx + 24, 3 do
+          if not world:isSolid(xx, yy) or not inProfile(xx, yy, 6) or avoidForEnemies(xx, yy) then
+            solid = false
+          end
+        end
+      end
+      for _, g in ipairs(result.sluices or {}) do
+        if math.abs(cx - g.x) < 90 and math.abs(cy - g.y) < 70 then
+          solid = false
+        end
+      end
+      if result.vault and math.abs(cx - result.vault.x) < 50 and math.abs(cy - result.vault.y) < 60 then
+        solid = false
+      end
+      if solid then
+        local bestD, dirx
+        for _, sx in ipairs({ 1, -1 }) do
+          for dist = 20, 90, 2 do
+            if not world:isSolid(cx + sx * dist, cy + 6) then
+              if not bestD or dist < bestD then
+                bestD, dirx = dist, sx
+              end
+              break
+            end
+          end
+        end
+        if bestD and bestD <= 80 then
+          local x0, x1, y0, y1 = cx - 16, cx + 16, cy - 8, cy + 8
+          world:fillRect(x0, y0, x1, y1, 0)
+          -- the corridor: 8 tall (floor at the chamber's floor), out to the cave
+          local plugX
+          for dist = 1, 90 do
+            local xx = dirx == 1 and x1 + dist or x0 - dist
+            if dist > 4 and not world:isSolid(xx, cy + 4) then
+              break
+            end
+            world:fillRect(xx, y1 - 7, xx, y1, 0)
+            plugX = xx
+          end
+          -- the plug: 6 thick, across the whole corridor, at its far (cave) end, with a slit 2 tall through its top
+          local p0 = dirx == 1 and plugX - 5 or plugX
+          local p1 = p0 + 5
+          world:fillRect(p0, y1 - 8, p1, y1 + 1, BRICKID)
+          world:fillRect(p0, y1 - 3, p1, y1, 0) -- (the slit: 4 tall, two of the fluid grid's cells, down at floor level where the oil lies)
+          world:repaintRegion(x0 - 8, y0 - 8, x1 + 100, y1 + 8)
+          world:repaintRegion(x0 - 100, y0 - 8, x1 + 8, y1 + 8)
+          -- the gas: every cell of the chamber, with a vent in its floor to keep it full
+          local pool = { cells = {}, vent = { cx, y1 }, level = y0 }
+          for yy = y0, y1, POOL_CELL do
+            for xx = x0, x1, POOL_CELL do
+              pool.cells[#pool.cells + 1] = math.floor(xx / POOL_CELL) * POOL_CELL
+              pool.cells[#pool.cells + 1] = math.floor(yy / POOL_CELL) * POOL_CELL
+            end
+          end
+          gas[#gas + 1] = pool
+          wallInVault({ { x0, y0, x1, y1 }, { dirx == 1 and x1 + 1 or p0, y1 - 7, dirx == 1 and p1 or x0 - 1, y1 + 1 } })
+          local mouthX = dirx == 1 and p1 + 1 or p0 - 1
+          -- a level trough outside the plug, 44 px long with a low lip at its far end, so the oil stays where it is poured
+          -- (a floor that slopes away would let it all run off): rock under, headroom over
+          for dist = 0, 46 do
+            local xx = mouthX + dirx * dist
+            world:fillRect(xx, y1 + 1, xx, y1 + 9, ROCKID)
+            world:fillRect(xx, y1 - 14, xx, y1, 0)
+            if dist >= 44 then
+              world:fillRect(xx, y1 - 3, xx, y1, ROCKID) -- (the lip)
+            end
+          end
+          world:repaintRegion(mouthX - 4, y1 - 16, mouthX + dirx * 50, y1 + 12)
+          world:repaintRegion(mouthX - dirx * 50, y1 - 16, mouthX + 4, y1 + 12)
+          result.gaslines[#result.gaslines + 1] = {
+            x = cx, y = y1 + 1, dir = dirx,
+            room = { x0 = x0, y0 = y0, x1 = x1, y1 = y1 },
+            plug = { x0 = p0, y0 = y1 - 8, x1 = p1, y1 = y1 + 1 },
+            slit = { x = mouthX, y = y1 - 2 },
+            barrels = { { mouthX + dirx * 14, y1 + 1 }, { mouthX + dirx * 30, y1 + 1 } },
+          }
+        end
+      end
+    end
+  end
+
+  -- Cave-ins (src.cavein): in areas that ask for them (area.cavein = how many), a flat, roomy stretch of cave whose roof is
+  -- a thick slab of solid rock is shored up with three timber props. Cut a prop through (a stray bullet will do) and the
+  -- slab comes down. Placed after the rest of the layout, so nothing else moves.
+  result.caveins = {}
+  if (area.cavein or 0) > 0 and not area.open and not area.arena then
+    local WOODID = materials.WOOD
+    local SPAN, SLAB = 72, 20
+    result.caveinDebug = { spots = 0, ceilOk = 0, spanOk = 0 }
+    for _, s in ipairs(findFloorSpots(area.cavein * 40, 44, avoidForEnemies)) do
+      result.caveinDebug.spots = result.caveinDebug.spots + 1
+      if #result.caveins >= area.cavein then
+        break
+      end
+      tick()
+      local sx, g = s[1], s[2]
+      -- the ceiling over the middle, and whether the span is flat floor under a flat roof with rock above it
+      local ceil
+      for oy = 12, 80 do
+        if world:isSolid(sx, g - oy) then
+          ceil = g - oy
+          break
+        end
+      end
+      local ok = ceil ~= nil and g - ceil >= 30 and g - ceil <= 64
+      local far = false
+      for _, z in ipairs(result.caveins) do
+        if math.abs(z.x - sx) < SPAN * 2 and math.abs(z.y - g) < 120 then
+          far = true
+        end
+      end
+      if far then
+        ok = false
+      end
+      if ok then
+        result.caveinDebug.ceilOk = result.caveinDebug.ceilOk + 1
+        -- walk the span: most columns must be flat floor under open air under a roof with rock above it
+        local good, total = 0, 0
+        for dx = -SPAN / 2, SPAN / 2, 4 do
+          local x = sx + dx
+          total = total + 1
+          local gx = world:findGround(x, g - 8)
+          local colOk = math.abs(gx - g) <= 10 and inProfile(x, ceil - SLAB, 8)
+          if colOk then
+            for oy = 4, g - ceil - 10 do
+              if world:isSolid(x, g - oy) then
+                colOk = false
+                break
+              end
+            end
+          end
+          if colOk then
+            local solid = 0
+            for yy = ceil - SLAB, ceil - 1 do
+              local id = world:get(x, yy)
+              if world:isSolid(x, yy) and id ~= materials.BEDROCK and id ~= materials.IRON and id ~= materials.VAULTROCK then
+                solid = solid + 1
+              end
+            end
+            colOk = solid >= SLAB - 10
+          end
+          if colOk then
+            good = good + 1
+          end
+        end
+        ok = good >= total * 0.45
+        if ok then
+          result.caveinDebug.spanOk = result.caveinDebug.spanOk + 1
+        end
+      end
+      if ok then
+        local supports = {}
+        for _, px in ipairs({ sx - 26, sx, sx + 26 }) do
+          local fg = world:findGround(px, g - 8)
+          local pc = fg - 6
+          while pc > ceil - 12 and not world:isSolid(px, pc) do
+            pc = pc - 1
+          end -- (this column's own roof)
+          world:fillRect(px - 2, pc - 1, px + 1, fg - 1, WOODID) -- (4 px wide, from the roof to the floor)
+          supports[#supports + 1] = { x = px, y0 = pc, y1 = fg - 1 }
+        end
+        -- a beam across the tops of the props, in the roof's lowest course
+        world:fillRect(sx - SPAN / 2 + 4, ceil - 2, sx + SPAN / 2 - 4, ceil, WOODID)
+        world:repaintRegion(sx - SPAN / 2 - 6, ceil - SLAB - 4, sx + SPAN / 2 + 6, g + 4)
+        result.caveins[#result.caveins + 1] = { x = sx, y = g, x0 = sx - SPAN / 2, x1 = sx + SPAN / 2, y0 = ceil - SLAB, y1 = ceil, supports = supports }
+      end
+    end
+  end
+
+  -- Live wires (src.livewire): bare cables hanging from the roof
+  result.wires = {}
+  if (area.wires or 0) > 0 and not area.open and not area.arena then
+    for _, sp in ipairs(findCeilingSpots(scaled(area.wires), 40, avoidForEnemies)) do
+      result.wires[#result.wires + 1] = { sp[1], sp[2] }
     end
   end
 

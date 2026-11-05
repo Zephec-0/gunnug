@@ -54,13 +54,16 @@ local THEMES = {
     backTop = { 0.10, 0.08, 0.14 },
     backDeep = { 0.06, 0.05, 0.09 },
     pillars = { { 0.03, 0.025, 0.05 }, { 0.16, 0.13, 0.22 }, { 0.10, 0.08, 0.15 } },
-    monsters = { ghoul = 38, bat = 28, spitter = 14, hopper = 6, miner = 28, roller = 10, worm = 12, wisp = 8 }, -- per 1920x3680; an old mine: skeletal miners, rollers and worms in the rock
+    monsters = { ghoul = 38, bat = 28, spitter = 14, hopper = 6, miner = 28, roller = 10, worm = 12, wisp = 8 , torchbearer = 6, tarcrawler = 8, arcbeetle = 4 }, -- per 1920x3680; an old mine: skeletal miners, rollers and worms in the rock
     boss = { "warden", "dreadbat" }, -- one of the two, chosen per run
     waterPools = 30,
     swarms = { swarmbat = 4 }, -- colonies of bats under the ceilings
     -- Breakables beside the crates { prop, count per 1920x3680 }: pots and pouches of coin, candle-lit skulls and lanterns
-    breakables = { { "urn", 14 }, { "pouch", 12 }, { "lantern", 8 }, { "skullCandle", 8 }, { "sporePod", 6 }, { "tntBarrel", 22 }, { "tntBarrel", 8 }, { "crate", 12 } },
+    breakables = { { "urn", 14 }, { "pouch", 12 }, { "lantern", 8 }, { "skullCandle", 8 }, { "sporePod", 6 }, { "tntBarrel", 22 }, { "tntBarrel", 8 }, { "crate", 12 }, { "oilBarrel", 10 } },
     mine = true, -- an old mine: rails and carts, shoring, oil lamps, skeletons, pickaxes, TNT
+    cavein = 3, -- roofs shored up with timber that can come down (src.cavein)
+    wires = 8, -- live cables (src.livewire)
+    gasline = 1, -- a sealed gas chamber and a lamp-oil trail to light it (src.gasline)
     stalactites = 150,
   },
   {
@@ -81,11 +84,12 @@ local THEMES = {
     backTop = { 0.045, 0.06, 0.105 },
     backDeep = { 0.03, 0.04, 0.075 },
     pillars = { { 0.02, 0.03, 0.05 }, { 0.10, 0.14, 0.22 }, { 0.06, 0.08, 0.14 } },
-    monsters = { ghoul = 20, bat = 14, spitter = 20, hopper = 44, bloater = 10, worm = 12, roller = 14, miner = 5, wisp = 8 }, -- a fen: hoppers everywhere
+    monsters = { ghoul = 20, bat = 14, spitter = 20, hopper = 44, bloater = 10, worm = 12, roller = 14, miner = 5, wisp = 8 , arcbeetle = 12 }, -- a fen: hoppers everywhere
+    wires = 6,
     boss = "matron",
     waterPools = 60,
     swarms = { swarmbat = 2 },
-    breakables = { { "sporePod", 36 }, { "urn", 10 }, { "pouch", 14 }, { "lantern", 8 } }, -- glowing spore pods in the fen
+    breakables = { { "sporePod", 36 }, { "urn", 10 }, { "pouch", 14 }, { "lantern", 8 }, { "waterJug", 8 }, { "oilBarrel", 5 } }, -- glowing spore pods in the fen
     stalactites = 70,
   },
   {
@@ -106,7 +110,7 @@ local THEMES = {
     backTop = { 0.085, 0.09, 0.04 },
     backDeep = { 0.05, 0.055, 0.025 },
     pillars = { { 0.035, 0.035, 0.012 }, { 0.20, 0.20, 0.08 }, { 0.11, 0.11, 0.05 } },
-    monsters = { ghoul = 14, bat = 10, spitter = 12, hopper = 8, bloater = 46, wisp = 40, worm = 12, roller = 8, miner = 8 }, -- gas bags and fire wisps
+    monsters = { ghoul = 14, bat = 10, spitter = 12, hopper = 8, bloater = 46, wisp = 40, worm = 12, roller = 8, miner = 8 , tarcrawler = 6 }, -- gas bags and fire wisps
     boss = "queen", -- the Sulfur Queen, in the arena that fills the last quarter
     glyph = "sulfur",
     defy = "Caverns", -- (the pedestal at the middle of the arena says "Defy the ...")
@@ -184,11 +188,13 @@ local THEMES = {
     backTop = { 0.16, 0.11, 0.08 },
     backDeep = { 0.09, 0.06, 0.05 },
     pillars = { { 0.05, 0.035, 0.03 }, { 0.26, 0.18, 0.12 }, { 0.15, 0.10, 0.07 } },
-    monsters = { ghoul = 16, bat = 10, miner = 44, roller = 24, worm = 18, spitter = 6, wisp = 8, wraith = 14, cairncrab = 22 },
+    monsters = { ghoul = 16, bat = 10, miner = 44, roller = 24, worm = 18, spitter = 6, wisp = 8, wraith = 14, cairncrab = 22 , torchbearer = 8, tarcrawler = 10 },
     swarms = { swarmbat = 2 },
     waterPools = 8,
-    breakables = { { "urn", 8 }, { "pouch", 14 }, { "lantern", 10 }, { "skullCandle", 6 }, { "tntBarrel", 30 }, { "tntBarrel", 12 }, { "crate", 18 } },
+    breakables = { { "urn", 8 }, { "pouch", 14 }, { "lantern", 10 }, { "skullCandle", 6 }, { "tntBarrel", 30 }, { "tntBarrel", 12 }, { "crate", 18 }, { "oilBarrel", 12 }, { "waterJug", 12 } },
     mine = true,
+    cavein = 3,
+    gasline = 1,
     stalactites = 60,
     parallax = 6, -- (the first area's far scenery, in this area's colours)
     track = 1, -- (and its music)
@@ -317,7 +323,7 @@ local THEMES = {
     monsters = { bat = 12, ghoul = 10, spitter = 6, miner = 8, roller = 5, worm = 6, wisp = 6, crow = 34, cragram = 18, dustdevil = 14, gargoyle = 16 },
     swarms = { swarmbat = 3 },
     waterPools = 4,
-    breakables = { { "urn", 8 }, { "pouch", 12 }, { "lantern", 10 }, { "skullCandle", 6 }, { "tntBarrel", 12 }, { "crate", 14 } },
+    breakables = { { "urn", 8 }, { "pouch", 12 }, { "lantern", 10 }, { "skullCandle", 6 }, { "tntBarrel", 12 }, { "crate", 14 }, { "oilBarrel", 8 }, { "waterJug", 8 } },
     stalactites = 100,
     climb = true, -- the routes go up (see src.cavegen)
     goldHint = require("src.buriedvault").goldHint, -- richer gold in the rock over the Buried Vault
@@ -899,6 +905,9 @@ local function areaFor(i)
   base.beacons = lv.theme.beacons
   base.breakables = lv.theme.breakables
   base.mine = lv.theme.mine
+  base.cavein = lv.theme.cavein
+  base.gasline = lv.theme.gasline
+  base.wires = lv.theme.wires
   base.stalactites = lv.theme.stalactites
   base.gasPools = lv.theme.gasPools
   base.grass = lv.theme.grass
@@ -1468,6 +1477,31 @@ local gravityScale = 1
 -- Banners as the hunter reaches each area, the shop-reached message, and gas
 local openGate -- (below)
 
+-- The glowing fungus and crystal clusters (and the vents' glowing mouths) stand on the floor: when the digging takes
+-- the ground under one away it is gone too, like the grass (src.grass). Run a few times a second for what is near
+-- the hunter; a cluster that has gone is skipped by its light and both draw passes.
+local function checkGlowSupport(info, px, py)
+  for _, g in ipairs(info.glows) do
+    if not g.gone and math.abs(g[1] - px) < 420 and math.abs(g[2] - py) < 420 then
+      local held = false
+      for dy = 1, 3 do
+        for dx = -2, 2 do
+          if world:isSolid(g[1] + dx, g[2] + dy) then
+            held = true
+            break
+          end
+        end
+        if held then
+          break
+        end
+      end
+      if not held then
+        g.gone = true
+      end
+    end
+  end
+end
+
 local supportTimer = 0
 function catacombs.update(player, dt)
   catacombs.spawnProps()
@@ -1492,7 +1526,9 @@ function catacombs.update(player, dt)
         end
         if info.story then
           story.checkSupport(world, info.story, px, py)
+          story.openMarkers(info.story, px, py) -- (the hunter's own grave: walk up to it for what he left)
         end
+        checkGlowSupport(info, px, py)
       end
     end
     chests.checkSupport(world, px, py)
@@ -2064,7 +2100,7 @@ function catacombs.addLights(lighting, view)
       local g, r = lv.theme.glow, lv.theme.glowRadius
       local strong = (lv.index > 1 and 0.75 or 0.6) * (lv.theme.glowLight or 1)
       for i, spot in ipairs(info.glows) do
-        if visible(view, spot[1], spot[2], r) then
+        if not spot.gone and visible(view, spot[1], spot[2], r) then
           lighting.add(spot[1], spot[2] - 3, r, g[1], g[2], g[3], strong + math.sin(t * 1.5 + i) * 0.08)
         end
       end
@@ -2300,7 +2336,7 @@ function catacombs.drawDecor(view)
         drawAltar(lv)
       end
       for i, g in ipairs(info.glows) do
-        if visible(view, g[1], g[2], 8) then
+        if not g.gone and visible(view, g[1], g[2], 8) then
           drawGlow(g[1], g[2], i, lv.theme.stalk)
         end
       end
@@ -2473,7 +2509,7 @@ function catacombs.drawEmissive(view)
         story.drawEmissive(info.story, view)
       end
       for i, spot in ipairs(info.glows) do
-        if visible(view, spot[1], spot[2], 8) then
+        if not spot.gone and visible(view, spot[1], spot[2], 8) then
           for j = 0, 2 do
             local dx = (j - 1) * 2 + (i + j) % 2
             love.graphics.setColor(math.min(1, g[1] + 0.1), math.min(1, g[2] + 0.05), math.min(1, g[3] + 0.05))
@@ -2582,6 +2618,26 @@ end
 
 function catacombs.areaName(i)
   return THEMES[i] and THEMES[i].name or nil
+end
+
+-- Dev panel: his own grave on the floor a few steps to the right of (px, py), as if he had died in this area before
+-- (walk up to it to claim it). Returns false when he is not inside an area.
+function catacombs.devGrave(px, py, gold, gunId)
+  local i = catacombs.levelAt(py, px)
+  local lv = i and levels[i]
+  if not (lv and lv.info and lv.info.story and world) then
+    return false
+  end
+  local x = math.floor(px) + 40
+  local y = world:findGround(x, math.floor(py) - 12)
+  table.insert(lv.info.story, { kind = "marker", x = x, y = y, seed = 7, flip = false, area = lv.theme.name, marker = { gold = gold, gun = gunId } })
+  return true
+end
+
+-- The name of the area built as level i (the name its generator was given, which story.generate keys the grave by)
+function catacombs.levelName(i)
+  local lv = levels[i]
+  return lv and lv.theme and lv.theme.name or nil
 end
 
 return catacombs

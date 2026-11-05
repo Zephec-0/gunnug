@@ -341,6 +341,26 @@ local function drawPouch(p)
   rects(x, y, PR_L19, PR_C20) -- a coin showing
 end
 
+-- A barrel of lamp oil: a dark wooden barrel with tarred hoops and a drop on the label
+local function drawOilBarrel(p)
+  local x, y = topLeft(p)
+  rects(x, y, { { 1, 0, 11, 1 }, { 0, 1, 13, 13 }, { 1, 14, 11, 1 } }, { 0.22, 0.17, 0.14 })
+  rects(x, y, { { 1, 1, 3, 13 }, { 6, 1, 1, 13 } }, { 0.30, 0.23, 0.17 })
+  rects(x, y, { { 0, 3, 13, 1 }, { 0, 11, 13, 1 } }, { 0.09, 0.08, 0.12 }) -- (the hoops)
+  rects(x, y, { { 4, 5, 5, 5 } }, { 0.62, 0.56, 0.44 }) -- (the plate)
+  rects(x, y, { { 6, 6, 1, 1 }, { 5, 7, 3, 2 } }, { 0.10, 0.07, 0.16 }) -- (a drop of oil)
+  rects(x, y, { { 6, 7, 1, 1 } }, { 0.55, 0.40, 0.75 })
+end
+
+-- A clay water jug: round, a narrow neck, a blue band
+local function drawWaterJug(p)
+  local x, y = topLeft(p)
+  rects(x, y, { { 3, 0, 3, 2 }, { 2, 2, 5, 1 }, { 1, 3, 7, 5 }, { 2, 8, 5, 1 } }, { 0.58, 0.38, 0.26 })
+  rects(x, y, { { 1, 3, 2, 5 } }, { 0.70, 0.48, 0.34 })
+  rects(x, y, { { 1, 5, 7, 1 } }, { 0.28, 0.52, 0.78 }) -- (the blue band)
+  rects(x, y, { { 4, 0, 1, 1 } }, { 0.30, 0.20, 0.14 })
+end
+
 local function drawLantern(p)
   local x, y = topLeft(p)
   rects(x, y, PR_L21, PR_C22)
@@ -616,6 +636,20 @@ props.defs = {
     showDamage = true, draw = drawLantern, emit = emitLantern,
     oil = 24, -- cells of lamp oil inside: spilt as it is shot, the rest when it breaks (src.fluids)
   },
+  oilBarrel = {
+    width = 13, height = 15, mass = 1.6, hp = 16, gold = { 0, 2 }, itemChance = 0.02,
+    shard = { 0.28, 0.21, 0.16 },
+    oilSpill = 70, -- cells of oil: it leaks as it is shot and pours out when it breaks (no fire of its own)
+    gravityScale = 0.5, friction = 0.6, restitution = 0.15, linearDamping = 0.3, angularDamping = 0.5,
+    showDamage = true, draw = drawOilBarrel,
+  },
+  waterJug = {
+    width = 9, height = 10, mass = 0.5, hp = 8, gold = { 0, 3 }, itemChance = 0.03,
+    shard = { 0.58, 0.38, 0.26 },
+    waterSpill = 24, -- cells of water it splashes when it breaks: puts out fire, soaks whatever is under it
+    gravityScale = 0.4, friction = 0.5, restitution = 0.15, linearDamping = 0.3, angularDamping = 0.5,
+    showDamage = true, draw = drawWaterJug,
+  },
   skullCandle = {
     width = 8, height = 10, mass = 0.5, hp = 12, gold = { 1, 5 }, itemChance = 0.06,
     shard = { 0.80, 0.78, 0.70 },
@@ -879,6 +913,17 @@ local function breakProp(p)
     effects.explosion(x, y, 5)
     require("src.audio").play("explosion", 0.35, 1.6)
   end
+  if p.def.oilSpill then
+    -- the rest of the barrel's oil pours out (what it leaked while it was shot is already on the floor)
+    require("src.fluids").addOil(x, y + 3, p.oilLeft or p.def.oilSpill)
+  end
+  if p.def.waterSpill then
+    require("src.fluids").addWater(x, y + 2, p.def.waterSpill)
+    effects.ring(x, y, 12, { 0.55, 0.8, 1 })
+    for _ = 1, 10 do
+      effects.particle(x, y, (love.math.random() - 0.5) * 90, -30 - love.math.random() * 50, 0.6, { 0.6, 0.82, 1 }, 260, true)
+    end
+  end
   local gold = p.def.gold
   if gold then
     pickups.dropGold(x, y, love.math.random(gold[1], gold[2]))
@@ -898,6 +943,15 @@ function props.damage(p, amount)
     if spill > 0 then
       local x, y = p.body:getPosition()
       p.oil = p.oil - require("src.fluids").addOil(x, y + 2, spill)
+    end
+  end
+  if p.def.oilSpill and not p.broken then
+    -- a barrel of oil leaks a little at every hit, and pours out the rest when it goes
+    p.oilLeft = p.oilLeft or p.def.oilSpill
+    local leak = math.min(p.oilLeft, 5 + math.floor(amount / 2))
+    if leak > 0 then
+      local x, y = p.body:getPosition()
+      p.oilLeft = p.oilLeft - require("src.fluids").addOil(x, y + 4, leak)
     end
   end
   if p.def.explosive then

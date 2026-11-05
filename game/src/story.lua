@@ -86,7 +86,53 @@ function story.generate(world, spots, level, rng, areaName)
     end
     items[#items + 1] = item
   end
+  -- The hunter's own death marker, if he fell in this area before and has not been back for his things (src.meta):
+  -- one of the spots (the middle one: no random numbers, so the area is laid out as it always is) becomes his grave
+  local marker = areaName and require("src.meta").markerFor(areaName)
+  if marker and #items > 0 then
+    local it = items[math.floor(#items / 2) + 1]
+    it.kind, it.text, it.trail, it.loot, it.skeleton = "marker", nil, nil, nil, nil
+    it.marker, it.area = { gold = marker.gold or 0, gun = marker.gun ~= "" and marker.gun or nil }, areaName
+  end
   return items
+end
+
+-- The gun he left, as the cave gives it back: the same kind of gun, rolled afresh at C grade with nothing fitted
+local function keepsake(gunId)
+  local guns = require("src.guns")
+  if not (gunId and guns.defs[gunId]) then
+    return nil
+  end
+  local gunInfo = require("src.gunInfo")
+  local gun
+  for _ = 1, 300 do
+    gun = guns.generate(gunId, nil, 0) -- (0: no ammo or attachment already in the slots)
+    if gunInfo.gradeIndex(gun) == 3 then
+      break
+    end
+  end
+  return gun
+end
+
+-- Called a few times a second with the hunter's place: walking up to his marker gives back half the gold he died
+-- with and one of his guns (a C grade, stripped of its attachments), and the marker is spent for good
+function story.openMarkers(items, px, py)
+  for _, it in ipairs(items) do
+    if it.kind == "marker" and not it.opened and not it.gone and math.abs(it.x - px) < 26 and math.abs(it.y - py) < 30 then
+      it.opened = true
+      local m = it.marker or {}
+      require("src.meta").clearMarker(it.area)
+      local pickups = require("src.pickups")
+      if (m.gold or 0) > 0 then
+        pickups.dropGold(it.x, it.y - 10, m.gold)
+      end
+      local gun = keepsake(m.gun)
+      if gun then
+        pickups.dropWeapon(it.x, it.y - 12, gun, (love.math.random() - 0.5) * 30, -95)
+      end
+      require("src.effects").popup(it.x, it.y - 26, "What he left behind", { 0.95, 0.85, 0.55 })
+    end
+  end
 end
 
 -- Sign images ---------------------------------------------------------------------
@@ -248,6 +294,27 @@ local function drawSign(it)
   love.graphics.draw(img, x, it.y - 20 + (it.seed % 2))
 end
 
+-- His own grave: a cairn with a plank cross, the hat hung on it and a glint of what lies beneath (until it is claimed)
+local function drawMarker(it)
+  love.graphics.push()
+  love.graphics.translate(it.x, it.y)
+  R(STONE_D, -6, -2, 13, 2)
+  R(STONE, -6, -2, 12, 1)
+  R(STONE_D, -4, -4, 9, 2)
+  R(STONE_L, -4, -4, 6, 1)
+  R(STONE, -3, -6, 6, 2)
+  R(WOOD_D, -1, -18, 2, 13) -- the cross
+  R(WOOD, -1, -18, 1, 13)
+  R(WOOD_D, -5, -15, 10, 2)
+  R(WOOD, -5, -15, 5, 1)
+  if not it.opened then
+    R({ 0.30, 0.2, 0.12 }, -5, -19, 11, 1) -- his hat on the top of the cross
+    R({ 0.30, 0.2, 0.12 }, -3, -22, 7, 3)
+    R({ 0.45, 0.30, 0.16 }, -3, -20, 7, 1)
+  end
+  love.graphics.pop()
+end
+
 local function drawCairn(it)
   love.graphics.push()
   love.graphics.translate(it.x, it.y)
@@ -298,6 +365,8 @@ function story.draw(items, view)
         drawSign(it)
       elseif it.kind == "cairn" then
         drawCairn(it)
+      elseif it.kind == "marker" then
+        drawMarker(it)
       end
     end
   end
@@ -314,6 +383,12 @@ function story.drawEmissive(items, view)
         local pulse = 0.5 + 0.5 * math.sin(t * 1.3 + it.seed)
         love.graphics.setColor(1, 0.3, 0.1, 0.35 + 0.5 * pulse)
         love.graphics.rectangle("fill", it.x + f * 8 - (it.flip and 1 or 0), it.y - 2, 1, 1)
+      elseif it.kind == "marker" and not it.opened then
+        -- A glint of gold at the foot of the cross, slow and easy to spot
+        local pulse = 0.5 + 0.5 * math.sin(t * 2 + it.seed)
+        love.graphics.setColor(1, 0.85, 0.35, 0.35 + 0.6 * pulse)
+        love.graphics.rectangle("fill", it.x + 4, it.y - 4 - math.floor(pulse * 2), 1, 1)
+        love.graphics.rectangle("fill", it.x - 5, it.y - 3, 1, 1)
       elseif it.kind == "ritual" then
         for i = 0, 4 do
           local a = (i / 5) * math.pi * 2 + it.seed
@@ -340,6 +415,8 @@ function story.addLights(lighting, items, view)
         end
       elseif it.kind == "camp" then
         lighting.add(it.x + (it.flip and -8 or 8), it.y - 2, 20, 1, 0.35, 0.12, 0.3)
+      elseif it.kind == "marker" and not it.opened then
+        lighting.add(it.x, it.y - 8, 26, 1, 0.8, 0.4, 0.35 + math.sin(t * 2 + it.seed) * 0.05)
       end
     end
   end

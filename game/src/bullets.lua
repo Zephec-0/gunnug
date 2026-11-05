@@ -379,6 +379,7 @@ local function step(b, dt, w)
       end
     end
 
+    require("src.livewire").shot(nx, ny, b.damage) -- (a bullet through a live cable cuts it: it arcs once and is dead)
     local prop = props.hitTest(nx, ny)
     if prop then
       b.x, b.y = nx, ny

@@ -232,6 +232,38 @@ local function dropLooseTerrain(world, xs, ys, n)
   end
 end
 
+-- A cave-in: every solid, destructible pixel in the rectangle comes down at once, cut into blocks of bw x bh that fall as
+-- physics debris (a block under MIN_DEBRIS_PIXELS crumbles to dust instead). Returns how many pixels came down.
+local collapseX, collapseY = {}, {}
+function destruction.collapse(world, x0, y0, x1, y1, bw, bh)
+  local total = 0
+  for by = y0, y1, bh do
+    for bx = x0, x1, bw do
+      local n = 0
+      for y = by, math.min(y1, by + bh - 1) do
+        for x = bx, math.min(x1, bx + bw - 1) do
+          if world:inBounds(x, y) then
+            local id = world:get(x, y)
+            if solid[id] and not anchored[id] then
+              n = n + 1
+              collapseX[n], collapseY[n] = x, y
+            end
+          end
+        end
+      end
+      if n > 0 then
+        local px, py = {}, {}
+        for i = 1, n do
+          px[i], py[i] = collapseX[i], collapseY[i]
+        end
+        makeDebris(world, px, py, n)
+        total = total + n
+      end
+    end
+  end
+  return total
+end
+
 -- Digs a crater of the given radius at (cx, cy). Each pixel in range is
 -- removed with probability power / hardness. dx, dy is the impact direction
 -- (debris sprays back against it). Vault rock only gives to a dig with vaultDig set.
@@ -268,6 +300,7 @@ function destruction.dig(world, cx, cy, radius, power, dx, dy, vaultDig)
   end
   clearPixels(world, removedX, removedY, n)
   dropLooseTerrain(world, removedX, removedY, n)
+  require("src.cavein").onDig(cx, cy, radius, n) -- (digging out the underside of a roof with no props stresses it)
   return n
 end
 

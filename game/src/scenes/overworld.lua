@@ -25,6 +25,9 @@ local npcs = require("src.npcs")
 local town = require("src.town")
 local targets = require("src.targets")
 local barrens = require("src.barrens")
+local controlstone = require("src.controlstone")
+local footprints = require("src.footprints")
+local lensflare = require("src.lensflare")
 local World = require("src.world")
 
 local SAND, SANDSTONE, WOOD, STONE, AIR, TAILINGS, ROCK, BEDROCK =
@@ -80,6 +83,7 @@ local GEN_BUDGET = 0.010
 local SPAWN_X = 990
 local CAMPFIRE_X = 972 -- (just right of the tent, clear of the doctor's lot)
 local TENT_X = 930
+local STONE_X = 876 -- the stone with the controls carved in it (src.controlstone), between the practice range and the tent
 -- (the camp's people and the bounty board live on the lots of the town, src.town)
 local WINCH_X = 1758 -- left edge of the winch house
 local SUN_X, SUN_Y = 440, 196 -- on screen, low over the horizon
@@ -288,10 +292,13 @@ local function buildBackground(eclipse, ash, keepLayers)
     end
   end
   -- A few early stars, high up where the sky is darkest
+  -- (kept as a list rather than painted in, so drawBackground can twinkle them: about half fade out and back in
+  -- on their own slow beat, the rest hold steady)
+  local stars = {}
   for _ = 1, ash and 0 or 60 do
     local x, y = rng:random(0, W - 1), math.floor(rng:random() ^ 2 * H * 0.3)
     local s = 0.45 + rng:random() * 0.3
-    sky:setPixel(x, y, s, s * 0.95, s, 1)
+    stars[#stars + 1] = { x = x, y = y, s = s, phase = rng:random() * 6.283, speed = 0.4 + rng:random() * 1.1, twinkles = rng:random() < 0.55 }
   end
 
   -- Silhouettes wider than the screen, so they scroll with parallax:
@@ -345,6 +352,7 @@ local function buildBackground(eclipse, ash, keepLayers)
 
   return {
     sky = love.graphics.newImage(sky),
+    stars = stars,
     -- (the far scenery is the same either way: when only the sun changes, it is kept)
     layers = keepLayers or (ash and {
       layer(0.06, 268, { 0.27, 0.20, 0.21 }, 41, "mountains"),
@@ -440,11 +448,18 @@ function overworld.build(opts)
     pillar(world, px, 8, 30 + px % 31)
   end
   -- Farther east: open desert, mesas and boulders, with ruined pillars here and there
-  for _, m in ipairs({ { 3280, 3460, 380, 9 }, { 4080, 4230, 404, 8 }, { 5000, 5150, 360, 10 } }) do
+  for _, m in ipairs({ { 3280, 3460, 380, 9 }, { 3640, 3790, 404, 8 }, { 5000, 5150, 360, 10 } }) do
     mesa(world, m[1], m[2], m[3], m[4])
   end
   for _, bx in ipairs({ 3010, 3650, 4520, 4900, 5260, 5560 }) do
     boulder(world, bx, 6 + bx % 4)
+  end
+  -- (dark rock lies on the ground leading up to the Needle, bigger and thicker the nearer the mountain: src.entrances)
+  for i, bx in ipairs({ 5080, 5190, 5290, 5370, 5450, 5520, 5590, 5650, 5710, 5770, 5820 }) do
+    boulder(world, bx, 5 + i, i % 2 == 0 and materials.BASALT or materials.BASALT)
+    if i > 4 then
+      boulder(world, bx + 22 + i * 2, 4 + math.floor(i / 2), materials.SLATE)
+    end
   end
   for _, px in ipairs({ 4700, 4742, 5400, 5440 }) do
     pillar(world, px, 8, 30 + px % 31)
@@ -500,6 +515,7 @@ function overworld.build(opts)
     end
     return false
   end, SANDSTONE, materials.FOSSIL)
+  require("src.entrances").build(world, surface, lakes, catacombs.entries()) -- (what is left outside each way down)
   -- The town's lots (src.town): fixed every run, but a porch only goes up
   -- once its person has moved in
   town.build(world, surface, materials.HARDWOOD, SAND, AIR) -- (the porches' timber can't be broken)
@@ -514,8 +530,8 @@ function overworld.build(opts)
   -- A motherlode of gold buried in the desert between the lake and the camp: deep enough that nothing shows
   -- until a hunter digs down to it
   do
-    local lx = -250
-    local ly = world:findGround(lx, 160) + 220
+    local lx = -150 -- (nearer the camp, and well under the sand so the surface shows nothing)
+    local ly = world:findGround(lx, 160) + 320
     local lr = 100
     for oy = -lr, lr do
       for ox = -lr, lr do
@@ -624,7 +640,8 @@ function overworld.populate(world)
   -- The camp's practice range, just west of the tent: a DPS dummy and a few
   -- crates to kick about
   enemies.spawn("dummy", 832, ground(832))
-  for i, x in ipairs({ 862, 876 }) do
+  -- (the crates stand just west of the dummy now, clear of the stone with the controls on it)
+  for i, x in ipairs({ 816, 824 }) do
     props.spawn("crate", x, ground(x) - 7)
     if i == 1 then
       props.spawn("crate", x + 7, ground(x) - 20)
@@ -832,6 +849,7 @@ function overworld.update(dt, player, game, effects)
     effects.particle(x, surface(math.floor(x)) - 1 - love.math.random() * 6, -50 - love.math.random() * 40, -6 - love.math.random() * 8, 1.2, { s, s * 0.8, s * 0.6 }, 10)
   end
   updateWeeds(dt, player.world, px, py)
+  footprints.step(dt, player) -- (prints in the sand, fading)
   -- Dust turning slowly in the shaft's light
   moteTimer = moteTimer - dt
   if moteTimer <= 0 and effects and math.abs(px - SHAFT_CX) < 500 and py < CAVE_TOP + 300 then
@@ -839,6 +857,7 @@ function overworld.update(dt, player, game, effects)
     effects.particle(SHAFT_X0 + 2 + love.math.random() * (SHAFT_X1 - SHAFT_X0 - 4), PIT_Y + love.math.random() * 360, (love.math.random() - 0.5) * 6, 3 + love.math.random() * 5, 3, { 1, 0.85, 0.55 }, 0, true)
   end
 
+  require("src.entrances").update(dt, px, py)
   -- An area must be complete before the hunter can get anywhere near it
   if not catacombs.ready() and py > surface(px) + 12 then
     catacombs.finish(1)
@@ -881,8 +900,9 @@ local function lanterns()
     if e.walk then
       list[#list + 1] = { e.x - 455, surface(e.x - 455) - 24 }
     elseif not e.lake then
-      list[#list + 1] = { e.x - e.half - 8, surface(e.x) - 24 }
-      list[#list + 1] = { e.x + e.half + 8, surface(e.x) - 24 }
+      local ent = require("src.entrances")
+      list[#list + 1] = { e.x - e.half - 8, ent.groundAt(e.x - e.half - 8, surface(e.x)) - 24 } -- (the Quarry's lamps stand on its terrace)
+      list[#list + 1] = { e.x + e.half + 8, ent.groundAt(e.x + e.half + 8, surface(e.x)) - 24 }
     end
   end
   return list
@@ -1125,19 +1145,46 @@ function overworld.drawBackground(camX, camY)
   end
   love.graphics.draw(background.sky, 0, 0, 0, ssx, ssy)
   love.graphics.setShader()
+  local now = love.timer.getTime()
+  for _, st in ipairs(background.stars) do
+    local a = 1
+    if st.twinkles then
+      -- (a slow swell that dips right out for a moment, with a quicker flutter on top)
+      local w = 0.5 + 0.5 * math.sin(now * st.speed + st.phase)
+      a = math.max(0, w * w * 1.3 - 0.15 + 0.12 * math.sin(now * st.speed * 4.1 + st.phase * 3))
+      a = math.min(1, a)
+    end
+    if a > 0.02 then
+      love.graphics.setColor(st.s, st.s * 0.95, st.s, a)
+      love.graphics.rectangle("fill", st.x * ssx, st.y * ssy, ssx, ssy)
+    end
+  end
+  if not black then
+    -- the sun's streak sits on the sky, so the far mountains cover it
+    local sunlight = 1 - underground(camX + config.VIRTUAL_W / 2, camY + config.VIRTUAL_H / 2)
+    if require("src.meta").undercroftBeaten() then
+      lensflare.drawStreak(SUN_X, SUN_Y - 16, sunlight * 0.3, { 1, 0.5, 0.4 })
+    else
+      lensflare.drawStreak(SUN_X, SUN_Y - 16, sunlight * 0.65)
+    end
+  end
   if black then
     drawBlackSun() -- (alive: pixels drifting round it, in front of the sky and behind the far scenery)
   end
+  local nearFade = require("src.entrances").sceneryFade(camX + config.VIRTUAL_W / 2)
   for i, l in ipairs(background.layers) do
-    local oy = -math.floor(camY * l.parallax * 0.5)
-    love.graphics.setColor(1, 1, 1)
-    local lx = -math.floor((camX - LEFT) * l.parallax)
-    love.graphics.draw(l.image, lx, oy)
-    -- When the camera is high the layer scrolls up; keep its base filled
-    local bottom = oy + l.image:getHeight()
-    if bottom < config.VIRTUAL_H then
-      love.graphics.setColor(l.color)
-      love.graphics.rectangle("fill", 0, bottom, config.VIRTUAL_W, config.VIRTUAL_H - bottom)
+    local fade = i >= 2 and nearFade or 1 -- (the mesas and towers thin out over the lake)
+    if fade > 0.01 then
+      local oy = -math.floor(camY * l.parallax * 0.5)
+      love.graphics.setColor(1, 1, 1, fade)
+      local lx = -math.floor((camX - LEFT) * l.parallax)
+      love.graphics.draw(l.image, lx, oy)
+      -- When the camera is high the layer scrolls up; keep its base filled
+      local bottom = oy + l.image:getHeight()
+      if bottom < config.VIRTUAL_H then
+        love.graphics.setColor(l.color[1], l.color[2], l.color[3], fade)
+        love.graphics.rectangle("fill", 0, bottom, config.VIRTUAL_W, config.VIRTUAL_H - bottom)
+      end
     end
     if i == 1 then
       drawVultures(camX, camY) -- between the far mountains and the mesas
@@ -1266,7 +1313,7 @@ local function drawLanternPost(x)
   if not visibleX(x - 3, x + 7) then
     return
   end
-  local g = surface(x)
+  local g = require("src.entrances").groundAt(x, surface(x)) -- (the Quarry's posts stand on its terrace)
   love.graphics.setColor(TIMBER)
   rect(x + 4, g - 28, 2, 28)
   rect(x, g - 28, 6, 2)
@@ -1595,6 +1642,7 @@ function overworld.drawDecor(camX, camY)
     love.graphics.setColor(backdrop(y, (vx0 + vx1) / 2))
     love.graphics.rectangle("fill", vx0, y, vx1 - vx0, 8)
   end
+  require("src.entrances").drawBackdrop(camX, camY, 0, 0) -- (the Quarry's cut wall, over the earth backdrop, in world coordinates)
   drawMountainDepth(camX, camY, vx0, vy0, vx1, vy1)
   if vy1 > CAVE_TOP then
     local index = catacombs.levelAt((math.max(vy0, CAVE_TOP) + vy1) / 2, (vx0 + vx1) / 2) or 1
@@ -1624,7 +1672,9 @@ function overworld.drawDecor(camX, camY)
   drawGroundClutter(vx0, vx1)
   drawBones()
   barrens.draw(vx0, vx1, surface)
+  require("src.entrances").draw(vx0, vx1)
   drawCamp()
+  footprints.draw(vx0, vx1)
   town.draw({ x = vx0, y = vy0, w = vx1 - vx0, h = vy1 - vy0 }, surface)
   drawRails(vx0, vx1)
   drawLanternPost(RAMP_X0 - 4)
@@ -1743,9 +1793,29 @@ local function drawShaftLight(camY)
   end
 end
 
+-- The low sun's lens flare, over the lit scene (not under the ground, not under a black sun)
+local function drawLensFlare(camX, camY)
+  local meta = require("src.meta")
+  if meta.isSkyBeaten() then
+    return
+  end
+  local cx, cy = camX + config.VIRTUAL_W / 2, camY + config.VIRTUAL_H / 2
+  local sunlight = 1 - underground(cx, cy)
+  if sunlight <= 0 then
+    return
+  end
+  if meta.undercroftBeaten() then
+    lensflare.draw(camX + SUN_X, camY + SUN_Y - 16, cx, cy, sunlight * 0.45, { 1, 0.5, 0.4 }, camY) -- (a dull red sun through the smoke)
+  else
+    lensflare.draw(camX + SUN_X, camY + SUN_Y - 16, cx, cy, sunlight, nil, camY)
+  end
+end
+
 -- Flames glow regardless of the light level
 function overworld.drawEmissive(camX, camY)
+  drawLensFlare(camX, camY)
   drawShaftLight(camY)
+  require("src.entrances").drawEmissive(camX, camY, 1 - underground(camX + config.VIRTUAL_W / 2, camY + config.VIRTUAL_H / 2))
   town.drawEmissive(view(camX, camY))
   catacombs.drawEmissive(view(camX, camY))
   for _, l in ipairs(lanterns()) do

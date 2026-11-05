@@ -89,6 +89,39 @@ local function dropStash()
   return "Dropped 100 gold and 12 ether"
 end
 
+-- The death marker (src.story): a grave right here to try out, and one left for the next run
+local function graveHere()
+  local player = require("src.game").player()
+  if not player then
+    return "No hunter"
+  end
+  local px, py = player:center()
+  local guns = require("src.guns")
+  local archetypes = guns.archetypes()
+  local gun = archetypes[love.math.random(1, #archetypes)]
+  if catacombs.devGrave(px, py, 80, gun) then
+    return "Grave 40 px to the right (a " .. gun .. ", 80 gold)"
+  end
+  return "Go into an area first"
+end
+
+local function graveNextRun()
+  local player = require("src.game").player()
+  if not player then
+    return "No hunter"
+  end
+  local px, py = player:center()
+  local at = catacombs.levelAt(py, px)
+  local name = at and catacombs.levelName(at)
+  if not name then
+    return "Go into an area first"
+  end
+  local archetypes = require("src.guns").archetypes()
+  require("src.meta").leaveMarker(name, 80, archetypes[love.math.random(1, #archetypes)])
+  require("src.save").flush()
+  return "Marker left in " .. name .. " (start a new run)"
+end
+
 local function rows()
   local out = {
     { kind = "head", label = "Toggles" },
@@ -114,6 +147,8 @@ local function rows()
       return "+10 marks"
     end },
     { kind = "action", label = "Drop 100 gold + 12 ether", fn = dropStash },
+    { kind = "action", label = "Death marker: grave here now", fn = graveHere },
+    { kind = "action", label = "Death marker: leave for next run", fn = graveNextRun },
     { kind = "head", label = "Go to" },
     { kind = "button", label = "Camp", spec = { kind = "camp" } },
     { kind = "button", label = "Test room", spec = { kind = "test" } },

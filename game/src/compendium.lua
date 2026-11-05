@@ -22,6 +22,8 @@ compendium.CATEGORIES = {
   { id = "attachment", name = "Attachments", verb = "Collected" },
   { id = "perk", name = "Perks", verb = "Taken" },
   { id = "enemy", name = "Bestiary", verb = "Slain" },
+  { id = "condition", name = "Conditions", verb = "Felt" },
+  { id = "journal", name = "Journal", verb = "Read" },
 }
 
 local catalogue -- category id -> list of entries (built on first use)
@@ -169,7 +171,7 @@ local EXTRA = {
 -- then the bosses (anything not named here is listed after, by name)
 local ENEMY_ORDER = {
   "ghoul", "bat", "swarmbat", "spitter", "hopper", "bloater", "wisp", "worm", "miner", "roller", "piranha",
-  "jellyfish", "angler", "urchin", "crow", "cragram", "dustdevil", "gargoyle", "wraith", "cairncrab", "ethercrawler", "minigolem", "cloudray", "starmoth", "sentinel", "windspirit", "gildedlens", "cometling", "stormcloud", "starguardian",
+  "jellyfish", "angler", "urchin", "crow", "cragram", "dustdevil", "gargoyle", "wraith", "cairncrab", "arcbeetle", "torchbearer", "tarcrawler", "ethercrawler", "minigolem", "cloudray", "starmoth", "sentinel", "windspirit", "gildedlens", "cometling", "stormcloud", "starguardian",
   "warden", "dreadbat", "matron", "behemoth", "queen", "golem", "darkhunter", "crowrider", "starwarden", "hollowking",
   "bigfish_1", "bigfish_2", "bigfish_3", "bigfish",
 }
@@ -451,6 +453,45 @@ local function build()
         { "Gold", d.gold and (d.gold[1] .. "-" .. d.gold[2]) or "-" },
       },
     })
+  end
+  -- The conditions that can come on the hunter (src.status), and the journal's pages (src.journal)
+  local status = require("src.status")
+  for _, id in ipairs(status.ORDER) do
+    local d = status.DEFS[id]
+    add("condition", { id = id, name = d.name, desc = d.desc, image = status.icon(id), color = d.color, stats = d.stats })
+  end
+  local paper
+  do
+    local rows = {
+      "............",
+      "..########..",
+      "..#oooooo#..",
+      "..#o####o#..",
+      "..#oooooo#..",
+      "..#o####o#..",
+      "..#oooooo#..",
+      "..#o###oo#..",
+      "..#oooooo#..",
+      "..###..###..",
+      "............",
+      "............",
+    }
+    local data = love.image.newImageData(12, 12)
+    for y, row in ipairs(rows) do
+      for x = 1, #row do
+        local ch = row:sub(x, x)
+        if ch == "#" then
+          data:setPixel(x - 1, y - 1, 0.45, 0.36, 0.24, 1)
+        elseif ch == "o" then
+          data:setPixel(x - 1, y - 1, 0.90, 0.84, 0.66, 1)
+        end
+      end
+    end
+    paper = love.graphics.newImage(data)
+    paper:setFilter("nearest", "nearest")
+  end
+  for _, p in ipairs(require("src.journal").PAGES) do
+    add("journal", { id = p.id, name = p.title, desc = p.text, image = paper, color = { 1, 0.86, 0.5 }, stats = { { "Found at", p.where } } })
   end
   for _, c in ipairs(compendium.CATEGORIES) do
     catalogue[c.id] = catalogue[c.id] or {}

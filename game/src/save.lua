@@ -112,7 +112,7 @@ end
 
 -- Every category a profile counts; listed here only so a fresh profile has
 -- them all (record() makes new ones on demand)
-save.CATEGORIES = { "weapon", "ammo", "attachment", "perk", "enemy" }
+save.CATEGORIES = { "weapon", "ammo", "attachment", "perk", "enemy", "condition", "journal" }
 
 local function fresh()
   local p = {

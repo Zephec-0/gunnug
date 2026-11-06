@@ -387,6 +387,7 @@ end
 -- from a ceiling) or "near" (clings to any rock beside it). One that loses its support vanishes (World:colorAt).
 local nextDecor = 40
 local kits = {}
+local kitList = {} -- the kits in the order they were made, for a worker thread to report (see materials.kitExport)
 function materials.decorKit(name, support, colors)
   local ids = kits[name]
   if ids then
@@ -400,7 +401,19 @@ function materials.decorKit(name, support, colors)
     nextDecor = nextDecor + 1
   end
   kits[name] = ids
+  kitList[#kitList + 1] = { name = name, support = support, colors = colors, ids = ids }
   return ids
+end
+
+-- The kits made so far, as plain data: { name, support, colors, ids = { a, b, c } }. A worker thread that built an
+-- area has made its own kits with ids of its own (they are given out in the order they are asked for); the main
+-- thread asks decorKit for the same names and swaps the worker's ids for its own (see src.genworker).
+function materials.kitExport()
+  local out = {}
+  for i, k in ipairs(kitList) do
+    out[i] = { name = k.name, support = k.support, colors = k.colors, ids = { k.ids[1], k.ids[2], k.ids[3] } }
+  end
+  return out
 end
 
 return materials

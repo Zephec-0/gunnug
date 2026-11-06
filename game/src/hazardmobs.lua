@@ -7,7 +7,7 @@
 --   Tar Crawler  a slug of black pitch that walks the floor, the walls and the roof alike, tracking the hunter over
 --                whatever it is on and dropping on him from above. It leaves a trail of oil, spits globs (Oiled), bursts
 --                into a pool when it dies, and burns if a flame finds it
--- (and the live wires, src.livewire, are their environment cousins: bare cables that spark and shock.)
+-- (and the stormglass, src.livewire, is their environment cousin: glass shards that spark and shock.)
 local enemies = require("src.enemies")
 local Body = require("src.body")
 local audio = require("src.audio")
@@ -36,10 +36,10 @@ end
 local D = enemies.defs
 D.arcbeetle = {
   name = "Arc Beetle",
-  ground = true, w = 16, h = 9, hp = 40, speed = 46, jump = 150,
+  ground = true, w = 12, h = 7, hp = 40, speed = 46, jump = 150,
   sight = 240, forget = 700, damage = 6,
   knockback = 0.3, gold = { 4, 9 }, weight = 2,
-  spriteW = 16, spriteH = 10, scale = 1,
+  spriteW = 12, spriteH = 8, scale = 1,
   blood = { 0.55, 0.8, 1.0 },
   desc = "A beetle with a coil of charge under its shell. It crawls close, glows, then lets go in a ring of arcs. The current is worse on anyone soaked, and in water it runs through the whole pool: don't be in it, and don't let it be.",
 }
@@ -167,7 +167,7 @@ local function updateBeetle(e, dt, world, player, px, py)
     e.timer = e.timer - dt
     if love.math.random() < dt * 40 then
       local a = love.math.random() * math.pi * 2
-      effects.particle(cx + math.cos(a) * 12, cy + math.sin(a) * 8, -math.cos(a) * 30, -math.sin(a) * 25, 0.25, { 0.75, 0.92, 1 }, 0, true)
+      effects.particle(cx + math.cos(a) * 9, cy + math.sin(a) * 6, -math.cos(a) * 30, -math.sin(a) * 25, 0.25, { 0.75, 0.92, 1 }, 0, true)
     end
     if e.timer <= 0 then
       discharge(e, world, player, px, py)
@@ -177,8 +177,8 @@ local function updateBeetle(e, dt, world, player, px, py)
   move(e, dt, world, want, 700, 250, e.state == "crawl")
 end
 
--- The beetle, second pass: a rounded armoured body with a seam of copper coil between the wing cases, six jointed legs,
--- two spark rods on the back and a stinger-like earthing tail that touches the ground as it charges
+-- The beetle, third pass (smaller, 11 x 7): a rounded armoured body with a seam of copper coil between the wing cases,
+-- six jointed legs, two spark rods on the back and a stinger-like earthing tail that touches the ground as it charges
 local function drawBeetle(e)
   local b = e.body
   local white = e.flash > 0
@@ -186,68 +186,62 @@ local function drawBeetle(e)
     love.graphics.setColor(white and { 1, 1, 1 } or c)
   end
   local f = e.facing
-  local mid, y = b.x + b.w / 2, b.y + 1
+  local mid, y = b.x + b.w / 2, b.y
   local charging = e.state == "charge"
   local k = charging and (1 - math.max(0, e.timer) / 0.9) or 0
   local walk = (e.grounded and math.abs(b.vx) > 4) and math.floor(e.phase * 3) % 2 or 0
-  local function X(dx, w)
-    return f > 0 and mid + dx or mid - dx - (w or 1) + 1
-  end
-  -- legs: three a side, alternating, jointed
+  -- legs: three a side, alternating
   color({ 0.18, 0.17, 0.22 })
   for i = 0, 2 do
     local up = (i + walk) % 2
-    rect(X(-4 + i * 4, 1), y + 6, 1, 2 - up)
-    rect(X(-5 + i * 4, 1), y + 8 - up, 1, 1)
+    rect(mid - 4 + i * 3, y + 5, 1, 2 - up)
   end
   -- the body: two wing cases, steel blue, with a bright edge along the top
   color({ 0.20, 0.23, 0.34 })
-  rect(mid - 7, y + 3, 14, 4)
-  rect(mid - 6, y + 1, 12, 3)
-  rect(mid - 4, y, 8, 2)
+  rect(mid - 5, y + 2, 10, 3)
+  rect(mid - 4, y + 1, 8, 2)
+  rect(mid - 3, y, 6, 1)
   color({ 0.34, 0.40, 0.58 })
-  rect(mid - 5, y + 1, 5, 1)
-  rect(mid - 4, y, 4, 1)
+  rect(mid - 3, y + 1, 4, 1)
+  rect(mid - 2, y, 3, 1)
   color({ 0.12, 0.14, 0.22 })
-  rect(mid - 7, y + 6, 14, 1)
+  rect(mid - 5, y + 4, 10, 1)
   -- the copper coil down the seam, lighting up with the charge
-  for i = 0, 6 do
+  for i = 0, 4 do
     color({ 0.55 + 0.4 * k, 0.34 + 0.4 * k, 0.16 + 0.5 * k })
-    rect(mid - 7 + i * 2, y + 3, 1, 3)
+    rect(mid - 5 + i * 2, y + 2, 1, 2)
   end
-  color({ 0.80, 0.56, 0.30 })
-  rect(mid, y + 2, 1, 1)
   -- the head, with two bright eyes
   color({ 0.16, 0.16, 0.22 })
-  rect(f > 0 and mid + 6 or mid - 9, y + 3, 3, 3)
+  rect(f > 0 and mid + 5 or mid - 7, y + 2, 2, 3)
   color(charging and { 0.9, 0.97, 1 } or { 0.5, 0.78, 1 })
-  rect(f > 0 and mid + 8 or mid - 9, y + 3)
-  rect(f > 0 and mid + 8 or mid - 9, y + 5)
+  rect(f > 0 and mid + 6 or mid - 7, y + 2)
+  rect(f > 0 and mid + 6 or mid - 7, y + 4)
   -- the earthing tail behind
   color({ 0.55, 0.55, 0.62 })
-  rect(f > 0 and mid - 9 or mid + 8, y + 5, 2, 1)
-  rect(f > 0 and mid - 10 or mid + 9, y + 6 + (charging and 1 or 0), 1, 2)
+  rect(f > 0 and mid - 7 or mid + 6, y + 4, 2, 1)
+  rect(f > 0 and mid - 8 or mid + 7, y + 5 + (charging and 1 or 0), 1, 2)
   -- two spark rods on the back
   color({ 0.60, 0.62, 0.70 })
-  rect(mid - 3, y - 2, 1, 3)
-  rect(mid + 2, y - 2, 1, 3)
+  rect(mid - 2, y - 2, 1, 2)
+  rect(mid + 1, y - 2, 1, 2)
 end
 
 local function drawBeetleGlow(e)
   local b = e.body
-  local mid, y = b.x + b.w / 2, b.y + 1
+  local mid, y = b.x + b.w / 2, b.y
   local k = e.state == "charge" and (1 - math.max(0, e.timer) / 0.9) or 0
   local flick = math.floor(love.timer.getTime() * 20) % 2
   love.graphics.setColor(0.7, 0.9, 1, 0.35 + 0.6 * k)
-  rect(mid - 3, y - 3 - flick)
-  rect(mid + 2, y - 3 - (1 - flick))
+  rect(mid - 2, y - 3 - flick)
+  rect(mid + 1, y - 3 - (1 - flick))
   if k > 0 then
     love.graphics.setColor(0.7, 0.9, 1, 0.10 + 0.25 * k)
-    for i = 0, 6 do
-      rect(mid - 7 + i * 2, y + 3, 1, 3)
+    for i = 0, 4 do
+      rect(mid - 5 + i * 2, y + 2, 1, 2)
     end
     love.graphics.setColor(0.7, 0.9, 1, 0.05 + 0.12 * k)
-    rect(mid - 9, y - 1, 18, 9)
+    rect(mid - 7, y - 1, 14, 7)
   end
 end
 

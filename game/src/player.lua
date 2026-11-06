@@ -904,6 +904,9 @@ function Player:addLights(lighting)
   if lamp > 0 then
     lighting.add(cx, cy, 150 + lamp, 1, 0.82, 0.55, 0.6) -- Muzzle Lantern
   end
+  if status.has(self, "burning") then
+    lighting.add(cx, cy, 90, 1, 0.5, 0.16, 0.7) -- (he is on fire)
+  end
   local ex, ey = playeranim.eyes(self)
   lighting.add(ex, ey, 9, 1, 0.8, 0.4, 0.7)
 end

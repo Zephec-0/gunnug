@@ -172,3 +172,14 @@ Each Undercroft zone now has its own backdrop (`parallax.lua` styles 10 to 13), 
 Still to do: the lit windows and lamps in the backdrops are drawn under the lighting (they glow but cast no light), ribs and ruins could come in larger sizes, the Core's hall has no set pieces of its own, and none of this has pixel art beyond the props' simple shapes.
 
 - **Goblet chamber (2026-11-04, headless-tested with screenshots; not played).** The Buried Vault's two rectangle rooms are one bedrock-shelled goblet (`buriedvault.lua`): the antechamber (diggable vault rock) opens onto a brick shelf across the upper bulb with the three locks standing on it (`relicdoor.lua`; the sockets, hover icons and prompt moved onto the plinths). Under the shelf the bulb holds a pool (`fluids.fillWater`) that funnels to a narrow neck stopped by a plug; the sealed lower sphere holds the Cork on its pedestal. Setting the third lock removes the plug and wakes the water, which pours down and floods the sphere (about 60% full, the bulb nearly empty); the hunter swims down for the Cork. The whole goblet is bedrock so digging cannot breach the pool early.
+
+## The Hollow King, second pass (2026-11-05, headless-tested with screenshots; not played)
+
+`hollowking.lua` rewritten around the ground and a bare prism. Tuning is all in the `T` table at the top (health 2000, damage multipliers, gaps, open windows, `RISE`).
+
+- **Weak point.** His body is a screen: a shot into the swarm does 12% damage, and the prism at the heart only takes full damage while it is bare (`hk.exposeK`). It is bare after each chain of attacks (`open`, 2.4 to 3.2 s, the swarm peels back and a ring of light shows), and after a slam (`recover`). Bare but shot into the swarm: 30%.
+- **Five turns** (lines at 80/60/40/20 percent): Queen, Golem, Fish, Champion (new: a robed figure with a halo, light attacks), then the Hive. Each plays chains of attacks (`CHAINS`), never the same chain twice running, with a banner naming the turn.
+- **Attacks.** Globs; lava rain (marked columns, leaves lava puddles); slam (wave of rock, stones from the roof); lunge (now trenches the floor); crack (floor opens into magma pits that cool into basalt mounds); pillars of light (marked, then strike and vaporise cover); sweeping beam (stopped by rock, so rubble is cover); shed (wisps, turns 3 and 5); in the last turn a flood of magma rises in cycles ("The Floor Is Burning").
+- **Terrain rule.** Roof stones leave basalt rubble (cap 9, oldest crumbles) that blocks his waves and can be dug or stood on; his light and beam scorch it away. Hand-written terrain goes through `changed()` (repaint, physics outlines, fluids wake): without that, props went NaN.
+- Hazards are drawn from a hook on `enemies.drawEmissive`, so they show when he is off screen.
+- Not done: tuning from real play (health, damage taken ×area scaling is steep: a pillar hit is about 58 at the Core), sounds of its own, the hall is still very dark.

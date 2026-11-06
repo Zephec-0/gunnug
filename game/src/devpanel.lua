@@ -5,6 +5,7 @@
 local dev = require("src.dev")
 local bake = require("src.bake")
 local lighting = require("src.lighting")
+local perf = require("src.perf")
 local itembar = require("src.itembar")
 local catacombs = require("src.scenes.catacombs")
 
@@ -131,10 +132,29 @@ local function rows()
     { kind = "toggle", label = "Sprites cast shadows (test)", get = function() return lighting.spriteShadows end, set = function(v) lighting.spriteShadows = v end },
     { kind = "toggle", label = "Objects cast shadows", get = function() return lighting.objectShadows end, set = function(v) lighting.objectShadows = v end },
     { kind = "toggle", label = "Lit sprites (test)", get = function() return lighting.litSprites end, set = function(v) lighting.litSprites = v end },
+    { kind = "head", label = "Frame timing (CPU ms per part, top left)" },
+    { kind = "toggle", label = "Show timings", get = function() return perf.show end, set = function(v) perf.show = v end },
+    { kind = "toggle", label = "Wait for the GPU at each lap (slower)", get = function() return perf.sync end, set = function(v) perf.sync = v end },
+    { kind = "action", label = "Turn every switch below back on", fn = function() perf.reset() return "All switches on" end },
+    { kind = "toggle", label = "Areas built on worker threads", get = function() return require("src.genworker").enabled end, set = function(v) require("src.genworker").enabled = v end },
+  }
+  for _, sw in ipairs(perf.SWITCHES) do
+    local key = sw[1]
+    if key == "head" then
+      out[#out + 1] = { kind = "head", label = "Switch off to test: " .. sw[2] }
+    else
+      out[#out + 1] = { kind = "toggle", label = sw[2], get = function() return not perf.off[key] end, set = function(v) perf.off[key] = (not v) or nil end }
+    end
+  end
+  for _, row in ipairs({
     { kind = "head", label = "Cached drawing (off = the plain way)" },
     { kind = "toggle", label = "Rock slabs", get = function() return bake.enabled.slabs end, set = function(v) bake.enabled.slabs = v end },
     { kind = "toggle", label = "Mine decorations", get = function() return bake.enabled.minedecor end, set = function(v) bake.enabled.minedecor = v end },
     { kind = "toggle", label = "Item bar boxes", get = function() return bake.enabled.itembar end, set = function(v) bake.enabled.itembar = v end },
+  }) do
+    out[#out + 1] = row
+  end
+  for _, row in ipairs({
     { kind = "head", label = "Save file" },
     { kind = "action", label = "Unlock everything (+10 marks)", fn = unlockEverything },
     { kind = "action", label = "Give 10 marks", fn = function()
@@ -153,7 +173,9 @@ local function rows()
     { kind = "button", label = "Camp", spec = { kind = "camp" } },
     { kind = "button", label = "Test room", spec = { kind = "test" } },
     { kind = "head", label = "Area entrances" },
-  }
+  }) do
+    out[#out + 1] = row
+  end
   for i = 1, catacombs.count() do
     out[#out + 1] = { kind = "button", label = i .. ". " .. (catacombs.areaName(i) or "?"), spec = { kind = "area", i = i } }
   end

@@ -13,6 +13,7 @@
 -- still above it (no loading screen). catacombs.ensure(y) completes any area
 -- the hunter is getting close to, if it isn't done yet.
 local cavegen = require("src.cavegen")
+local genworker = require("src.genworker")
 local chests = require("src.chests")
 local audio = require("src.audio")
 local effects = require("src.effects")
@@ -62,7 +63,7 @@ local THEMES = {
     breakables = { { "urn", 14 }, { "pouch", 12 }, { "lantern", 8 }, { "skullCandle", 8 }, { "sporePod", 6 }, { "tntBarrel", 22 }, { "tntBarrel", 8 }, { "crate", 12 }, { "oilBarrel", 10 } },
     mine = true, -- an old mine: rails and carts, shoring, oil lamps, skeletons, pickaxes, TNT
     cavein = 3, -- roofs shored up with timber that can come down (src.cavein)
-    wires = 8, -- live cables (src.livewire)
+    wires = 8, -- stormglass spurs (src.livewire)
     gasline = 1, -- a sealed gas chamber and a lamp-oil trail to light it (src.gasline)
     stalactites = 150,
   },
@@ -328,17 +329,10 @@ local THEMES = {
     climb = true, -- the routes go up (see src.cavegen)
     goldHint = require("src.buriedvault").goldHint, -- richer gold in the rock over the Buried Vault
     indoors = true, -- dark inside, though it stands above the ground
-    profile = function(y)
-      -- The mountain's silhouette: the plain's rock below the ground line, a
-      -- flank rising from x 5900 to x 6900 at the summit (7400 px up) above it
-      if y < -6900 then
-        return nil
-      end
-      if y >= 500 then
-        return 5800, 8599
-      end
-      return math.floor(5900 + (500 - y) * (1000 / 7400)), 8599
-    end,
+    -- The mountain's silhouette: the plain's rock below the ground line, a flank rising from x 5900 to x 6900
+    -- at the summit (7400 px up) above it (as data too: src.genworker sends the data to its worker threads)
+    profileData = { kind = "flank", summit = -6900, ground = 500, xGround = 5800, xTop = 5900, run = 1000, rise = 7400, right = 8599 },
+    profile = require("src.profiles").flank({ summit = -6900, ground = 500, xGround = 5800, xTop = 5900, run = 1000, rise = 7400, right = 8599 }),
     groundY = 500,
     arena = true,
     arenaFrac = 0.04,
@@ -740,6 +734,7 @@ local updateBossCamera
 -- whole of it, 3 stops after the Sulfur Vents).
 function catacombs.start(w, first, seed, tiers)
   world, firstArea, baseSeed = w, first, seed
+  genworker.reset() -- (builds still running for the last run's world must not land in this one)
   minedecor.clear()
   audio.setBoss(false) -- (a fight left by a death must not play on into the next run)
   levels = {}
@@ -864,6 +859,8 @@ local function areaFor(i)
       shaftX0 = plate.x0,
       shaftX1 = plate.x1,
       shaftTop = plate.y1 + 1,
+      sealTop = true, -- (built with the rest, shut off by a band of bedrock until the key turns)
+      sealOpen = require("src.meta").undercroftOpen(),
     }
   else
     local parent = levels[lv.parent or (i - 1)]
@@ -940,15 +937,112 @@ local function areaFor(i)
   return base
 end
 
+local lastBuilt = 0 -- (when the last area came into the world)
+local BACKGROUND_GAP = 4 -- seconds between the areas nobody needs yet, built on a worker
+local buildRate = 2.4e-7 -- seconds of building per pixel of area (a guess until one has been built; then the last measured)
 local function tick()
   if os.clock() > deadline then
     coroutine.yield()
   end
 end
 
--- Runs the coroutine of level i for up to `budget` seconds (creating it first)
-local function resume(i, budget)
+-- Level i is built: its layout is `result`; `spent` is how long it took (seconds)
+local function finishLevel(i, result, spent)
   local lv = levels[i]
+  lv.job, lv.remote, lv.info = nil, nil, result
+  lastBuilt = love.timer.getTime()
+  -- (how long this machine takes per pixel of area: what the next estimates use)
+  local pixels = (lv.x1 - lv.x0 + 1) * (lv.y1 - lv.y0 + 1)
+  if pixels > 0 and spent > 0 then
+    buildRate = spent / pixels
+  end
+  world.platforms = world.platforms or {}
+  for _, p in ipairs(result.arena and result.arena.platforms or {}) do
+    world.platforms[#world.platforms + 1] = p
+  end
+  for _, p in ipairs(result.platforms or {}) do
+    world.platforms[#world.platforms + 1] = p
+  end
+end
+
+-- An area is built on a worker thread (src.genworker) once the area above it is in the world (its build cuts into
+-- the strip of that one's floor; an area entered from the surface needs nothing)
+local function parentBuilt(i)
+  local lv = levels[i]
+  if i == 1 or lv.entry then
+    return true
+  end
+  local parent = levels[lv.parent or (i - 1)]
+  return parent == nil or parent.info ~= nil
+end
+
+-- Hands area i to a worker if it can be (true if it is on a worker now, or was already)
+local function submitRemote(i)
+  local lv = levels[i]
+  if lv.remote then
+    return true
+  end
+  if lv.info or lv.job or lv.threadFailed or not parentBuilt(i) or genworker.free() == 0 then
+    return false
+  end
+  local area = areaFor(i)
+  lv.area = area
+  local marker = area.name and require("src.meta").markerFor(area.name)
+  local spec = area
+  if area.profile then
+    -- (a function cannot be sent: the mountain's silhouette goes as its data, and the worker makes the function)
+    spec = {}
+    for k, v in pairs(area) do
+      spec[k] = v
+    end
+    spec.profile, spec.profileData = nil, lv.theme.profileData
+  end
+  local sent, reason = genworker.submit(i, spec, baseSeed + (i - 1) * 7919, world, marker)
+  if reason == "unsendable" then
+    lv.threadFailed = true -- (this area is built on the main thread)
+  end
+  if sent then
+    lv.remote, lv.sent, lv.spent = true, love.timer.getTime(), 0
+    return true
+  end
+  return false
+end
+
+-- Takes in what the workers have finished (and merges it), for up to `budget` seconds; with wait, until something
+-- has come in or the time is up
+local function pumpRemote(budget, wait)
+  genworker.pump(world, budget, function(i, info, res)
+    local lv = levels[i]
+    if info then
+      if res.hadArea then
+        info.area = lv.area
+      end
+      finishLevel(i, info, res.built or 0)
+    else
+      -- (a worker could not build it: the main thread's own build takes over for this area)
+      lv.remote, lv.threadFailed = nil, true
+    end
+  end, wait)
+end
+
+-- Works on level i for up to `budget` seconds. async: nobody is waiting for it, so a worker thread's build is only
+-- looked in on (it costs the frame next to nothing); otherwise the call waits for up to `budget` for it.
+local function resume(i, budget, async)
+  local lv = levels[i]
+  if genworker.available() and not lv.job and not lv.threadFailed then
+    if submitRemote(i) then
+      lv.spent = love.timer.getTime() - (lv.sent or love.timer.getTime())
+      pumpRemote(async and 0 or budget, not async)
+      return
+    elseif lv.info then
+      return
+    elseif parentBuilt(i) then
+      -- (every worker is busy with another area: wait for one, or look again next frame)
+      pumpRemote(async and 0 or budget, not async)
+      return
+    end
+    -- (its parent is not in the world yet: the main thread's own build, below)
+  end
   if not lv.job then
     local area = areaFor(i)
     lv.area = area
@@ -957,19 +1051,14 @@ local function resume(i, budget)
     end)
   end
   deadline = os.clock() + budget
+  local t0 = love.timer.getTime()
   local ok, result = coroutine.resume(lv.job)
+  lv.spent = (lv.spent or 0) + (love.timer.getTime() - t0)
   if not ok then
     error(debug.traceback(lv.job, result))
   end
   if coroutine.status(lv.job) == "dead" then
-    lv.job, lv.info = nil, result
-    world.platforms = world.platforms or {}
-    for _, p in ipairs(result.arena and result.arena.platforms or {}) do
-      world.platforms[#world.platforms + 1] = p
-    end
-    for _, p in ipairs(result.platforms or {}) do
-      world.platforms[#world.platforms + 1] = p
-    end
+    finishLevel(i, result, lv.spent)
   end
 end
 
@@ -980,11 +1069,9 @@ end
 -- An area that waits to be opened (the Undercroft, until the Sunken Key has turned): nothing builds it
 local dormant
 function dormant(lv)
-  if lv.seal then
-    return not require("src.meta").undercroftOpen()
-  end
-  local parent = lv.parent and not lv.entry and levels[lv.parent]
-  return parent and dormant(parent) or false
+  -- (nothing waits any more: the Undercroft is built with the other areas and is closed off by bedrock until the Sunken
+  -- Key has turned, so there is no build to wait through when it opens)
+  return false
 end
 
 local function nextUnfinished()
@@ -1011,25 +1098,33 @@ end
 -- entrance). Returns the area to work on now (its parent first, when the
 -- parent is missing too).
 local function needed(py, px, reach)
+  local best, bestGap
   for i, lv in ipairs(levels) do
     if not lv.info and not dormant(lv) then
-      local close
+      local close, gap
       if lv.entry then
         local ey = lv.entry.y or lv.y0
-        close = px and math.abs(px - lv.entry.x) < reach and py > ey - 400 and py < lv.y1
+        gap = px and math.abs(px - lv.entry.x) or 0
+        close = px and gap < reach and py > ey - 400 and py < lv.y1
       else
+        gap = math.max(0, lv.y0 - py)
         close = py > lv.y0 - reach and py < lv.y1 and (not px or (px > lv.x0 - reach and px < lv.x1 + reach))
       end
-      if close then
-        local j = i
-        while j > 1 and not levels[j].entry and levels[levels[j].parent or (j - 1)] and not levels[levels[j].parent or (j - 1)].info do
-          j = levels[j].parent or (j - 1)
-        end
-        return j
+      -- (the one he is nearest to comes first, not the first in the list: the next area down is far under him
+      -- when he is at the surface heading for a side branch)
+      if close and (not bestGap or gap < bestGap) then
+        best, bestGap = i, gap
       end
     end
   end
-  return nil
+  if not best then
+    return nil
+  end
+  local j = best
+  while j > 1 and not levels[j].entry and levels[levels[j].parent or (j - 1)] and not levels[levels[j].parent or (j - 1)].info do
+    j = levels[j].parent or (j - 1)
+  end
+  return j, bestGap, best
 end
 
 -- Spends up to budget seconds on generation; call once per frame.
@@ -1043,28 +1138,44 @@ end
 -- frame isn't made longer: building every area at a fixed few milliseconds a
 -- frame was most of the lag in a fight. Only an area he is about to reach
 -- gets time whether or not there is any to spare.
+-- How he is assumed to travel when working out how soon an area is needed: px per second toward a side branch's
+-- entrance along the surface, and down through the areas (a long way round by the shops' hatches)
+local ENTRY_SPEED, STACK_SPEED = 220, 320
+
 function catacombs.step(budget, px, py, spare)
   local i
   if py then
-    i = needed(py, px, 3500)
+    local gap, best
+    i, gap, best = needed(py, px, 4500)
     local least = 0.00075 -- (always a little, so a frame that is busy on its own still gets the areas built)
     if levels[1] and not levels[1].info then
       -- The first area is where every run goes first: it is built at a steady pace from the moment the run
       -- begins (a good slice of every frame, more as the hunter nears the shaft), so it is standing before he
       -- gets there, not built on the spot when he steps in
       i = 1
-      least = needed(py, px, 700) and 0.008 or 0.004
+      least = needed(py, px, 700) and 0.008 or 0.0045
     elseif not i then
       i = nextUnfinished()
-      if i and levels[i].entry and py < firstArea.y0 and not catacombs.levelAt(py, px) then -- (not while inside one of them)
-        least = 0.007 -- (an area entered from the surface, with the hunter still up there: a fair share of each frame)
+      if i and not levels[i].remote and genworker.available() and love.timer.getTime() - lastBuilt < BACKGROUND_GAP then
+        -- (nothing is needed yet: on a worker the areas are built at full speed, so the spare ones are spaced out, not all
+        -- at once at the start of a run)
+        pumpRemote(0)
+        return
       end
-    elseif needed(py, px, 700) then
-      least = 0.006
-    elseif needed(py, px, 1400) then
-      least = 0.003
+      if i and levels[i].entry and py < firstArea.y0 and not catacombs.levelAt(py, px) then -- (not while inside one of them)
+        least = 0.0025 -- (an area entered from the surface, with the hunter still up there: a small share of each frame)
+      end
+    else
+      -- An area is coming up: its share of the frame is what finishes it (the estimate of what is left of it, by
+      -- the time per pixel the last one took) in the time he needs to get there, ENSURE_NEAR short of it
+      local lv = levels[best or i]
+      local pixels = (lv.x1 - lv.x0 + 1) * (lv.y1 - lv.y0 + 1)
+      local remaining = math.max(0.15, buildRate * pixels - (levels[i].spent or 0))
+      local seconds = math.max(0.75, (gap - 450) / (lv.entry and ENTRY_SPEED or STACK_SPEED))
+      local dt = math.min(0.05, love.timer.getDelta())
+      least = math.max(least, math.min(0.012, remaining * dt / seconds))
     end
-    budget = math.min(0.012, math.max(spare or budget, least))
+    budget = math.min(0.014, math.max(spare or budget, least))
     if budget < 0.0005 then
       return
     end
@@ -1072,7 +1183,9 @@ function catacombs.step(budget, px, py, spare)
     i = nextUnfinished()
   end
   if i then
-    resume(i, budget)
+    resume(i, budget, true)
+  elseif genworker.busy() then
+    pumpRemote(0)
   end
 end
 
@@ -1506,11 +1619,15 @@ local supportTimer = 0
 function catacombs.update(player, dt)
   catacombs.spawnProps()
   updateBossCamera(player, dt)
-  fluids.update(dt, player, enemies)
+  if not require("src.perf").off.fluids then -- (a dev panel switch: water and gas stand still while it is off)
+    fluids.update(dt, player, enemies)
+  end
   propTimer = propTimer - dt
   if propTimer <= 0 then
     propTimer = 0.3
-    fluids.updateProps(props)
+    if not require("src.perf").off.fluids then
+      fluids.updateProps(props)
+    end
   end
   local px, py = player:center()
   local at = catacombs.levelAt(py, px)
@@ -2320,8 +2437,10 @@ local function drawHatchShafts(view)
 end
 
 function catacombs.drawDecor(view)
+  local perf = require("src.perf")
   fluids.drawDecor(view)
   drawHatchShafts(view)
+  perf.lap("decor: vents, hatch shafts")
   for _, lv in ipairs(levels) do
     local info = inArea(lv, view) and lv.info
     if info then
@@ -2418,6 +2537,7 @@ function catacombs.drawDecor(view)
       end
     end
   end
+  perf.lap("decor: area scenery (glows, mine, story, shops, slabs)")
 end
 
 function catacombs.drawEmissive(view)

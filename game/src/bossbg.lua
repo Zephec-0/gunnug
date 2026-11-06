@@ -65,14 +65,13 @@ local function disc(c, a, x, y, r)
   love.graphics.circle("fill", math.floor(x), math.floor(y), r, 14)
 end
 
+local POLY_PTS = {} -- (the points of the polygon being added: kept, not made afresh each time)
 local function poly(c, a, ...)
-  flush()
-  love.graphics.setColor(c[1], c[2], c[3], a)
-  local pts = { ... }
-  for k = 1, #pts do
-    pts[k] = math.floor(pts[k] + 0.5)
+  local n = select("#", ...)
+  for k = 1, n do
+    POLY_PTS[k] = floor(select(k, ...) + 0.5)
   end
-  love.graphics.polygon("fill", pts)
+  quads.poly(c[1], c[2], c[3], a, POLY_PTS, n / 2) -- (into the batch, with the rectangles)
 end
 
 -- Calls fn(i, j, x, y) for every cell of a layer that parallaxes at p, covering the view
@@ -92,6 +91,23 @@ local function columns(p, cw, camX, vx0, vx1, fn)
   for i = math.floor((vx0 - ox) / cw) - 1, math.floor((vx1 - ox) / cw) + 1 do
     fn(i, math.floor(i * cw + ox))
   end
+end
+
+-- The layers that slide rigidly are drawn through the baked-layer cache (see src.parallax): their picture is
+-- made in layer space (the camera at 0) into a canvas, kept, and put on the screen with one draw. anim: it has
+-- something moving in it (the canvas is made again a dozen times a second); py 1: the layer stays at its height in the world.
+local parallax = require("src.parallax")
+local function paintCells(x0, y0, x1, y1, p, cw, ch, fn)
+  cells(p, cw, ch, 0, 0, x0, y0, x1, y1, fn)
+end
+local function paintColumns(x0, y0, x1, y1, p, cw, fn)
+  columns(p, cw, 0, x0, x1, fn)
+end
+local function bakedCells(key, anim, p, cw, ch, camX, camY, vx0, vy0, vx1, vy1, t, fn)
+  parallax.baked(key, false, anim, p, p, camX, camY, vx0, vy0, vx1, vy1, t, paintCells, p, cw, ch, fn)
+end
+local function bakedColumns(key, anim, p, cw, camX, camY, vx0, vy0, vx1, vy1, t, fn)
+  parallax.baked(key, false, anim, p, 1, camX, camY, vx0, vy0, vx1, vy1, t, paintColumns, p, cw, fn)
 end
 
 -- A rock spire of stacked rows, tapering from its base at (x, y): dir 1 hangs it down from y,
@@ -249,7 +265,7 @@ local FAR, MID, NEAR = { 0.024, 0.05, 0.085 }, { 0.04, 0.078, 0.13 }, { 0.02, 0.
 
 local function deepStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
   -- The far walls: broad, jagged masses of rock, the faintest
-  cells(0.1, 240, 380, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
+  bakedCells("deep.far", false, 0.1, 240, 380, camX, camY, vx0, vy0, vx1, vy1, t, function(i, j, x, y)
     if hash(i, j + 200) < 0.2 then
       return
     end
@@ -266,7 +282,7 @@ local function deepStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
   end)
   drawStalk(camX, camY, t)
   -- Stalactites and stalagmites, the middle distance
-  cells(0.24, 150, 330, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
+  bakedCells("deep.mid", false, 0.24, 150, 330, camX, camY, vx0, vy0, vx1, vy1, t, function(i, j, x, y)
     if hash(i, j + 210) > 0.25 then
       local len = 70 + math.floor(hash(i, j + 211) * 130)
       local w = 24 + math.floor(hash(i, j + 212) * 30)
@@ -279,7 +295,7 @@ local function deepStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
     end
   end)
   -- Nearer spires, darker
-  cells(0.42, 110, 250, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
+  bakedCells("deep.near", false, 0.42, 110, 250, camX, camY, vx0, vy0, vx1, vy1, t, function(i, j, x, y)
     if hash(i, j + 230) < 0.45 then
       return
     end
@@ -290,7 +306,7 @@ local function deepStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
     spire(bx, up and (y + 250) or y, len, w, up and -1 or 1, NEAR, { 0.07, 0.16, 0.26 }, 0.95, (hash(i, j + 235) - 0.5) * 8)
   end)
   -- Marine snow, drifting down
-  cells(0.55, 70, 90, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
+  bakedCells("deep.snow", true, 0.55, 70, 90, camX, camY, vx0, vy0, vx1, vy1, t, function(i, j, x, y)
     if hash(i, j + 250) < 0.4 then
       return
     end
@@ -527,7 +543,7 @@ end
 
 -- Calls fn(x, y, r, id, onMound) for every pustule: on the faces of the pillars and sitting on
 -- the mould mounds along the ground
-local function eachPustule(camX, vx0, vx1, y0, y1, fn)
+local function eachPillarPustule(camX, vx0, vx1, y0, y1, fn)
   columns(0.22, 170, camX, vx0, vx1, function(i, x)
     local off, w, top = pillarOf(i, y0, y1)
     if off and hash(i, 430) > 0.35 then
@@ -535,6 +551,9 @@ local function eachPustule(camX, vx0, vx1, y0, y1, fn)
       fn(x + off + w * 0.5 + (hash(i, 432) - 0.5) * w, py, 4 + math.floor(hash(i, 433) * 4), i, false)
     end
   end)
+end
+
+local function eachMoundPustule(camX, vx0, vx1, y0, y1, fn)
   columns(0.6, 120, camX, vx0, vx1, function(i, x)
     if hash(i, 470) > 0.4 then
       local mh = 10 + hash(i, 471) * 12
@@ -544,6 +563,19 @@ local function eachPustule(camX, vx0, vx1, y0, y1, fn)
       end
     end
   end)
+end
+
+local function eachPustule(camX, vx0, vx1, y0, y1, fn)
+  eachPillarPustule(camX, vx0, vx1, y0, y1, fn)
+  eachMoundPustule(camX, vx0, vx1, y0, y1, fn)
+end
+
+-- (for the baked layers: the same, in layer space)
+local function paintPillarPustules(x0, y0, x1, y1, ay0, ay1, fn)
+  eachPillarPustule(0, x0, x1, ay0, ay1, fn)
+end
+local function paintMoundPustules(x0, y0, x1, y1, ay0, ay1, fn)
+  eachMoundPustule(0, x0, x1, ay0, ay1, fn)
 end
 
 local function drawPustule(x, y, r, id, t)
@@ -562,7 +594,7 @@ end
 local function acidStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
   local y0, y1 = bounds(vy0, vy1)
   -- The pillars, ceiling to floor (or broken off short, standing on the floor)
-  columns(0.22, 170, camX, vx0, vx1, function(i, x)
+  bakedColumns("acid.pillars", false, 0.22, 170, camX, camY, vx0, vy0, vx1, vy1, t, function(i, x)
     local off, w, top, full = pillarOf(i, y0, y1)
     if not off then
       return
@@ -588,7 +620,7 @@ local function acidStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
   -- The ceiling and the stalactites hanging from it, slimed and dripping
   rect(BCOL_22, 0.97, vx0, y0, vx1 - vx0, 10)
   rect(BCOL_23, 0.5, vx0, y0 + 10, vx1 - vx0, 1)
-  columns(0.5, 100, camX, vx0, vx1, function(i, x)
+  bakedColumns("acid.stalactites", true, 0.5, 100, camX, camY, vx0, vy0, vx1, vy1, t, function(i, x)
     if hash(i, 450) < 0.5 then
       return
     end
@@ -604,7 +636,7 @@ local function acidStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
     end
   end)
   -- Mould mounds along the ground, crusted with blocks of mould
-  columns(0.6, 120, camX, vx0, vx1, function(i, x)
+  bakedColumns("acid.mounds", false, 0.6, 120, camX, camY, vx0, vy0, vx1, vy1, t, function(i, x)
     if hash(i, 470) <= 0.4 then
       return
     end
@@ -619,15 +651,16 @@ local function acidStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
     end
   end)
   -- Mould patches round the pustules on the pillars
-  eachPustule(camX, vx0, vx1, y0, y1, function(x, y, r, id, onMound)
-    if not onMound then
-      for k = 1, 6 do
-        local s = 4 + math.floor(hash(id + k, 478) * 5)
-        rect(MOLD_A, 0.85, x + (hash(id + k, 479) - 0.5) * 22, y + (hash(id + k, 480) - 0.5) * 16, s, s - 1)
-      end
+  parallax.baked("acid.patches", false, false, 0.22, 1, camX, camY, vx0, vy0, vx1, vy1, t, paintPillarPustules, y0, y1, function(x, y, r, id)
+    for k = 1, 6 do
+      local s = 4 + math.floor(hash(id + k, 478) * 5)
+      rect(MOLD_A, 0.85, x + (hash(id + k, 479) - 0.5) * 22, y + (hash(id + k, 480) - 0.5) * 16, s, s - 1)
     end
   end)
-  eachPustule(camX, vx0, vx1, y0, y1, function(x, y, r, id)
+  parallax.baked("acid.pustules.pillars", false, true, 0.22, 1, camX, camY, vx0, vy0, vx1, vy1, t, paintPillarPustules, y0, y1, function(x, y, r, id)
+    drawPustule(x, y, r, id, t)
+  end)
+  parallax.baked("acid.pustules.mounds", false, true, 0.6, 1, camX, camY, vx0, vy0, vx1, vy1, t, paintMoundPustules, y0, y1, function(x, y, r, id)
     drawPustule(x, y, r, id, t)
   end)
   -- The pool along the ground: one soft layer of acid, thickest at the floor, a faint chop on top
@@ -649,7 +682,7 @@ local function acidStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
     end
   end
   -- Spores rising off the acid
-  cells(0.68, 90, 170, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
+  bakedCells("acid.spores", true, 0.68, 90, 170, camX, camY, vx0, vy0, vx1, vy1, t, function(i, j, x, y)
     if hash(i, j + 460) < 0.45 then
       return
     end

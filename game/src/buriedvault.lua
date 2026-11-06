@@ -17,7 +17,7 @@ local BLOCK = { x0 = 6780, y0 = 1100, x1 = 7220, y1 = 1440 }
 -- shelf the bulb holds a pool of water that funnels down to a narrow neck, stopped by a plug. Below the plug is a
 -- sphere with the Cork on a tall column; when the third lock is set the plug gives and the water pours down into
 -- the basin round the column's foot (src.relicdoor). Only the neck and the sphere are bedrock, so nothing digs to
--- the Cork or round the plug; ledges up the sphere and the neck are the way back out.
+-- the Cork or round the plug; the ledges up the sphere are one-way slabs, as is the shelf.
 local CX = 7000
 local BULB = { cy = 1190, rx = 60, ry = 42, flat = 1213 } -- (the ellipse down to `flat`, then a funnel)
 local FUNNEL_END, NECK_HW = 1236, 7
@@ -27,7 +27,7 @@ local SHELL_FROM = 1230 -- (the bedrock starts a little above the neck)
 
 buriedvault.info = {
   block = BLOCK,
-  shelf = { x0 = 6936, y0 = 1186, x1 = 7045, y1 = 1189 }, -- (brick, wall to nearly wall: the pool is under it)
+  shelf = { x0 = 6936, y0 = 1186, x1 = 7045, y1 = 1189 }, -- (a one-way slab hovering over the pool, wall to nearly wall)
   locks = { 6982, 7000, 7018 }, -- (x centres of the three locks, standing on the shelf)
   waterLevel = 1195, -- (the pool's surface, just under the shelf)
   plug = { x0 = CX - NECK_HW, y0 = 1240, x1 = CX + NECK_HW, y1 = 1245 },
@@ -35,7 +35,8 @@ buriedvault.info = {
   bounds = { x0 = CX - BULB.rx - 6, y0 = TOP - 6, x1 = CX + BULB.rx + 6, y1 = BOTTOM + 6 },
   -- the Cork rests on a column rising from the sphere's floor, so the water that pours in lies round its foot
   pedestal = { x0 = CX - 5, y0 = 1332, x1 = CX + 5, y1 = BOTTOM + 2 },
-  -- the way out of the sphere: ledges (x0, x1, y) up its wall and the neck, a jump apart
+  -- the way out of the sphere: ledges (x0, x1, y) up its wall and the neck, a jump apart. One-way slabs (world.platforms),
+  -- not terrain: he jumps up through them and lands on top
   ledges = {
     { 7012, 7020, 1320 }, { 6980, 6988, 1308 }, { 7012, 7020, 1296 }, { 6982, 6990, 1284 },
     { 7007, 7014, 1274 }, { 6993, 7000, 1262 }, { 7001, 7007, 1252 },
@@ -96,11 +97,13 @@ function buriedvault.build(world)
       world:fillRect(CX - math.floor(hw), y, CX + math.floor(hw), y, AIR)
     end
   end
-  world:fillRect(i.shelf.x0, i.shelf.y0, i.shelf.x1, i.shelf.y1, BRICK)
   world:fillRect(i.plug.x0, i.plug.y0, i.plug.x1, i.plug.y1, BEDROCK)
   world:fillRect(i.pedestal.x0, i.pedestal.y0, i.pedestal.x1, i.pedestal.y1, BRICK)
+  -- (the shelf and the ledges are one-way platforms, drawn by src.relicdoor)
+  world.platforms = world.platforms or {}
+  world.platforms[#world.platforms + 1] = { x0 = i.shelf.x0, x1 = i.shelf.x1, y = i.shelf.y0 }
   for _, l in ipairs(i.ledges) do
-    world:fillRect(l[1], l[3], l[2], l[3] + 1, BRICK)
+    world.platforms[#world.platforms + 1] = { x0 = l[1], x1 = l[2], y = l[3] }
   end
   require("src.relicdoor").setup(world)
 end

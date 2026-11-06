@@ -2,13 +2,13 @@
 -- hazards (src.fluids) and from a few enemies' attacks (Player:hurt maps the attacker to a condition), last a while,
 -- and play against each other:
 --
---   Soaked    from water, 12 s after leaving it.  Puts out Burning and washes Oiled off; Burning can't take hold
---             while it lasts. But shocks hurt 75% more and stun 50% longer (water carries the current).
---   Oiled     from oil, 30 s (or until washed).  Burning lasts 80% longer and hurts 50% more; the hunter slides
+--   Soaked    from water, 12 s after leaving it, or three rolls (he shakes the water off).  Puts out Burning and washes
+--             Oiled off; Burning can't take hold while it lasts. But shocks hurt 75% more and stun 50% longer.
+--   Oiled     from oil, 15 s (or until washed).  Burning lasts 80% longer and hurts 50% more; the hunter slides
 --             on the ground (a third of the grip). Can't be oiled while swimming.
 --   Burning   from fire, lava, flame attacks, 4 s.  2 damage every half second (3 if Oiled), a little faster on
---             the feet. A roll smothers it 3x as fast; water puts it out. A burning hunter lights any gas or oil he
---             touches.
+--             the feet. Three rolls smother it; water puts it out. He sheds orange sparks and wisps, and lights
+--             any gas or oil he touches.
 --   Poisoned  from gas, acid, spitters, 6 s.  1-3 damage every 0.8 s by its stacks (gas builds them the longer he
 --             breathes it), and a slower walk.
 --   Shocked   from shock rounds in water, lightning, jellyfish, storms, 0.8 s.  Staggers: a fraction of walking
@@ -26,20 +26,20 @@ status.DEFS = {
   soaked = {
     name = "Soaked",
     color = { 0.45, 0.75, 1.0 },
-    desc = "Water running off the hunter. It puts out any fire on him and keeps new fire from taking hold, but it carries a current: shocks hurt a good deal more and stun a good deal longer.",
-    stats = { { "From", "Water" }, { "Lasts", "12 s" }, { "Fire", "Put out" }, { "Shock", "+75%" } },
+    desc = "Water running off the hunter. It puts out any fire on him and keeps new fire from taking hold, but it carries a current: shocks hurt a good deal more and stun a good deal longer. Three rolls shake it off.",
+    stats = { { "From", "Water" }, { "Lasts", "12 s, 3 rolls" }, { "Fire", "Put out" }, { "Shock", "+75%" } },
   },
   oiled = {
     name = "Oiled",
     color = { 0.32, 0.26, 0.40 },
     desc = "A black film of lamp oil. It makes him burn longer and hotter, and his boots slide on it. Water washes it off.",
-    stats = { { "From", "Oil" }, { "Lasts", "30 s" }, { "Fire", "+80% long" }, { "Cure", "Water" } },
+    stats = { { "From", "Oil" }, { "Lasts", "15 s" }, { "Fire", "+80% long" }, { "Cure", "Water" } },
   },
   burning = {
     name = "Burning",
     color = { 1.0, 0.55, 0.15 },
-    desc = "He's on fire. It keeps hurting after he leaves the flames. A roll smothers it, water puts it out, and a burning hunter lights any gas or oil he touches.",
-    stats = { { "From", "Fire, lava" }, { "Lasts", "4 s" }, { "Damage", "2 / 0.5 s" }, { "Cure", "Roll, water" } },
+    desc = "He's on fire. It keeps hurting after he leaves the flames. Three rolls smother it, water puts it out, and a burning hunter lights any gas or oil he touches.",
+    stats = { { "From", "Fire, lava" }, { "Lasts", "4 s, 3 rolls" }, { "Damage", "2 / 0.5 s" }, { "Cure", "Rolls, water" } },
   },
   poisoned = {
     name = "Poisoned",
@@ -74,12 +74,13 @@ local SOURCE = {
   shock = { "shocked", 0.8 },
   arcbeetle = { "shocked", 0.8 },
   torchbearer = { "burning", 3 },
-  tarcrawler = { "oiled", 20 },
+  tarcrawler = { "oiled", 10 },
 }
 
-local DURATION = { soaked = 12, oiled = 30, burning = 4, poisoned = 6, shocked = 0.8 }
+local DURATION = { soaked = 12, oiled = 15, burning = 4, poisoned = 6, shocked = 0.8 }
 
 local BURN_TICK, POISON_TICK = 0.5, 0.8
+local ROLLS_TO_SHAKE = 3 -- rolls that shake off Soaked or put out Burning
 
 function status.reset(player)
   player.status = {}
@@ -143,6 +144,7 @@ function status.apply(p, kind, dur, opts)
     S[kind] = s
   end
   s.t = math.max(s.t, dur)
+  s.rolls = 0 -- (fresh contact: the rolls start again)
   s.max = math.max(s.max, s.t)
   if kind == "poisoned" then
     local want = (opts and opts.stacks) or 1
@@ -235,6 +237,24 @@ function status.update(p, dt)
     end
   end
   local cx, cy = p:center()
+  -- Each roll (counted as it begins) wears Soaked and Burning down: the third shakes the water off or puts the fire out
+  local rolling = p.rollT ~= nil
+  if rolling and not p.statusRolling then
+    for _, kind in ipairs({ "soaked", "burning" }) do
+      local s = S[kind]
+      if s then
+        s.rolls = (s.rolls or 0) + 1
+        if s.rolls >= ROLLS_TO_SHAKE then
+          S[kind] = nil
+          for _ = 1, 6 do
+            local c = kind == "burning" and { 0.55, 0.52, 0.5 } or { 0.6, 0.82, 1 }
+            effects.particle(cx + (love.math.random() - 0.5) * 8, cy + (love.math.random() - 0.5) * 12, (love.math.random() - 0.5) * 40, -10 - love.math.random() * 25, 0.6, c, 20)
+          end
+        end
+      end
+    end
+  end
+  p.statusRolling = rolling
   if S.soaked then
     drip(p, { 0.6, 0.82, 1 }, 5, dt)
   end
@@ -243,15 +263,22 @@ function status.update(p, dt)
   end
   if S.burning then
     local s = S.burning
-    if p.rollT then
-      s.t = s.t - dt * 3 -- (a roll smothers it)
-    end
     s.tick = s.tick + dt
     if s.tick >= BURN_TICK then
       s.tick = s.tick - BURN_TICK
       p:hurtOverTime(S.oiled and 3 or 2, { 1, 0.55, 0.15 }, "fire")
     end
-    drip(p, { 1, 0.5 + love.math.random() * 0.35, 0.12 }, 18, dt, true)
+    -- Wisps and pixels of orange coming off him, rising and fading (no flames drawn on the body)
+    local b = p.body
+    local fade = math.min(1, s.t / 0.8)
+    if love.math.random() < 60 * dt * fade then
+      local pick = love.math.random()
+      local c = pick < 0.5 and { 1.0, 0.50, 0.12 } or (pick < 0.85 and { 1.0, 0.68, 0.22 } or { 0.85, 0.30, 0.08 })
+      effects.particle(b.x + 1 + love.math.random() * (b.w - 2), b.y + 3 + love.math.random() * (b.h - 6), (love.math.random() - 0.5) * 14, -14 - love.math.random() * 26, 0.55 + love.math.random() * 0.5, c, -18, true)
+    end
+    if love.math.random() < 8 * dt * fade then -- (now and then a dark ember of smoke)
+      effects.particle(b.x + b.w / 2 + (love.math.random() - 0.5) * 4, b.y + 1, (love.math.random() - 0.5) * 8, -22 - love.math.random() * 14, 0.9, { 0.25, 0.22, 0.2 }, -8)
+    end
     -- a burning hunter lights what he touches: gas and oil
     s.light = (s.light or 0) - dt
     if s.light <= 0 then

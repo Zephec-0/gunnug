@@ -353,11 +353,73 @@ function World:fillFast(x0, y0, x1, y1, id)
   end
 end
 
+-- The cells of a rectangle (x0, y0, x1, y1: inside the world) as one ByteData, row by row. Used to hand a worker thread
+-- the part of the world its area will touch, and to hand its result back (src.genworker).
+function World:exportRegion(x0, y0, x1, y1)
+  local w, h = x1 - x0 + 1, y1 - y0 + 1
+  local bd = love.data.newByteData(w * h)
+  local out = ffi.cast("uint8_t*", bd:getFFIPointer())
+  for ty = floor((y0 - self.top) / TILE), floor((y1 - self.top) / TILE) do
+    for tx = floor((x0 - self.left) / TILE), floor((x1 - self.left) / TILE) do
+      local t = self.tiles[ty * self.tilesX + tx + 1]
+      local rx0, ry0 = math.max(x0, t.x), math.max(y0, t.y)
+      local rx1, ry1 = math.min(x1, t.x1 - 1), math.min(y1, t.y1 - 1)
+      local n = rx1 - rx0 + 1
+      local c = t.cells
+      for y = ry0, ry1 do
+        local dst = out + ((y - y0) * w + (rx0 - x0))
+        if c then
+          ffi.copy(dst, c + ((y - t.y) * t.w + (rx0 - t.x) + 1), n)
+        else
+          ffi.fill(dst, n, t.uniform)
+        end
+      end
+    end
+  end
+  return bd
+end
+
+-- The other way: puts rows of cells (a ByteData of (x1 - x0 + 1) x (y1 - y0 + 1), as exportRegion makes) into the
+-- rectangle, from row `fromRow` to `toRow` (0-based, within the rectangle). trans: an optional table of 256 ids to
+-- swap each cell's id for.
+function World:importRegion(x0, y0, x1, y1, bd, fromRow, toRow, trans)
+  local w = x1 - x0 + 1
+  local src = ffi.cast("uint8_t*", bd:getFFIPointer())
+  local last = math.min(toRow, y1 - y0)
+  local ya, yb = y0 + (fromRow or 0), y0 + last
+  for ty = floor((ya - self.top) / TILE), floor((yb - self.top) / TILE) do
+    for tx = floor((x0 - self.left) / TILE), floor((x1 - self.left) / TILE) do
+      local t = self.tiles[ty * self.tilesX + tx + 1]
+      local rx0, ry0 = math.max(x0, t.x), math.max(ya, t.y)
+      local rx1, ry1 = math.min(x1, t.x1 - 1), math.min(yb, t.y1 - 1)
+      if rx0 <= rx1 and ry0 <= ry1 then
+        local n = rx1 - rx0 + 1
+        local c = t.cells or allocCells(t)
+        for y = ry0, ry1 do
+          local from = src + ((y - y0) * w + (rx0 - x0))
+          local to = c + ((y - t.y) * t.w + (rx0 - t.x) + 1)
+          if trans then
+            for k = 0, n - 1 do
+              to[k] = trans[from[k]]
+            end
+          else
+            ffi.copy(to, from, n)
+          end
+        end
+      end
+    end
+  end
+end
+
 -- Marks a region as painted on demand: its tiles are painted from the cells
 -- the first time they are drawn or touched, instead of all at once. (A world
 -- several times bigger than a screen would spend seconds painting ground
 -- nobody sees.) Mark after the cells are in place.
 function World:markLazy(x0, y0, x1, y1)
+  local log = self.lazyLog
+  if log then
+    log[#log + 1] = { "mark", x0, y0, x1, y1 }
+  end
   self.lazy[#self.lazy + 1] = { x0, y0, x1, y1 }
 end
 
@@ -403,6 +465,10 @@ end
 -- Takes a region out of the lazy ones: whoever builds it paints it themselves
 -- (an area being generated claims its rectangle first)
 function World:claim(x0, y0, x1, y1)
+  local log = self.lazyLog -- (a world a worker thread builds an area in keeps a log of these, for the main thread to replay)
+  if log then
+    log[#log + 1] = { "claim", x0, y0, x1, y1 }
+  end
   local out = {}
   for _, r in ipairs(self.lazy) do
     if x1 < r[1] or x0 > r[3] or y1 < r[2] or y0 > r[4] then
@@ -863,6 +929,35 @@ function World:repaintRect(x0, y0, x1, y1, tick)
     end
   end
   busy[co] = level - 1
+end
+
+-- The cheap repaint for a freshly generated area: the rectangle is marked lazy again, so each tile is coloured from its
+-- cells the first time it is needed (World:prewarm paints the tiles round the view a little each frame), instead of all of
+-- it at once at the end of the build. Tiles whose picture already exists are repainted now (the part that is already painted).
+function World:repaintDeferred(x0, y0, x1, y1, tick)
+  local log = self.lazyLog
+  if log then
+    log[#log + 1] = { "deferred", x0, y0, x1, y1 }
+  end
+  x0, y0 = math.max(self.left, x0), math.max(self.top, y0)
+  x1, y1 = math.min(self.right - 1, x1), math.min(self.bottom - 1, y1)
+  if x0 > x1 or y0 > y1 then
+    return
+  end
+  for ty = floor((y0 - self.top) / TILE), floor((y1 - self.top) / TILE) do
+    for tx = floor((x0 - self.left) / TILE), floor((x1 - self.left) / TILE) do
+      local tile = self.tiles[ty * self.tilesX + tx + 1]
+      if tile.data then
+        local done = tile.lazyY or tile.y -- (rows above this are painted already: they are done now, the rest later)
+        local ix0, iy0 = math.max(x0, tile.x), math.max(y0, tile.y)
+        local ix1, iy1 = math.min(x1, tile.x1 - 1), math.min(y1, math.min(tile.y1 - 1, done - 1))
+        if ix0 <= ix1 and iy0 <= iy1 then
+          self:repaintRect(ix0, iy0, ix1, iy1, tick)
+        end
+      end
+    end
+  end
+  table.insert(self.lazy, 1, { x0, y0, x1, y1 }) -- (at the front: lazyAt asks about every pixel of a small repaint, and most of them lie in the area just built)
 end
 
 function World:repaintAll(tick)

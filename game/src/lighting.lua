@@ -23,6 +23,7 @@
 -- drawn after all this as "emissive"; src.render then blooms them.
 -- If shaders are unavailable the old unshadowed radial sprites are used.
 local config = require("src.config")
+local perf = require("src.perf")
 
 local lighting = {}
 
@@ -73,6 +74,7 @@ uniform vec2 canvasSize;
 uniform float power;
 uniform float leak;
 uniform float gain;
+uniform float rays; // 0: no shadow rays at all (a dev panel test)
 
 vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
   vec2 p = vPos;
@@ -98,7 +100,7 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
       objectGate = 1.0;
     }
   }
-  if (dist > 6.0 && vFlat < 0.5) {
+  if (dist > 6.0 && vFlat < 0.5 && rays > 0.5) {
     float occ = 0.0;
     // Each pixel starts its ray at a different offset, so the shadow edges
     // come out as fine grain instead of wide bands
@@ -546,6 +548,7 @@ function lighting.render(camX, camY, drawTerrain, drawOccluders)
     end
     love.graphics.pop()
     love.graphics.setShader()
+    perf.lap("lighting: shadow mask (rock, sprites, objects)")
 
     lightShader:send("mask", maskCanvas)
     lightShader:send("canvasSize", { W, H })
@@ -557,17 +560,22 @@ function lighting.render(camX, camY, drawTerrain, drawOccluders)
     lightShader:send("power", 1.7)
     lightShader:send("leak", 0.08)
     lightShader:send("gain", LIGHT_GAIN)
+    lightShader:send("rays", perf.off.rays and 0 or 1)
     drawLights(1, camX, camY, 1, false)
+    perf.lap("lighting: light map (shadow rays)")
     love.graphics.setCanvas(hazeCanvas)
     love.graphics.clear(0, 0, 0, 1)
     lightShader:send("power", 2.4)
     lightShader:send("leak", 0.03)
     lightShader:send("gain", HAZE)
-    drawLights(2, camX, camY, 1.3, true)
+    if not perf.off.haze then
+      drawLights(2, camX, camY, 1.3, true)
+    end
+    perf.lap("lighting: haze pass")
     -- Fog and mist belong to the caves: none on the surface, fading in as the
     -- ambient light darkens on the way down
     local dark = math.max(0, 1 - (ambient[1] + ambient[2] + ambient[3]) / 3 / 0.6)
-    if fogApply and dark > 0 then
+    if fogApply and dark > 0 and not perf.off.fog then
       love.graphics.setBlendMode("replace", "premultiplied")
       love.graphics.setShader(fogGather)
       fogGather:send("mask", maskCanvas)
@@ -605,6 +613,7 @@ function lighting.render(camX, camY, drawTerrain, drawOccluders)
       love.graphics.draw(white, 0, 0, 0, W, H)
     end
     love.graphics.setShader()
+    perf.lap("lighting: cave fog")
   else
     lightShader = nil
     love.graphics.setCanvas(canvas)
@@ -661,7 +670,7 @@ lighting.drift = 0
 -- The terrain shader for this frame's lit pass (nil if unavailable), with the
 -- light map and ambient set. Pass it to World:draw.
 function lighting.terrainShader()
-  if not terrainShader or not lightShader or (lighting.reliefStrength or 0) <= 0 then
+  if not terrainShader or not lightShader or perf.off.relief or (lighting.reliefStrength or 0) <= 0 then
     return nil
   end
   terrainShader:send("light", canvas)
@@ -773,6 +782,7 @@ function lighting.apply(ents)
   love.graphics.origin()
   if lighting.litSprites and ents then
     litPass(ents)
+    perf.lap("lit sprites: copy frame + relief shader")
   end
   love.graphics.setBlendMode("multiply", "premultiplied")
   love.graphics.setColor(1, 1, 1)
@@ -787,6 +797,7 @@ function lighting.apply(ents)
   end
   love.graphics.setShader()
   love.graphics.pop()
+  perf.lap("light map multiply + haze add")
 end
 
 return lighting

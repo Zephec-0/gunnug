@@ -20,25 +20,25 @@ local REACH = 38
 local world
 local set = {} -- recipe index -> true once its item is in
 local open = false
+local corked = false -- the Cork has been lifted from its pedestal (it goes straight into the hunter's bottle: no item)
 
 function relicdoor.clear()
   world = nil
-  set, open = {}, false
+  set, open, corked = {}, false, false
 end
 
 function relicdoor.setup(w)
   world = w
-  set, open = {}, false
+  set, open, corked = {}, false, false
 end
 
--- The Cork on its pedestal, and the pool in the bulb (the pickups and the liquids are made after the world is built)
+-- The pool in the bulb (the liquids are made after the world is built). The Cork itself is no pickup: it stands on its
+-- pedestal as part of the chamber (drawn below) and E takes it into the bottle.
 function relicdoor.populate()
   if not world then
     return
   end
   local i = buriedvault.info
-  local ped = i.pedestal
-  require("src.pickups").dropItem((ped.x0 + ped.x1) / 2, ped.y0 - 6, items.new("sunkenkey"), 0, 0)
   require("src.fluids").fillWater(world, i.bulb.x0 + 1, i.bulb.x1 - 1, i.waterLevel)
 end
 
@@ -111,7 +111,36 @@ local function give()
   end
 end
 
+-- Beside the Cork, with nothing yet in the bottle's neck
+local function nearCork(player)
+  if not world or corked or player.dead or player.inventory.cork then
+    return false
+  end
+  local ped = buriedvault.info.pedestal
+  local px, py = player:center()
+  return math.abs(px - (ped.x0 + ped.x1) / 2) < 26 and py < ped.y0 and py > ped.y0 - 34
+end
+
+-- The Cork goes into the hunter's bottle (src.hud draws it in the neck, src.deepseal spends it at the sealed floor)
+local function takeCork(player)
+  corked = true
+  player.inventory.cork = true
+  local ped = buriedvault.info.pedestal
+  local cx = (ped.x0 + ped.x1) / 2
+  audio.play("buy")
+  effects.ring(cx, ped.y0 - 6, 30, { 0.85, 0.7, 0.35 })
+  for _ = 1, 24 do
+    effects.particle(cx + (love.math.random() - 0.5) * 8, ped.y0 - 8, (love.math.random() - 0.5) * 50, -10 - love.math.random() * 50, 0.9, { 0.55, 0.7, 1 }, -20, true)
+  end
+  local px, py = player:center()
+  effects.popup(px, py - 18, "The Cork of Lerna seals your bottle", { 0.9, 0.78, 0.45 })
+end
+
 function relicdoor.interact(player)
+  if nearCork(player) then
+    takeCork(player)
+    return true
+  end
   if not near(player) then
     return false
   end
@@ -160,6 +189,17 @@ function relicdoor.draw(view)
     return
   end
   local sh = buriedvault.info.shelf
+  -- the shelf: a slab of old stone hovering over the pool, and the ledges up the sphere (all pass-through)
+  local function slab(x0, x1, y, thick)
+    R({ 0.10, 0.10, 0.14 }, 1, x0 - 1, y, x1 - x0 + 3, thick)
+    R({ 0.26, 0.27, 0.34 }, 1, x0, y + 1, x1 - x0 + 1, thick - 1)
+    R({ 0.46, 0.47, 0.56 }, 1, x0, y, x1 - x0 + 1, 1)
+    R({ 0.16, 0.17, 0.22 }, 1, x0 + 1, y + thick - 1, x1 - x0 - 1, 1)
+  end
+  slab(sh.x0, sh.x1, sh.y0, 4)
+  for _, l in ipairs(buriedvault.info.ledges) do
+    slab(l[1], l[2], l[3], 3)
+  end
   for i = 1, #relicdoor.RECIPE do
     local x, y = lockX(i) - 4, sh.y0 - 12
     R({ 0.12, 0.12, 0.16 }, 1, x - 1, y, 10, 12)
@@ -171,6 +211,15 @@ function relicdoor.draw(view)
     if set[i] then
       R(GOLD_SOCKET, 1, sx + 1, sy + 1, SW - 2, SH - 1)
     end
+  end
+  if not corked then
+    -- the Cork on its column: a rough grey stone with blue runes
+    local ped = buriedvault.info.pedestal
+    local cx, y = math.floor((ped.x0 + ped.x1) / 2), ped.y0
+    R({ 0.14, 0.15, 0.20 }, 1, cx - 4, y - 8, 9, 8)
+    R({ 0.36, 0.37, 0.45 }, 1, cx - 3, y - 7, 7, 7)
+    R({ 0.52, 0.54, 0.62 }, 1, cx - 3, y - 7, 7, 1)
+    R({ 0.22, 0.23, 0.30 }, 1, cx + 1, y - 6, 2, 6)
   end
   if not open then
     -- the plug in the neck: a stone stopper with a rune that fills with gold as the locks are set
@@ -195,6 +244,21 @@ function relicdoor.drawEmissive(view)
     return
   end
   local t = love.timer.getTime()
+  if not corked then
+    local ped = buriedvault.info.pedestal
+    local cx, y = math.floor((ped.x0 + ped.x1) / 2), ped.y0
+    local pulse = 0.5 + 0.5 * math.sin(t * 2.6)
+    R({ 0.45, 0.65, 1.0 }, 0.10 + 0.07 * pulse, cx - 8, y - 12, 17, 14)
+    R({ 0.55, 0.75, 1.0 }, 0.6 + 0.3 * pulse, cx - 2, y - 6, 1, 3)
+    R({ 0.55, 0.75, 1.0 }, 0.6 + 0.3 * pulse, cx + 1, y - 5, 1, 2)
+  end
+  do -- (a faint light under the hovering shelf, rippling on the water)
+    local sh = buriedvault.info.shelf
+    for x = sh.x0 + 4, sh.x1 - 4, 6 do
+      local f = 0.5 + 0.5 * math.sin(t * 1.6 + x * 0.3)
+      R({ 0.45, 0.65, 1.0 }, 0.04 + 0.05 * f, x, sh.y1 + 1, 4, 1 + (x % 3 == 0 and 1 or 0))
+    end
+  end
   for i = 1, #relicdoor.RECIPE do
     local sx, y = lockX(i) - SW / 2, socketY(i)
     local pulse = 0.5 + 0.5 * math.sin(t * 2.2 + i * 1.7)
@@ -212,6 +276,10 @@ end
 function relicdoor.addLights(lighting, view)
   if not world or not inView(view, 120) then
     return
+  end
+  if not corked then
+    local ped = buriedvault.info.pedestal
+    lighting.add((ped.x0 + ped.x1) / 2, ped.y0 - 5, 44, 0.45, 0.65, 1.0, 0.6)
   end
   for i = 1, #relicdoor.RECIPE do
     if set[i] then
@@ -255,24 +323,31 @@ function relicdoor.drawScreen(toScreen, font, player)
     local pad = math.max(3, (y1 - y0) * 0.4)
     local over = mx >= x0 - pad and mx <= x1 + pad and my >= y0 - pad and my <= y1 + pad
     local f = hoverT[i] or 0
-    f = math.max(0, math.min(1, f + (over and 1 or -1) * dt / 0.18))
+    -- (slow in, slower out)
+    f = math.max(0, math.min(1, f + (over and dt / 0.4 or -dt / 0.75)))
     hoverT[i] = f
     if f > 0.01 then
       local def = items.defs[id]
       local img = require("src.icons").get({ id = id, color = def.color })
       if img then
-        local scale = math.max(1, math.floor((y1 - y0) * 1.5 / 8 + 0.5))
+        -- floats up from the socket and settles above it: a bigger picture, no box round it
+        local ease = f * f * (3 - 2 * f)
+        local scale = math.max(2, math.floor((y1 - y0) * 2.6 / 8 + 0.5))
         local w = 8 * scale
-        local ix, iy = math.floor(x0 - w - pad * 2), math.floor((y0 + y1) / 2 - w / 2)
-        love.graphics.setColor(0.04, 0.04, 0.07, 0.8 * f)
-        love.graphics.rectangle("fill", ix - 3, iy - 3, w + 6, w + 6)
-        love.graphics.setColor(0.45, 0.46, 0.52, 0.8 * f)
-        love.graphics.rectangle("line", ix - 3, iy - 3, w + 6, w + 6)
-        local g = set[i] and 0.9 or 0.38
-        love.graphics.setColor(g, g, g * 1.05, (set[i] and 1 or 0.7) * f)
+        local ix = math.floor((x0 + x1) / 2 - w / 2)
+        local iy = math.floor(y0 - w - pad * 1.5 - (1 - ease) * -8)
+        local g = set[i] and 0.9 or 0.45
+        love.graphics.setColor(0, 0, 0, 0.5 * ease)
+        love.graphics.draw(img, ix + 2, iy + 2, 0, scale, scale)
+        love.graphics.setColor(g, g, g * 1.05, (set[i] and 1 or 0.8) * ease)
         love.graphics.draw(img, ix, iy, 0, scale, scale)
       end
     end
+  end
+  if nearCork(player) then
+    local ped = buriedvault.info.pedestal
+    prompt(font, toScreen, (ped.x0 + ped.x1) / 2, ped.y0 - 14, { { "[" .. input.label("interact") .. "] ", { 1, 0.88, 0.6 } }, { "Cork of Lerna", { 0.7, 0.82, 1 } } })
+    return
   end
   if not near(player) then
     return

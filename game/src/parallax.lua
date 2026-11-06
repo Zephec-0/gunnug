@@ -75,6 +75,117 @@ local function cells(p, cw, ch, camX, camY, vx0, vy0, vx1, vy1, fn)
   end
 end
 
+-- Baked layers ---------------------------------------------------------------
+-- Most of a style's layers are rigid: the whole layer shifts by floor(camera * (1 - p)), so what it draws,
+-- worked out in "layer space" (the camera at 0), is the same picture every frame. A layer is drawn into a
+-- canvas a little bigger than the view, kept, and put on the screen with one draw at the layer's shift, and
+-- drawn into again only when the view has left the canvas or (for a layer with something moving in it:
+-- sway, pulse, drifting spores) when its animation has moved on a tick (BAKE_HZ a second, each layer on its
+-- own beat so they do not all fall in one frame). Thousands of rectangles a frame, worked out in Lua, become
+-- a few draws. The layers are drawn into the canvas with the ordinary alpha blend and put over the scene
+-- as premultiplied alpha, which gives the same result as drawing the rectangles straight onto it.
+-- (src.perf switch "baked": off draws every layer the old way, every frame.)
+local perf = require("src.perf")
+local BAKE_MARGIN, BAKE_HZ = 48, 12
+local BAKE_CAP = 28 -- layers kept; the least recently drawn go
+local layerCache, layerCount, layerSerial = {}, 0, 0
+local viewQuad
+local BT = 0 -- the time the layer being drawn into its canvas is for
+local ceil = math.ceil
+
+-- Draws one layer: paint(x0, y0, x1, y1, a, b, c, d) puts it in layer space (rectangles via rect) for the box
+-- given. key names the layer, ckey what else its picture depends on (the area's colours; false if nothing);
+-- anim: it has something moving in it; px, py: how it parallaxes (the layer shifts by camera * (1 - p)).
+local function baked(key, ckey, anim, px, py, camX, camY, vx0, vy0, vx1, vy1, t, paint, a, b, c, d)
+  if perf.off.baked then
+    -- (the old way: straight onto the scene, in world coordinates, every frame)
+    local ox, oy = floor(camX * (1 - px)), floor(camY * (1 - py))
+    love.graphics.push()
+    love.graphics.translate(ox, oy)
+    BT = t
+    paint(vx0 - ox, vy0 - oy, vx1 - ox, vy1 - oy, a, b, c, d)
+    flush()
+    love.graphics.pop()
+    return
+  end
+  local ox, oy = floor(camX * (1 - px)), floor(camY * (1 - py))
+  local lx0, ly0, lx1, ly1 = floor(vx0 - ox), floor(vy0 - oy), ceil(vx1 - ox), ceil(vy1 - oy)
+  local byKey = layerCache[key]
+  if not byKey then
+    byKey = {}
+    layerCache[key] = byKey
+  end
+  local ck = ckey or false
+  local e = byKey[ck]
+  if not e then
+    layerSerial = layerSerial + 1
+    e = { phase = (layerSerial * 0.6180339) % 1, tick = -1, bx0 = 0, by0 = 0, bw = 0, bh = 0 }
+    byKey[ck] = e
+    layerCount = layerCount + 1
+    if layerCount > BAKE_CAP then
+      local oldest, oldestT, oldestKey, oldestCk = nil, math.huge, nil, nil
+      for k2, group in pairs(layerCache) do
+        for ck2, e2 in pairs(group) do
+          if e2 ~= e and e2.used < oldestT then
+            oldest, oldestT, oldestKey, oldestCk = e2, e2.used, k2, ck2
+          end
+        end
+      end
+      if oldest then
+        layerCache[oldestKey][oldestCk] = nil
+        layerCount = layerCount - 1
+      end
+    end
+  end
+  e.used = t
+  local tick = anim and floor(t * BAKE_HZ + e.phase) or 0
+  if not e.canvas or tick ~= e.tick or lx0 < e.bx0 or ly0 < e.by0 or lx1 > e.bx0 + e.bw or ly1 > e.by0 + e.bh then
+    local bx0, by0 = lx0 - BAKE_MARGIN, ly0 - BAKE_MARGIN
+    local w, h = lx1 - lx0 + 2 * BAKE_MARGIN, ly1 - ly0 + 2 * BAKE_MARGIN
+    if not e.canvas or e.cw < w or e.ch < h then
+      e.cw, e.ch = ceil(w / 64) * 64, ceil(h / 64) * 64 -- (rounded up: the size of a view clipped by a neighbour's border changes by a few pixels a frame)
+      e.canvas = love.graphics.newCanvas(e.cw, e.ch)
+      e.canvas:setFilter("nearest", "nearest")
+    end
+    e.bx0, e.by0, e.bw, e.bh, e.tick = bx0, by0, e.cw, e.ch, tick
+    flush()
+    local sx, sy, sw, sh = love.graphics.getScissor()
+    love.graphics.push("all")
+    love.graphics.origin()
+    love.graphics.setScissor()
+    love.graphics.setShader()
+    love.graphics.setCanvas(e.canvas)
+    love.graphics.clear(0, 0, 0, 0)
+    love.graphics.setBlendMode("alpha")
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.translate(-bx0, -by0)
+    BT = t
+    paint(bx0, by0, bx0 + e.cw, by0 + e.ch, a, b, c, d)
+    flush()
+    love.graphics.pop()
+    love.graphics.setScissor(sx, sy, sw, sh)
+  end
+  flush()
+  viewQuad = viewQuad or love.graphics.newQuad(0, 0, 1, 1, 1, 1)
+  viewQuad:setViewport(lx0 - e.bx0, ly0 - e.by0, lx1 - lx0, ly1 - ly0, e.cw, e.ch)
+  local mode, alphamode = love.graphics.getBlendMode()
+  local cr, cg, cb, ca = love.graphics.getColor()
+  love.graphics.setBlendMode("alpha", "premultiplied")
+  love.graphics.setColor(1, 1, 1, 1)
+  love.graphics.draw(e.canvas, viewQuad, lx0 + ox, ly0 + oy)
+  love.graphics.setBlendMode(mode, alphamode)
+  love.graphics.setColor(cr, cg, cb, ca)
+end
+
+local function paintCells(x0, y0, x1, y1, p, cw, ch, fn)
+  cells(p, cw, ch, 0, 0, x0, y0, x1, y1, fn)
+end
+
+-- A layer of cells (see cells): fn(i, j, x, y) draws one, in layer space
+local function bakedCells(key, anim, p, cw, ch, camX, camY, vx0, vy0, vx1, vy1, t, fn)
+  baked(key, false, anim, p, p, camX, camY, vx0, vy0, vx1, vy1, t, paintCells, p, cw, ch, fn)
+end
+
 -- Style 1: the old mine ------------------------------------------------------
 
 -- The lanterns hung from the standing timber frames: fn(x, y, flicker), (x, y) the top of the bulb.
@@ -91,204 +202,237 @@ local function mineLanterns(camX, camY, vx0, vy0, vx1, vy1, t, fn)
   end)
 end
 
-local function mineStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
+local function minePillars(x0, y0, x1, y1, colors)
   -- Far rock pillars
-  local p, spacing = 0.55, 74
-  local off = camX * (1 - p)
-  for i = math.floor((vx0 - off) / spacing) - 1, math.floor((vx1 - off) / spacing) + 1 do
-    local w = 10 + math.floor(hash(i, 1) * 14)
-    local x = math.floor(i * spacing + off + hash(i, 8) * spacing * 0.6)
-    rect(colors[1], 0.5, x, vy0, w, vy1 - vy0)
-    rect(colors[2], 0.4, x, vy0, 1, vy1 - vy0)
+  local spacing = 74
+  for i = floor(x0 / spacing) - 1, floor(x1 / spacing) + 1 do
+    local w = 10 + floor(hash(i, 1) * 14)
+    local x = floor(i * spacing + hash(i, 8) * spacing * 0.6)
+    rect(colors[1], 0.5, x, y0, w, y1 - y0)
+    rect(colors[2], 0.4, x, y0, 1, y1 - y0)
   end
-  -- Timber frames of old shoring
-  cells(0.78, 104, 168, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
-    if hash(i, j) < 0.25 then
-      return
+end
+
+-- Timber frames of old shoring
+local function mineTimber(i, j, x, y)
+  if hash(i, j) < 0.25 then
+    return
+  end
+  local fx = x + floor(hash(i + 3, j) * 60)
+  local fy = y + floor(hash(i, j + 5) * 60)
+  local gap = 22 + floor(hash(i, j + 9) * 10)
+  local h = 70 + floor(hash(i + 7, j) * 40)
+  local wood, lit = { 0.24, 0.16, 0.10 }, { 0.38, 0.26, 0.14 }
+  local broken = hash(i + 11, j + 2) < 0.35
+  rect(wood, 0.8, fx, fy, 3, h)
+  rect(lit, 0.6, fx, fy, 1, h)
+  if broken then
+    rect(wood, 0.8, fx + gap, fy + h * 0.45, 3, h * 0.55) -- a snapped post
+    rect(wood, 0.75, fx - 2, fy, gap * 0.7, 3)
+    for k = 0, 8 do
+      rect(wood, 0.75, fx + gap * 0.7 + k, fy + k * 2, 2, 3) -- the beam, hanging
     end
-    local fx = x + math.floor(hash(i + 3, j) * 60)
-    local fy = y + math.floor(hash(i, j + 5) * 60)
-    local gap = 22 + math.floor(hash(i, j + 9) * 10)
-    local h = 70 + math.floor(hash(i + 7, j) * 40)
-    local wood, lit = { 0.24, 0.16, 0.10 }, { 0.38, 0.26, 0.14 }
-    local broken = hash(i + 11, j + 2) < 0.35
-    rect(wood, 0.8, fx, fy, 3, h)
-    rect(lit, 0.6, fx, fy, 1, h)
-    if broken then
-      rect(wood, 0.8, fx + gap, fy + h * 0.45, 3, h * 0.55) -- a snapped post
-      rect(wood, 0.75, fx - 2, fy, gap * 0.7, 3)
-      for k = 0, 8 do
-        rect(wood, 0.75, fx + gap * 0.7 + k, fy + k * 2, 2, 3) -- the beam, hanging
-      end
-    else
-      rect(wood, 0.8, fx + gap, fy, 3, h)
-      rect(lit, 0.6, fx + gap, fy, 1, h)
-      rect(wood, 0.8, fx - 4, fy, gap + 11, 3)
-      rect(lit, 0.6, fx - 4, fy, gap + 11, 1)
-      for k = 0, 6 do
-        rect(wood, 0.7, fx + 3 + k, fy + 3 + k, 1, 1)
-        rect(wood, 0.7, fx + gap - 1 - k, fy + 3 + k, 1, 1)
-      end
-      -- A lantern hung from the beam: its chain and cage here, its flame and glow in parallax.drawLanternGlow
-      if hash(i, j + 17) < 0.5 then
-        rect(PCOL_1, 0.6, fx + gap / 2, fy + 3, 1, 5)
-        rect(PCOL_1, 0.9, fx + gap / 2 - 1, fy + 8, 3, 1)
-        rect(PCOL_1, 0.9, fx + gap / 2 - 1, fy + 11, 3, 1)
-      end
+  else
+    rect(wood, 0.8, fx + gap, fy, 3, h)
+    rect(lit, 0.6, fx + gap, fy, 1, h)
+    rect(wood, 0.8, fx - 4, fy, gap + 11, 3)
+    rect(lit, 0.6, fx - 4, fy, gap + 11, 1)
+    for k = 0, 6 do
+      rect(wood, 0.7, fx + 3 + k, fy + 3 + k, 1, 1)
+      rect(wood, 0.7, fx + gap - 1 - k, fy + 3 + k, 1, 1)
     end
-  end)
+    -- A lantern hung from the beam: its chain and cage here, its flame and glow in parallax.drawLanternGlow
+    if hash(i, j + 17) < 0.5 then
+      rect(PCOL_1, 0.6, fx + gap / 2, fy + 3, 1, 5)
+      rect(PCOL_1, 0.9, fx + gap / 2 - 1, fy + 8, 3, 1)
+      rect(PCOL_1, 0.9, fx + gap / 2 - 1, fy + 11, 3, 1)
+    end
+  end
+end
+
+local function mineStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
+  baked("mine.pillars", colors, false, 0.55, 0, camX, camY, vx0, vy0, vx1, vy1, t, minePillars, colors)
+  bakedCells("mine.timber", false, 0.78, 104, 168, camX, camY, vx0, vy0, vx1, vy1, t, mineTimber)
 end
 
 -- Style 2: the Sunken Hollows --------------------------------------------------
 
+-- Giant fungi: a stalk and a broad glowing cap
+local function hollowsFungi(i, j, x, y)
+  if hash(i, j) < 0.2 then
+    return
+  end
+  local sx = x + floor(hash(i + 1, j) * 110)
+  local base = y + 120 + floor(hash(i, j + 4) * 100)
+  local h = 70 + floor(hash(i + 6, j) * 90)
+  local w = 5 + floor(hash(i, j + 8) * 6)
+  local cap = 22 + floor(hash(i + 9, j) * 24)
+  rect(PCOL_3, 0.8, sx, base - h, w, h)
+  -- The cap: stacked rows narrowing upward, glowing at its rim
+  local rows = floor(cap / 3)
+  for r = 0, rows do
+    local rw = cap * math.sqrt(math.max(0, 1 - ((rows - r) / rows) ^ 2))
+    rect(PCOL_4, 0.8, sx + w / 2 - rw / 2, base - h - rows + r, rw, 1)
+  end
+  local pulse = 0.55 + 0.2 * math.sin(BT * 1.2 + i * 2 + j)
+  rect(PCOL_5, pulse, sx + w / 2 - cap / 2, base - h, cap, 1)
+  rect(PCOL_5, pulse * 0.4, sx + w / 2 - cap / 2 - 2, base - h + 1, cap + 4, 2)
+end
+
+-- Roots hanging from the ceiling, swaying, and spores drifting up
+local function hollowsRoots(i, j, x, y)
+  if hash(i, j + 20) < 0.3 then
+    return
+  end
+  local len = 60 + floor(hash(i, j + 3) * 160)
+  local sway = math.sin(BT * 0.8 + i * 1.7) * 2
+  for k = 0, len, 2 do
+    local bend = sway * (k / len) ^ 2
+    rect(PCOL_6, 0.6, x + 10 + bend, y + k, 1, 2)
+  end
+  local sp = (BT * 6 + hash(i, j) * 100) % 120
+  rect(PCOL_7, 0.35, x + 6 + math.sin(sp * 0.2 + i) * 4, y + 200 - sp, 1, 1)
+end
+
 local function hollowsStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
-  -- Giant fungi: a stalk and a broad glowing cap
-  cells(0.52, 120, 200, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
-    if hash(i, j) < 0.2 then
-      return
-    end
-    local sx = x + math.floor(hash(i + 1, j) * 110)
-    local base = y + 120 + math.floor(hash(i, j + 4) * 100)
-    local h = 70 + math.floor(hash(i + 6, j) * 90)
-    local w = 5 + math.floor(hash(i, j + 8) * 6)
-    local cap = 22 + math.floor(hash(i + 9, j) * 24)
-    rect(PCOL_3, 0.8, sx, base - h, w, h)
-    -- The cap: stacked rows narrowing upward, glowing at its rim
-    local rows = math.floor(cap / 3)
-    for r = 0, rows do
-      local rw = cap * math.sqrt(math.max(0, 1 - ((rows - r) / rows) ^ 2))
-      rect(PCOL_4, 0.8, sx + w / 2 - rw / 2, base - h - rows + r, rw, 1)
-    end
-    local pulse = 0.55 + 0.2 * math.sin(t * 1.2 + i * 2 + j)
-    rect(PCOL_5, pulse, sx + w / 2 - cap / 2, base - h, cap, 1)
-    rect(PCOL_5, pulse * 0.4, sx + w / 2 - cap / 2 - 2, base - h + 1, cap + 4, 2)
-  end)
-  -- Roots hanging from the ceiling, swaying, and spores drifting up
-  cells(0.78, 46, 260, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
-    if hash(i, j + 20) < 0.3 then
-      return
-    end
-    local len = 60 + math.floor(hash(i, j + 3) * 160)
-    local sway = math.sin(t * 0.8 + i * 1.7) * 2
-    for k = 0, len, 2 do
-      local bend = sway * (k / len) ^ 2
-      rect(PCOL_6, 0.6, x + 10 + bend, y + k, 1, 2)
-    end
-    local sp = (t * 6 + hash(i, j) * 100) % 120
-    rect(PCOL_7, 0.35, x + 6 + math.sin(sp * 0.2 + i) * 4, y + 200 - sp, 1, 1)
-  end)
+  bakedCells("hollows.fungi", true, 0.52, 120, 200, camX, camY, vx0, vy0, vx1, vy1, t, hollowsFungi)
+  bakedCells("hollows.roots", true, 0.78, 46, 260, camX, camY, vx0, vy0, vx1, vy1, t, hollowsRoots)
 end
 
 -- Style 3: the Sulfur Vents ---------------------------------------------------------
 
+-- Crystal spires rising from far below
+local function ventsSpires(i, j, x, y)
+  if hash(i, j) < 0.15 then
+    return
+  end
+  local sx = x + floor(hash(i + 2, j) * 60)
+  local base = y + 200
+  local h = 60 + floor(hash(i, j + 5) * 110)
+  local w = 10 + floor(hash(i + 4, j) * 14)
+  for r = 0, h, 2 do
+    local rw = w * (1 - r / h)
+    rect(PCOL_8, 0.75, sx + (w - rw) / 2, base - r, rw, 2)
+  end
+  rect(PCOL_9, 0.6, sx + w * 0.5, base - h, 1, h) -- the lit facet
+  rect(PCOL_10, 0.3 + 0.1 * math.sin(BT * 2 + i), sx + w / 2, base - h - 1, 1, 2)
+end
+
+-- Vent chimneys, each breathing a slow plume of pale steam
+local function ventsChimneys(i, j, x, y)
+  if hash(i, j + 30) < 0.3 then
+    return
+  end
+  local cx = x + 30 + floor(hash(i, j) * 60)
+  local base = y + 230
+  local h = 30 + floor(hash(i, j + 2) * 50)
+  rect(PCOL_11, 0.55, cx - 5, base - h, 10, h)
+  rect(PCOL_12, 0.5, cx - 6, base - h, 12, 3)
+  for k = 0, 7 do
+    local age = ((BT * 0.35 + k / 8 + hash(i, j) * 5) % 1)
+    local px = cx + math.sin(age * 5 + k) * (3 + age * 10)
+    local py = base - h - age * 110
+    rect(PCOL_13, 0.22 * (1 - age), px - 4 - age * 6, py, 9 + age * 14, 5)
+  end
+end
+
 local function ventsStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
-  -- Crystal spires rising from far below
-  cells(0.5, 84, 220, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
-    if hash(i, j) < 0.15 then
-      return
-    end
-    local sx = x + math.floor(hash(i + 2, j) * 60)
-    local base = y + 200
-    local h = 60 + math.floor(hash(i, j + 5) * 110)
-    local w = 10 + math.floor(hash(i + 4, j) * 14)
-    for r = 0, h, 2 do
-      local rw = w * (1 - r / h)
-      rect(PCOL_8, 0.75, sx + (w - rw) / 2, base - r, rw, 2)
-    end
-    rect(PCOL_9, 0.6, sx + w * 0.5, base - h, 1, h) -- the lit facet
-    rect(PCOL_10, 0.3 + 0.1 * math.sin(t * 2 + i), sx + w / 2, base - h - 1, 1, 2)
-  end)
-  -- Vent chimneys, each breathing a slow plume of pale steam
-  cells(0.78, 130, 250, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
-    if hash(i, j + 30) < 0.3 then
-      return
-    end
-    local cx = x + 30 + math.floor(hash(i, j) * 60)
-    local base = y + 230
-    local h = 30 + math.floor(hash(i, j + 2) * 50)
-    rect(PCOL_11, 0.55, cx - 5, base - h, 10, h)
-    rect(PCOL_12, 0.5, cx - 6, base - h, 12, 3)
-    for k = 0, 7 do
-      local age = ((t * 0.35 + k / 8 + hash(i, j) * 5) % 1)
-      local px = cx + math.sin(age * 5 + k) * (3 + age * 10)
-      local py = base - h - age * 110
-      rect(PCOL_13, 0.22 * (1 - age), px - 4 - age * 6, py, 9 + age * 14, 5)
-    end
-  end)
+  bakedCells("vents.spires", true, 0.5, 84, 220, camX, camY, vx0, vy0, vx1, vy1, t, ventsSpires)
+  bakedCells("vents.chimneys", true, 0.78, 130, 250, camX, camY, vx0, vy0, vx1, vy1, t, ventsChimneys)
 end
 
 -- Style 4: the Cinder Warrens -----------------------------------------------------------
 
-local function warrensStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
-  -- Basalt columns, banded where they were cast
-  local p, spacing = 0.5, 62
-  local off = camX * (1 - p)
-  for i = math.floor((vx0 - off) / spacing) - 1, math.floor((vx1 - off) / spacing) + 1 do
-    local w = 12 + math.floor(hash(i, 3) * 14)
-    local x = math.floor(i * spacing + off + hash(i, 9) * spacing * 0.5)
-    rect(PCOL_14, 0.6, x, vy0, w, vy1 - vy0)
-    rect(PCOL_15, 0.55, x, vy0, 1, vy1 - vy0)
-    rect(PCOL_16, 0.6, x + w - 2, vy0, 2, vy1 - vy0)
-    for y = math.floor(vy0 / 14) * 14, vy1, 14 do
-      rect(PCOL_17, 0.55, x + 1, y + math.floor(hash(i, y) * 8), w - 3, 1)
+-- Basalt columns, banded where they were cast
+local function warrensColumns(x0, y0, x1, y1)
+  local spacing = 62
+  for i = floor(x0 / spacing) - 1, floor(x1 / spacing) + 1 do
+    local w = 12 + floor(hash(i, 3) * 14)
+    local x = floor(i * spacing + hash(i, 9) * spacing * 0.5)
+    rect(PCOL_14, 0.6, x, y0, w, y1 - y0)
+    rect(PCOL_15, 0.55, x, y0, 1, y1 - y0)
+    rect(PCOL_16, 0.6, x + w - 2, y0, 2, y1 - y0)
+    for y = floor(y0 / 14) * 14, y1, 14 do
+      rect(PCOL_17, 0.55, x + 1, y + floor(hash(i, y) * 8), w - 3, 1)
     end
   end
-  -- Lava falls: glowing streaks pouring down the far walls, and embers rising
-  cells(0.76, 120, 300, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
-    if hash(i, j + 40) < 0.4 then
-      return
-    end
-    local fx = x + 20 + math.floor(hash(i, j) * 70)
-    local len = 100 + math.floor(hash(i, j + 6) * 160)
-    local w = 3 + math.floor(hash(i + 3, j) * 3)
-    local glow = 0.38 + 0.12 * math.sin(t * 1.5 + i * 3 + j)
-    rect(PCOL_18, glow * 0.5, fx - 3, y, w + 6, len)
-    rect(PCOL_19, glow, fx, y, w, len)
-    rect(PCOL_20, glow * 0.7, fx + 1, y, 1, len)
-    for k = 0, 8 do
-      local age = ((t * 0.25 + k / 9 + hash(i, j) * 7) % 1)
-      rect(PCOL_21, 0.7 * (1 - age), fx + w / 2 + math.sin(age * 9 + k * 2) * 6, y + len - age * 150, 1, 1)
-    end
-  end)
+end
+
+-- Lava falls: glowing streaks pouring down the far walls, and embers rising
+local function warrensFalls(i, j, x, y)
+  if hash(i, j + 40) < 0.4 then
+    return
+  end
+  local fx = x + 20 + floor(hash(i, j) * 70)
+  local len = 100 + floor(hash(i, j + 6) * 160)
+  local w = 3 + floor(hash(i + 3, j) * 3)
+  local glow = 0.38 + 0.12 * math.sin(BT * 1.5 + i * 3 + j)
+  rect(PCOL_18, glow * 0.5, fx - 3, y, w + 6, len)
+  rect(PCOL_19, glow, fx, y, w, len)
+  rect(PCOL_20, glow * 0.7, fx + 1, y, 1, len)
+  for k = 0, 8 do
+    local age = ((BT * 0.25 + k / 9 + hash(i, j) * 7) % 1)
+    rect(PCOL_21, 0.7 * (1 - age), fx + w / 2 + math.sin(age * 9 + k * 2) * 6, y + len - age * 150, 1, 1)
+  end
+end
+
+local function warrensStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
+  baked("warrens.columns", false, false, 0.5, 1, camX, camY, vx0, vy0, vx1, vy1, t, warrensColumns)
+  bakedCells("warrens.falls", true, 0.76, 120, 300, camX, camY, vx0, vy0, vx1, vy1, t, warrensFalls)
 end
 
 -- Style 5: the Drowned Halls ------------------------------------------------------------
 
-local function drownedStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
-  -- A drowned colonnade: tall columns with arches between them, some broken
-  local p, spacing = 0.52, 78
-  local off = camX * (1 - p)
-  for i = math.floor((vx0 - off) / spacing) - 1, math.floor((vx1 - off) / spacing) + 1 do
-    local x = math.floor(i * spacing + off)
+-- A drowned colonnade: tall columns with arches between them, some broken. The columns hang from the top of
+-- the view (they hold their height on the screen); their capitals and bands are fixed in the world.
+local function drownedColumns(x0, y0, x1, y1)
+  local spacing = 78
+  for i = floor(x0 / spacing) - 1, floor(x1 / spacing) + 1 do
+    local x = floor(i * spacing)
     local broken = hash(i, 2) < 0.25
-    local top = broken and (vy0 + 90 + math.floor(hash(i, 5) * 80)) or vy0
-    rect(PCOL_22, 0.55, x, top, 14, vy1 - top)
-    rect(PCOL_23, 0.4, x, top, 2, vy1 - top)
-    rect(PCOL_24, 0.5, x + 12, top, 2, vy1 - top)
-    for y = math.floor(vy0 / 34) * 34, vy1, 34 do
-      rect(PCOL_25, 0.5, x - 2, y, 18, 3) -- capitals and bands
-    end
+    local top = broken and (90 + floor(hash(i, 5) * 80)) or y0
+    rect(PCOL_22, 0.55, x, top, 14, y1 - top)
+    rect(PCOL_23, 0.4, x, top, 2, y1 - top)
+    rect(PCOL_24, 0.5, x + 12, top, 2, y1 - top)
     if not broken and hash(i + 1, 2) >= 0.25 then
       -- The arch to the next column
       local span = spacing - 14
       for k = 0, span do
         local ah = math.sqrt(math.max(0, 1 - ((k - span / 2) / (span / 2)) ^ 2)) * 26
-        rect(PCOL_22, 0.45, x + 14 + k, vy0 + 60 - ah, 1, 5)
+        rect(PCOL_22, 0.45, x + 14 + k, 60 - ah, 1, 5)
       end
     end
   end
-  -- Chains hanging and swaying, and slow wavering light from the surface
-  cells(0.8, 60, 280, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
-    if hash(i, j + 50) < 0.6 then
-      return
+end
+
+local function drownedBands(x0, y0, x1, y1)
+  local spacing = 78
+  for i = floor(x0 / spacing) - 1, floor(x1 / spacing) + 1 do
+    local x = floor(i * spacing)
+    for y = floor(y0 / 34) * 34, y1, 34 do
+      rect(PCOL_25, 0.5, x - 2, y, 18, 3) -- capitals and bands
     end
-    local len = 90 + math.floor(hash(i, j) * 150)
-    local sway = math.sin(t * 0.7 + i * 2.1) * 3
-    for k = 0, len, 3 do
-      local bend = sway * (k / len)
-      rect(PCOL_26, 0.4, x + 20 + bend, y + k, 1, 2)
-    end
-  end)
+  end
+end
+
+-- Chains hanging and swaying
+local function drownedChains(i, j, x, y)
+  if hash(i, j + 50) < 0.6 then
+    return
+  end
+  local len = 90 + floor(hash(i, j) * 150)
+  local sway = math.sin(BT * 0.7 + i * 2.1) * 3
+  for k = 0, len, 3 do
+    local bend = sway * (k / len)
+    rect(PCOL_26, 0.4, x + 20 + bend, y + k, 1, 2)
+  end
+end
+
+local function drownedStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
+  baked("drowned.columns", false, false, 0.52, 0, camX, camY, vx0, vy0, vx1, vy1, t, drownedColumns)
+  baked("drowned.bands", false, false, 0.52, 1, camX, camY, vx0, vy0, vx1, vy1, t, drownedBands)
+  bakedCells("drowned.chains", true, 0.8, 60, 280, camX, camY, vx0, vy0, vx1, vy1, t, drownedChains)
+  -- Slow wavering light from the surface
   for k = 0, 4 do
     local x = vx0 + ((k * 137 + camX * 0.1) % (vx1 - vx0 + 60)) - 30
     local a = 0.035 + 0.02 * math.sin(t * 0.6 + k * 2)
@@ -300,91 +444,105 @@ end
 -- Dark, cut stone: stepped terraces of far rock, jagged outcrops and spikes of rock
 -- hanging overhead, and veins of ore that shimmer (gold and a cold blue)
 
-local function quarryStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
-  -- Terraces: wide slabs of far rock stepped up and down, with lit edges, in
-  -- three ranks at different depths (the farthest palest and slowest), each
-  -- rank a repeating row of ridges that fades out below its stepped top, so
-  -- the ranks behind show through instead of one flat wall
-  local RANKS = {
-    { p = 0.28, cw = 190, rh = 230, fill = { 0.085, 0.07, 0.075 }, edge = { 0.17, 0.14, 0.14 }, a = 0.55, seed = 0 },
-    { p = 0.4, cw = 150, rh = 200, fill = { 0.07, 0.06, 0.065 }, edge = { 0.20, 0.17, 0.16 }, a = 0.7, seed = 40 },
-    { p = 0.52, cw = 120, rh = 260, fill = { 0.055, 0.045, 0.05 }, edge = { 0.24, 0.20, 0.18 }, a = 0.8, seed = 80 },
-  }
-  for _, r in ipairs(RANKS) do
-    local ox, oy = camX * (1 - r.p), camY * (1 - r.p)
-    for j = math.floor((vy0 - oy) / r.rh) - 1, math.floor((vy1 - oy) / r.rh) + 1 do
-      local rowY = math.floor(j * r.rh + oy)
-      for i = math.floor((vx0 - ox) / r.cw) - 1, math.floor((vx1 - ox) / r.cw) + 1 do
-        local x = math.floor(i * r.cw + ox)
-        local top = rowY + math.floor(hash(i, j + r.seed) * 90)
-        local depth = 70 + math.floor(hash(i + 3, j + r.seed) * 60)
-        rect(r.fill, r.a, x, top, r.cw + 1, depth)
-        -- (fading out underneath, so the rank behind shows below)
-        for k = 1, 4 do
-          rect(r.fill, r.a * (1 - k / 5), x, top + depth + (k - 1) * 8, r.cw + 1, 8)
-        end
-        rect(r.edge, r.a * 0.85, x, top, r.cw + 1, 2)
-        -- (the step down to the next slab casts a dark notch)
-        rect(PCOL_28, r.a * 0.5, x + r.cw - 2, top, 2, depth * 0.6)
-        for k = 0, 2 do
-          local ly = top + 16 + k * 22 + math.floor(hash(i, j + 10 + k + r.seed) * 10)
-          rect(PCOL_29, r.a * 0.6, x + math.floor(hash(i, 20 + k + j) * 40), ly, 30 + math.floor(hash(i, 30 + k + j) * 70), 1)
-        end
+-- Terraces: wide slabs of far rock stepped up and down, with lit edges, in three ranks at different depths (the
+-- farthest palest and slowest), each rank a repeating row of ridges that fades out below its stepped top, so the
+-- ranks behind show through instead of one flat wall
+local QUARRY_RANKS = {
+  { p = 0.28, cw = 190, rh = 230, fill = { 0.085, 0.07, 0.075 }, edge = { 0.17, 0.14, 0.14 }, a = 0.55, seed = 0 },
+  { p = 0.4, cw = 150, rh = 200, fill = { 0.07, 0.06, 0.065 }, edge = { 0.20, 0.17, 0.16 }, a = 0.7, seed = 40 },
+  { p = 0.52, cw = 120, rh = 260, fill = { 0.055, 0.045, 0.05 }, edge = { 0.24, 0.20, 0.18 }, a = 0.8, seed = 80 },
+}
+
+local function quarryRank(x0, y0, x1, y1, r)
+  for j = floor(y0 / r.rh) - 1, floor(y1 / r.rh) + 1 do
+    local rowY = j * r.rh
+    for i = floor(x0 / r.cw) - 1, floor(x1 / r.cw) + 1 do
+      local x = i * r.cw
+      local top = rowY + floor(hash(i, j + r.seed) * 90)
+      local depth = 70 + floor(hash(i + 3, j + r.seed) * 60)
+      rect(r.fill, r.a, x, top, r.cw + 1, depth)
+      -- (fading out underneath, so the rank behind shows below)
+      for k = 1, 4 do
+        rect(r.fill, r.a * (1 - k / 5), x, top + depth + (k - 1) * 8, r.cw + 1, 8)
+      end
+      rect(r.edge, r.a * 0.85, x, top, r.cw + 1, 2)
+      -- (the step down to the next slab casts a dark notch)
+      rect(PCOL_28, r.a * 0.5, x + r.cw - 2, top, 2, depth * 0.6)
+      for k = 0, 2 do
+        local ly = top + 16 + k * 22 + floor(hash(i, j + 10 + k + r.seed) * 10)
+        rect(PCOL_29, r.a * 0.6, x + floor(hash(i, 20 + k + j) * 40), ly, 30 + floor(hash(i, 30 + k + j) * 70), 1)
       end
     end
   end
-  -- Jagged outcrops of rock, leaning
-  cells(0.6, 110, 260, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
-    if hash(i, j + 60) < 0.35 then
-      return
+end
+
+-- Jagged outcrops of rock, leaning
+local function quarryOutcrops(i, j, x, y)
+  if hash(i, j + 60) < 0.35 then
+    return
+  end
+  local bx = x + 10 + floor(hash(i, j) * 70)
+  local base = y + 250
+  local h = 40 + floor(hash(i, j + 2) * 90)
+  local w = 24 + floor(hash(i + 5, j) * 40)
+  local lean = (hash(i, j + 7) - 0.5) * 14
+  for r = 0, h, 3 do
+    local k = r / h
+    local rw = w * (1 - k * 0.8) + (hash(i + r, j) - 0.5) * 3
+    local shift = lean * k
+    rect(PCOL_30, 0.85, bx + (w - rw) / 2 + shift, base - r, rw, 3)
+    rect(PCOL_31, 0.5, bx + (w - rw) / 2 + shift, base - r, 1, 3)
+  end
+end
+
+-- Rock spikes hanging from above
+local function quarrySpikes(i, j, x, y)
+  if hash(i, j + 80) < 0.5 then
+    return
+  end
+  local sx = x + 20 + floor(hash(i, j) * 30)
+  local len = 40 + floor(hash(i, j + 3) * 100)
+  local w = 8 + floor(hash(i + 2, j) * 12)
+  for r = 0, len, 3 do
+    local rw = w * (1 - r / len)
+    rect(PCOL_32, 0.85, sx + (w - rw) / 2, y + r, rw, 3)
+  end
+end
+
+-- Ore: clusters of flecks in the far walls that glint in turn
+local QUARRY_ORE_DIM = { TWO_1A, TWO_1B }
+for n, c in ipairs(QUARRY_ORE_DIM) do
+  QUARRY_ORE_DIM[n] = { c, { c[1] * 0.5, c[2] * 0.5, c[3] * 0.5 } }
+end
+local function quarryOre(i, j, x, y)
+  if hash(i, j + 90) < 0.5 then
+    return
+  end
+  local blue = hash(i, j + 92) < 0.35
+  local pair = QUARRY_ORE_DIM[blue and 1 or 2]
+  local c, dim = pair[1], pair[2]
+  local ox, oy = x + floor(hash(i, j) * 70), y + floor(hash(i, j + 1) * 100)
+  for k = 0, 5 do
+    local fx = ox + floor((hash(i + k, j) - 0.5) * 18)
+    local fy = oy + floor((hash(i, j + k) - 0.5) * 12)
+    local tw = math.sin(BT * 2.2 + hash(i + k, j + k) * 20)
+    local a = 0.25 + 0.55 * math.max(0, tw)
+    rect(dim, 0.6, fx, fy, 2, 2)
+    rect(c, a, fx, fy, 1, 1)
+    if tw > 0.85 then
+      rect(PCOL_33, 0.8, fx - 1, fy, 3, 1)
+      rect(PCOL_33, 0.8, fx, fy - 1, 1, 3)
     end
-    local bx = x + 10 + math.floor(hash(i, j) * 70)
-    local base = y + 250
-    local h = 40 + math.floor(hash(i, j + 2) * 90)
-    local w = 24 + math.floor(hash(i + 5, j) * 40)
-    local lean = (hash(i, j + 7) - 0.5) * 14
-    for r = 0, h, 3 do
-      local k = r / h
-      local rw = w * (1 - k * 0.8) + (hash(i + r, j) - 0.5) * 3
-      local shift = lean * k
-      rect(PCOL_30, 0.85, bx + (w - rw) / 2 + shift, base - r, rw, 3)
-      rect(PCOL_31, 0.5, bx + (w - rw) / 2 + shift, base - r, 1, 3)
-    end
-  end)
-  -- Rock spikes hanging from above
-  cells(0.7, 70, 300, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
-    if hash(i, j + 80) < 0.5 then
-      return
-    end
-    local sx = x + 20 + math.floor(hash(i, j) * 30)
-    local len = 40 + math.floor(hash(i, j + 3) * 100)
-    local w = 8 + math.floor(hash(i + 2, j) * 12)
-    for r = 0, len, 3 do
-      local rw = w * (1 - r / len)
-      rect(PCOL_32, 0.85, sx + (w - rw) / 2, y + r, rw, 3)
-    end
-  end)
-  -- Ore: clusters of flecks in the far walls that glint in turn
-  cells(0.62, 86, 130, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
-    if hash(i, j + 90) < 0.5 then
-      return
-    end
-    local blue = hash(i, j + 92) < 0.35
-    local c = blue and TWO_1A or TWO_1B
-    local ox, oy = x + math.floor(hash(i, j) * 70), y + math.floor(hash(i, j + 1) * 100)
-    for k = 0, 5 do
-      local fx = ox + math.floor((hash(i + k, j) - 0.5) * 18)
-      local fy = oy + math.floor((hash(i, j + k) - 0.5) * 12)
-      local tw = math.sin(t * 2.2 + hash(i + k, j + k) * 20)
-      local a = 0.25 + 0.55 * math.max(0, tw)
-      rect({ c[1] * 0.5, c[2] * 0.5, c[3] * 0.5 }, 0.6, fx, fy, 2, 2)
-      rect(c, a, fx, fy, 1, 1)
-      if tw > 0.85 then
-        rect(PCOL_33, 0.8, fx - 1, fy, 3, 1)
-        rect(PCOL_33, 0.8, fx, fy - 1, 1, 3)
-      end
-    end
-  end)
+  end
+end
+
+local function quarryStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
+  for n, r in ipairs(QUARRY_RANKS) do
+    baked("quarry.rank" .. n, false, false, r.p, r.p, camX, camY, vx0, vy0, vx1, vy1, t, quarryRank, r)
+  end
+  bakedCells("quarry.outcrops", false, 0.6, 110, 260, camX, camY, vx0, vy0, vx1, vy1, t, quarryOutcrops)
+  bakedCells("quarry.spikes", false, 0.7, 70, 300, camX, camY, vx0, vy0, vx1, vy1, t, quarrySpikes)
+  bakedCells("quarry.ore", true, 0.62, 86, 130, camX, camY, vx0, vy0, vx1, vy1, t, quarryOre)
 end
 
 -- Style 7: the ocean (the Flooded Caverns and the Deep) ----------------------------------
@@ -405,43 +563,38 @@ local function swell(x, t, seed)
   return h
 end
 
-local function oceanStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
-  -- The swell: wide soft bands of lighter water riding the fractal waves
-  local p = 0.3
-  local oy = camY * (1 - p)
-  for band = 0, 6 do
-    local base = vy0 + ((band * 71 - oy * 0.4) % (vy1 - vy0 + 140)) - 70
-    local tint = band % 2 == 0 and TWO_2A or TWO_2B
-    for x = math.floor(vx0 / 3) * 3, vx1, 3 do
-      local wx = x + camX * (1 - p)
-      local w = swell(wx, t, band * 1.7)
-      local a = 0.035 + 0.025 * (0.5 + 0.5 * math.sin(wx * 0.004 + t * 0.12 + band * 2))
-      rect(tint, a * 0.5, x, base + w - 6, 3, 20)
-      rect(tint, a, x, base + w, 3, 8)
-      rect(PCOL_34, a * 0.9, x, base + w, 3, 1)
-    end
+-- The swell: wide soft bands of lighter water riding the fractal waves. A band is a strip of columns three
+-- pixels wide, drawn with its baseline at 0; the strip is put on the screen at the band's height, which wraps
+-- through the view as the camera moves. The waves run along the strip at 1.7 times the camera's speed against it
+-- (the pattern is read at x + camera * 0.7, as it always was), which is a layer that shifts by -0.7 * camera.
+local function oceanSwell(x0, y0, x1, y1, band)
+  local tint = band % 2 == 0 and TWO_2A or TWO_2B
+  for x = floor(x0 / 3) * 3, x1, 3 do
+    local w = swell(x, BT, band * 1.7)
+    local a = 0.035 + 0.025 * (0.5 + 0.5 * math.sin(x * 0.004 + BT * 0.12 + band * 2))
+    rect(tint, a * 0.5, x, w - 6, 3, 20)
+    rect(tint, a, x, w, 3, 8)
+    rect(PCOL_34, a * 0.9, x, w, 3, 1)
   end
-  -- Light falling from far above
-  for k = 0, 5 do
-    local x = vx0 + ((k * 151 + camX * 0.15 + math.sin(t * 0.15 + k) * 24) % (vx1 - vx0 + 80)) - 40
-    local a = 0.035 + 0.02 * math.sin(t * 0.4 + k * 1.9)
-    rect(PCOL_27, a, x, vy0, 22 + math.sin(t * 0.3 + k) * 6, vy1 - vy0)
-  end
-  -- Seaweed: tall strands rising out of the dark, swaying with the swell
-  cells(0.45, 90, 300, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
+end
+
+-- Seaweed: tall strands rising out of the dark, swaying with the swell (the box is the layer's own: a strand
+-- is only drawn within the rows it covers)
+local function oceanSeaweed(x0, y0, x1, y1)
+  cells(0.45, 90, 300, 0, 0, x0, y0, x1, y1, function(i, j, x, y)
     for s = 0, 2 do
       if hash(i + s, j + 9) > 0.3 then
-        local kx = x + 10 + math.floor(hash(i + s, j + 4) * 70)
+        local kx = x + 10 + floor(hash(i + s, j + 4) * 70)
         local root = y + 300
-        local len = 80 + math.floor(hash(i, j + s) * 170)
+        local len = 80 + floor(hash(i, j + s) * 170)
         local col = s == 1 and TWO_3A or TWO_3B
         -- (only the part of the strand within the rows drawn: a segment sits at root - q, a frond a row higher)
-        local qa = math.max(0, math.floor(root - vy1 - 4))
+        local qa = math.max(0, floor(root - y1 - 4))
         qa = qa + qa % 2 -- (on the strand's own even steps)
-        local qb = math.min(len, root - vy0 + 4)
+        local qb = math.min(len, root - y0 + 4)
         for q = qa, qb, 2 do
           local u = q / len
-          local sway = (math.sin(t * 0.7 + q * 0.035 + kx * 0.05) * 7 + math.sin(t * 0.37 + q * 0.011 + s) * 4) * u
+          local sway = (math.sin(BT * 0.7 + q * 0.035 + kx * 0.05) * 7 + math.sin(BT * 0.37 + q * 0.011 + s) * 4) * u
           rect(col, 0.72 - u * 0.2, kx + sway, root - q, 2, 2)
           if q % 14 == 0 and q > 10 then
             local side = (q / 14) % 2 == 0 and 1 or -1
@@ -451,25 +604,43 @@ local function oceanStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
       end
     end
   end)
-  -- Bubbles: columns of them rising and wobbling, each bubble on its own loop
-  cells(0.6, 70, 240, camX, camY, vx0, vy0, vx1, vy1, function(i, j, x, y)
-    if hash(i, j + 31) < 0.45 then
-      return
+end
+
+-- Bubbles: columns of them rising and wobbling, each bubble on its own loop
+local function oceanBubbles(i, j, x, y)
+  if hash(i, j + 31) < 0.45 then
+    return
+  end
+  local bx = x + floor(hash(i, j + 32) * 60)
+  for b = 0, 4 do
+    local speed = 14 + hash(i + b, j) * 16
+    local phase = (BT * speed + hash(i, j + b) * 240) % 240
+    local by = y + 240 - phase
+    local wob = math.sin(BT * 2.2 + b * 1.7 + i) * 2.5
+    local size = 1 + floor(hash(i + b, j + 3) * 2.5)
+    local a = 0.45 * math.min(1, phase / 40) * math.min(1, (240 - phase) / 40)
+    rect(PCOL_35, a, bx + wob, by, size, size)
+    if size > 1 then
+      rect(PCOL_33, a * 0.9, bx + wob, by, 1, 1) -- the glint
     end
-    local bx = x + math.floor(hash(i, j + 32) * 60)
-    for b = 0, 4 do
-      local speed = 14 + hash(i + b, j) * 16
-      local phase = (t * speed + hash(i, j + b) * 240) % 240
-      local by = y + 240 - phase
-      local wob = math.sin(t * 2.2 + b * 1.7 + i) * 2.5
-      local size = 1 + math.floor(hash(i + b, j + 3) * 2.5)
-      local a = 0.45 * math.min(1, phase / 40) * math.min(1, (240 - phase) / 40)
-      rect(PCOL_35, a, bx + wob, by, size, size)
-      if size > 1 then
-        rect(PCOL_33, a * 0.9, bx + wob, by, 1, 1) -- the glint
-      end
-    end
-  end)
+  end
+end
+
+local function oceanStyle(camX, camY, vx0, vy0, vx1, vy1, colors, t)
+  local oy = camY * (1 - 0.3)
+  for band = 0, 6 do
+    local base = vy0 + ((band * 71 - oy * 0.4) % (vy1 - vy0 + 140)) - 70
+    -- (the strip's own camera height is its baseline: the strip is drawn at the baseline wherever that is)
+    baked("ocean.swell" .. band, false, true, 1.7, 0, camX, base, vx0, base - 70, vx1, base + 90, t, oceanSwell, band)
+  end
+  -- Light falling from far above
+  for k = 0, 5 do
+    local x = vx0 + ((k * 151 + camX * 0.15 + math.sin(t * 0.15 + k) * 24) % (vx1 - vx0 + 80)) - 40
+    local a = 0.035 + 0.02 * math.sin(t * 0.4 + k * 1.9)
+    rect(PCOL_27, a, x, vy0, 22 + math.sin(t * 0.3 + k) * 6, vy1 - vy0)
+  end
+  baked("ocean.seaweed", false, true, 0.45, 0.45, camX, camY, vx0, vy0, vx1, vy1, t, oceanSeaweed)
+  bakedCells("ocean.bubbles", true, 0.6, 70, 240, camX, camY, vx0, vy0, vx1, vy1, t, oceanBubbles)
 end
 
 -- Style 9: inside the Needle -------------------------------------------------------------------
@@ -955,5 +1126,8 @@ function parallax.draw(index, camX, camY, vx0, vy0, vx1, vy1, colors)
   style(camX, camY, vx0, vy0, vx1, vy1, colors, love.timer.getTime())
   flush()
 end
+
+-- (for the boss arenas' scenery, src.bossbg)
+parallax.baked = baked
 
 return parallax

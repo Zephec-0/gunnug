@@ -1859,56 +1859,82 @@ end
 local flowDirection
 do
 local FLOW_CELL, FLOW_RADIUS = 8, 44
-local flow = { t = -1, cx = nil, cy = nil, dist = {}, world = nil, solid = {} }
+local flow = { t = -1, cx = nil, cy = nil, dist = {}, world = nil }
 local FLOW_DIRS = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 }, { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 } }
 
 local function flowKey(gx, gy)
   return gx * 65536 + gy
 end
 
-local function flowBlocked(world, gx, gy)
+local function flowBlocked(world, solid, gx, gy)
   local k = flowKey(gx, gy)
-  local v = flow.solid[k]
+  local v = solid[k]
   if v == nil then
     local x, y = gx * FLOW_CELL + FLOW_CELL / 2, gy * FLOW_CELL + FLOW_CELL / 2
     v = world:isSolid(math.floor(x), math.floor(y)) or world:isSolid(math.floor(x - 3), math.floor(y - 3)) or world:isSolid(math.floor(x + 3), math.floor(y - 3)) or world:isSolid(math.floor(x - 3), math.floor(y + 3)) or world:isSolid(math.floor(x + 3), math.floor(y + 3))
-    flow.solid[k] = v
+    solid[k] = v
   end
   return v
 end
 
-local function flowRebuild(world, px, py)
+-- The field is worked out a little at a time: a rebuild is a search over some 7,000 cells, several milliseconds, and
+-- in one frame it was a hitch every half second while a bat chased. Now it is a job (`build`) that gets a slice of
+-- each frame (enemies.flowAdvance, from enemies.update); the bats go on steering by the last finished field until the
+-- new one is ready, and are given nothing (their open-air weaving) before the first.
+local build
+local function flowStart(world, px, py)
   local pgx, pgy = math.floor(px / FLOW_CELL), math.floor(py / FLOW_CELL)
-  flow.world, flow.cx, flow.cy, flow.t = world, pgx, pgy, love.timer.getTime()
-  flow.solid = {}
   local dist = {}
-  flow.dist = dist
-  local queue, head = { pgx, pgy }, 1
   dist[flowKey(pgx, pgy)] = 0
-  while head <= #queue do
-    local gx, gy = queue[head], queue[head + 1]
-    head = head + 2
+  build = { world = world, pgx = pgx, pgy = pgy, queue = { pgx, pgy }, head = 1, dist = dist, solid = {} }
+end
+
+-- Works on the rebuild for up to `budget` seconds; when it is done the new field takes over
+local function flowAdvance(budget)
+  local bd = build
+  if not bd then
+    return
+  end
+  local deadline = love.timer.getTime() + budget
+  local world, queue, dist, solid = bd.world, bd.queue, bd.dist, bd.solid
+  local n = 0
+  while bd.head <= #queue do
+    local gx, gy = queue[bd.head], queue[bd.head + 1]
+    bd.head = bd.head + 2
     local d = dist[flowKey(gx, gy)]
     if d < FLOW_RADIUS then
       for _, dir in ipairs(FLOW_DIRS) do
         local nx, ny = gx + dir[1], gy + dir[2]
         local k = flowKey(nx, ny)
-        if not dist[k] and not flowBlocked(world, nx, ny) and (dir[1] == 0 or dir[2] == 0 or (not flowBlocked(world, gx + dir[1], gy) and not flowBlocked(world, gx, gy + dir[2]))) then
+        if not dist[k] and not flowBlocked(world, solid, nx, ny) and (dir[1] == 0 or dir[2] == 0 or (not flowBlocked(world, solid, gx + dir[1], gy) and not flowBlocked(world, solid, gx, gy + dir[2]))) then
           dist[k] = d + 1
           queue[#queue + 1] = nx
           queue[#queue + 1] = ny
         end
       end
     end
+    n = n + 1
+    if n % 24 == 0 and love.timer.getTime() > deadline then
+      return
+    end
   end
+  flow.world, flow.cx, flow.cy, flow.t, flow.dist = world, bd.pgx, bd.pgy, love.timer.getTime(), dist
+  build = nil
 end
+enemies.flowAdvance = flowAdvance
 
 -- The unit direction a bat at (x, y) should fly to get round the rock to the
 -- hunter at (px, py), or nil if there is no known way (too far, or sealed in)
 flowDirection = function(world, x, y, px, py)
   local pgx, pgy = math.floor(px / FLOW_CELL), math.floor(py / FLOW_CELL)
-  if flow.world ~= world or not flow.cx or love.timer.getTime() - flow.t > 0.45 or math.abs(pgx - flow.cx) + math.abs(pgy - flow.cy) > 3 then
-    flowRebuild(world, px, py)
+  if flow.world ~= world then
+    flow.world, flow.cx, flow.dist, build = world, nil, {}, nil -- (a new world: nothing of the old field is any use)
+  end
+  if not build and (not flow.cx or love.timer.getTime() - flow.t > 0.45 or math.abs(pgx - flow.cx) + math.abs(pgy - flow.cy) > 3) then
+    flowStart(world, px, py)
+  end
+  if not flow.cx then
+    return nil
   end
   local gx, gy = math.floor(x / FLOW_CELL), math.floor(y / FLOW_CELL)
   local here = flow.dist[flowKey(gx, gy)]
@@ -4143,6 +4169,9 @@ end
 
 function enemies.update(dt, world, player)
   clock = clock + dt
+  if enemies.flowAdvance then
+    enemies.flowAdvance(0.0008) -- (a slice of the bats' route-finding: see flowAdvance)
+  end
   local px, py = player:center()
   local pb = player.body
   dorm.t = dorm.t - dt

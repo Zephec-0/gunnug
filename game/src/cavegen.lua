@@ -54,7 +54,7 @@ local SIZES = {
   gargoyle = { 14, 16, false, true },
   wraith = { 12, 18, false, true }, -- the Quarry's: wraiths hang from the ceiling, crabs stand
   cairncrab = { 16, 10, true },
-  arcbeetle = { 14, 8, true }, -- the condition makers (src.hazardmobs)
+  arcbeetle = { 11, 7, true }, -- the condition makers (src.hazardmobs)
   torchbearer = { 10, 19, true },
   tarcrawler = { 14, 7, true },
   cloudray = { 26, 10 }, -- the Cloud Reaches' (src.skymobs): all of them fly
@@ -68,6 +68,37 @@ local SIZES = {
 local ENTRANCE_GAP = 26 -- half-width of the opening down from the entrance chamber
 
 local PLAYER_W, PLAYER_H = config.player.width, config.player.height
+
+-- A smooth noise field sampled on a coarse lattice and interpolated between the samples: one love.math.noise call per
+-- S x S pixels instead of one per pixel (the calls were most of the time of the base fill and the caves). noiseRows
+-- keeps two lattice rows (the ones above and below the current pixel row) and hands back the interpolated row.
+local function newLattice(x0, x1, S, fx, fy, z)
+  local n = math.floor((x1 - x0) / S) + 2
+  return { x0 = x0, S = S, n = n, fx = fx, fy = fy, z = z, rowA = {}, rowB = {}, gyA = nil }
+end
+
+local function latticeRow(L, gy, out)
+  local y = gy * L.S
+  for gx = 0, L.n - 1 do
+    out[gx] = love.math.noise((L.x0 + gx * L.S) * L.fx, y * L.fy, L.z)
+  end
+end
+
+-- the field's value at (x, y); rows must be asked for in order of rising y, x rising within a row
+local function latticeSetRow(L, y)
+  local gy = math.floor(y / L.S)
+  if L.gyA ~= gy then
+    if L.gyA == gy - 1 then
+      L.rowA, L.rowB = L.rowB, L.rowA
+      latticeRow(L, gy + 1, L.rowB)
+    else
+      latticeRow(L, gy, L.rowA)
+      latticeRow(L, gy + 1, L.rowB)
+    end
+    L.gyA = gy
+  end
+  L.ty = (y - gy * L.S) / L.S
+end
 
 -- Generates a cave in world. area: { x0, y0, x1, y1, entranceX, entranceY }
 -- (inclusive pixel bounds; the surface's rock, or the previous area, lies
@@ -249,6 +280,7 @@ function cavegen.generate(world, area, seed, tick)
       return
     end
     local tops = {} -- (the wavering top edge depends on the column alone: worked out once per column)
+    local L = newLattice(X0, X1, 4, 0.011, 0.011, noiseSeed) -- (the dirt pockets: a slow field, sampled every 4 px)
     for y = (climb and Y0 or Y0 - BLEND), Y1 do
       local depth = math.max(0, (y - Y0) / H)
       local xa, xb = X0, X1
@@ -256,6 +288,9 @@ function cavegen.generate(world, area, seed, tick)
         xa, xb = profile(y)
       end
       if xa then
+        latticeSetRow(L, y)
+        local ty, A, B, S = L.ty, L.rowA, L.rowB, L.S
+        local limit = 0.38 + depth * 0.35
         for x = xa, xb do
           local top = tops[x]
           if not top then
@@ -263,8 +298,13 @@ function cavegen.generate(world, area, seed, tick)
             tops[x] = top
           end
           if y >= top then
-            local n = love.math.noise(x * 0.011, y * 0.011, noiseSeed)
-            world:setRaw(x, y, n > 0.38 + depth * 0.35 and DIRTID or ROCKID)
+            local gx = (x - X0) / S
+            local ix = gx - gx % 1
+            local tx = gx - ix
+            local a = A[ix] + (A[ix + 1] - A[ix]) * tx
+            local b = B[ix] + (B[ix + 1] - B[ix]) * tx
+            local n = a + (b - a) * ty
+            world:setRaw(x, y, n > limit and DIRTID or ROCKID)
           end
         end
       end
@@ -310,6 +350,7 @@ function cavegen.generate(world, area, seed, tick)
       gy = math.max(0, math.min(gh - 1, gy))
       return grid[gy * gw + gx]
     end
+    local EDGE = newLattice(X0, X1, 2, 0.094, 0.094, noiseSeed + 7) -- (the ragged edge of the caves: sampled every 2 px)
     for y = Y0 + 40, Y1 - BORDER - 1 do
       -- Harder to open up near the top, so caves there get rounded ceilings
       -- instead of all stopping at the same line
@@ -317,21 +358,28 @@ function cavegen.generate(world, area, seed, tick)
       local fy = (y - Y0) / CELL - 0.5
       local gy = math.floor(fy)
       local ty = fy - gy
-      for x = X0 + BORDER, X1 - BORDER do
-        local fx = (x - X0) / CELL - 0.5
-        local gx = math.floor(fx)
-        local tx = fx - gx
-        local top = cell(gx, gy) * (1 - tx) + cell(gx + 1, gy) * tx
-        local bottom = cell(gx, gy + 1) * (1 - tx) + cell(gx + 1, gy + 1) * tx
-        local v = top * (1 - ty) + bottom * ty + (love.math.noise(x * 0.094, y * 0.094, noiseSeed + 7) - 0.5) * 0.35
-        if v > threshold and inFunnel(x, y) then
-          world:setRaw(x, y, AIR)
+      latticeSetRow(EDGE, y)
+      local ety, EA, EB, ES = EDGE.ty, EDGE.rowA, EDGE.rowB, EDGE.S
+      -- (the whole row in 64-column pieces, a yield between them: a whole row ran 4-6 ms past the frame's budget)
+      for xs = X0 + BORDER, X1 - BORDER, 64 do
+        for x = xs, math.min(xs + 63, X1 - BORDER) do
+          local fx = (x - X0) / CELL - 0.5
+          local gx = math.floor(fx)
+          local tx = fx - gx
+          local top = cell(gx, gy) * (1 - tx) + cell(gx + 1, gy) * tx
+          local bottom = cell(gx, gy + 1) * (1 - tx) + cell(gx + 1, gy + 1) * tx
+          local ex = (x - X0) / ES
+          local ix = ex - ex % 1
+          local etx = ex - ix
+          local ea = EA[ix] + (EA[ix + 1] - EA[ix]) * etx
+          local eb = EB[ix] + (EB[ix + 1] - EB[ix]) * etx
+          local v = top * (1 - ty) + bottom * ty + (ea + (eb - ea) * ety - 0.5) * 0.35
+          if v > threshold and inFunnel(x, y) then
+            world:setRaw(x, y, AIR)
+          end
         end
-        if x % 64 == 0 then
-          tick() -- (a whole row ran 4-6 ms past the frame's budget)
-        end
+        tick()
       end
-      tick()
     end
   end
 
@@ -1197,10 +1245,10 @@ function cavegen.generate(world, area, seed, tick)
     end
   end
 
-  -- A shell of plain rock at the sides and the bottom of the last area: nothing
-  -- is indestructible at a dungeon's edge (only the boss arenas seal themselves)
+  -- A shell of bedrock at the sides and the bottom of the last area: the edge of a dungeon is indestructible, so no
+  -- one can mine in from the rock round it
   if not area.hasNext and not open then
-    world:fillRect(X0, Y1 - BORDER + 1, X1, Y1, ROCKID)
+    world:fillRect(X0, Y1 - BORDER + 1, X1, Y1, BEDROCK)
   end
   -- (an inner side, facing the other path, is plain rock instead, with more
   -- rock out to the neighbour so the hunter can dig across)
@@ -1209,8 +1257,8 @@ function cavegen.generate(world, area, seed, tick)
     sideTop = world.top -- (the sky's walls go up to the world's invisible ceiling)
   end
   if not sky then -- (the sky has no walls at its edges)
-    world:fillRect(X0, sideTop, X0 + BORDER - 1, Y1, ROCKID)
-    world:fillRect(X1 - BORDER + 1, sideTop, X1, Y1, ROCKID)
+    world:fillRect(X0, sideTop, X0 + BORDER - 1, Y1, area.gapLeft and ROCKID or BEDROCK)
+    world:fillRect(X1 - BORDER + 1, sideTop, X1, Y1, area.gapRight and ROCKID or BEDROCK)
   end
   -- A secret nobody points to: a motherlode of gold in the middle of the solid rock between the
   -- two paths, far from either one's caves. Only a long dig through the wall finds it. (Both
@@ -1250,6 +1298,17 @@ function cavegen.generate(world, area, seed, tick)
     -- (no roof: the world's top edge above is an invisible ceiling, out of view)
     if area.shaftX0 then
       carveSkyEntrance(area.shaftX0, area.shaftX1) -- (the bottom shell must not close the hole)
+    end
+  end
+
+  -- The Undercroft's roof (area.sealTop): the area is built with the rest, long before the Sunken Key turns, so a band
+  -- of bedrock closes it off under the Deep's floor (the iron plate's shaft is cut through it when the key turns,
+  -- src.deepseal; on a save that has already opened it the shaft is left open here)
+  if area.sealTop then
+    for x = X0, X1 do
+      if not (area.sealOpen and area.shaftX0 and x >= area.shaftX0 and x <= area.shaftX1) then
+        world:fillRect(x, Y0 - 14, x, Y0 - 1, BEDROCK)
+      end
     end
   end
 
@@ -1305,7 +1364,7 @@ function cavegen.generate(world, area, seed, tick)
     end
     arena.seal = { x0 = sx0, y0 = sy0, x1 = sx1, y1 = sy1, rock = ROCKID }
   end
-  world:repaintRect(X0 - (area.gapLeft or 0), math.min(Y0 - BLEND - 16, (area.shaftTop or math.huge) - 16), X1 + (area.gapRight or 0), Y1, tick)
+  world:repaintDeferred(X0 - (area.gapLeft or 0), math.min(Y0 - BLEND - 16, (area.shaftTop or math.huge) - 16), X1 + (area.gapRight or 0), Y1, tick)
 
   -- Monsters: none near the entrance or in the shop. More of them, and
   -- tougher, the deeper you go.
@@ -2065,10 +2124,13 @@ function cavegen.generate(world, area, seed, tick)
   -- Events for the dungeon (src.events): altars, spots for a quest relic, a
   -- wounded hunter, and a sealed vault. Placed last, so the layout above is
   -- unchanged.
+  if area.climb and area.monsters and next(area.monsters) then
+    result.pageSpots = findFloorSpots(3, 20, avoidForEnemies) -- (the mountain has an arena, so none of the events below, but it keeps its journal pages)
+  end
   if area.monsters and next(area.monsters) and not area.open and not area.arena then
     result.altars = findFloorSpots(level >= 3 and 2 or 1, 26, avoidForEnemies)
     result.relicSpots = findFloorSpots(3, 20, avoidForEnemies)
-    result.pageSpots = findFloorSpots(2, 20, avoidForEnemies) -- (a torn page of the journal lies on the first: src.journal)
+    result.pageSpots = findFloorSpots(3, 20, avoidForEnemies) -- (the torn pages of the journal lie on them, one each: src.journal)
     if area.wounded then
       result.wounded = findFloorSpots(1, 26, avoidForEnemies)[1]
     end
@@ -2415,7 +2477,7 @@ function cavegen.generate(world, area, seed, tick)
     end
   end
 
-  -- Live wires (src.livewire): bare cables hanging from the roof
+  -- Stormglass (src.livewire): shards of lightning-struck glass hanging from the roof
   result.wires = {}
   if (area.wires or 0) > 0 and not area.open and not area.arena then
     for _, sp in ipairs(findCeilingSpots(scaled(area.wires), 40, avoidForEnemies)) do

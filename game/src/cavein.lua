@@ -90,7 +90,11 @@ local function collapse(z, player)
     world:repaintLater(sp.x - 3, sp.y0, sp.x + 2, sp.y1)
     require("src.physics").rebuildRegion(sp.x - 3, sp.y0, sp.x + 2, sp.y1)
   end
-  local n = destruction.collapse(world, z.x0, z.y0, z.x1, z.y1, 11, 9)
+  -- (only what hangs over open air comes down; the slab where it rests on the cave's walls stays in the rock)
+  local solidAt = materials.solid
+  local n = destruction.collapseRock(world, z.x0, z.y0, z.x1, z.y1, 12, 9, function(x)
+    return not solidAt[world:get(x, z.y1 + 1)] and not solidAt[world:get(x, z.y1 + 3)]
+  end)
   pcall(function()
     require("src.audio").play("explosion", 0.6, 0.5)
     require("src.juice").blast((z.x0 + z.x1) / 2, z.y1, 60)

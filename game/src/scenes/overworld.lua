@@ -90,6 +90,7 @@ local SUN_X, SUN_Y = 440, 196 -- on screen, low over the horizon
 
 local background -- pre-rendered sky and parallax layers
 local backgroundEclipse -- whether its sky was painted with the sun a black hole
+local sunHalo -- (the soft red blob behind the ashen sun, made once)
 local backgroundAsh -- whether it was painted for the world after the core (the Undercroft beaten): ash and a volcano
 local trees = {}
 
@@ -249,7 +250,9 @@ local function buildBackground(eclipse, ash, keepLayers)
       elseif d < 30 then
         local core = 1 - d / 30 * 0.12
         if ash then
-          sky:setPixel(x, y, 0.55 * core, 0.2 * core, 0.12 * core, 1) -- (a dull red disc through the smoke)
+          -- (a red disc through the smoke, hotter in the middle and fading to the rim, with its glow round it below)
+          local hot = 1 - d / 30
+          sky:setPixel(x, y, math.min(1, 0.62 * core + 0.3 * hot), 0.2 * core + 0.1 * hot, 0.12 * core, 1)
         else
           sky:setPixel(x, y, 1, 0.74 * core, 0.44 * core, 1) -- the setting sun
         end
@@ -286,6 +289,12 @@ local function buildBackground(eclipse, ash, keepLayers)
           cr = math.min(1, (grey * 1.05 + hz * 0.42) * dark)
           cg = math.min(1, (grey * 0.9 + hz * 0.12) * dark)
           cb = math.min(1, (grey * 0.86 + hz * 0.05) * dark)
+          -- the sun's red glow, bleeding into the smoke round it: a tight bloom and a wide soft one
+          local near = math.max(0, 1 - (d - 30) / 70) ^ 2
+          local wide = math.max(0, 1 - d / 300) ^ 2
+          cr = math.min(1, cr + near * 0.45 + wide * 0.34)
+          cg = math.min(1, cg + near * 0.12 + wide * 0.07)
+          cb = math.min(1, cb + near * 0.06 + wide * 0.03)
         end
         sky:setPixel(x, y, cr, cg, cb, 1)
       end
@@ -1159,6 +1168,32 @@ function overworld.drawBackground(camX, camY)
       love.graphics.rectangle("fill", st.x * ssx, st.y * ssy, ssx, ssy)
     end
   end
+  if not black and require("src.meta").undercroftBeaten() then
+    -- a slow red breath over the sun's glow (drawn additively, over the painted sky, under the scenery)
+    local sunlight = 1 - underground(camX + config.VIRTUAL_W / 2, camY + config.VIRTUAL_H / 2)
+    if sunlight > 0.02 then
+      if not sunHalo then
+        local data = love.image.newImageData(64, 64)
+        for yy = 0, 63 do
+          for xx = 0, 63 do
+            local ddx, ddy = (xx + 0.5 - 32) / 32, (yy + 0.5 - 32) / 32
+            local dd = math.min(1, math.sqrt(ddx * ddx + ddy * ddy))
+            data:setPixel(xx, yy, 1, 1, 1, (1 - dd) ^ 2.2)
+          end
+        end
+        sunHalo = love.graphics.newImage(data)
+        sunHalo:setFilter("linear", "linear")
+      end
+      local breath = 0.5 + 0.5 * math.sin(love.timer.getTime() * 0.7)
+      love.graphics.setBlendMode("add")
+      love.graphics.setColor(0.95, 0.25, 0.12, (0.30 + 0.12 * breath) * sunlight)
+      local r = 190 + 14 * breath
+      love.graphics.draw(sunHalo, (SUN_X - r) * ssx, (SUN_Y - r) * ssy, 0, 2 * r / 64 * ssx, 2 * r / 64 * ssy)
+      love.graphics.setColor(1, 0.45, 0.2, (0.22 + 0.1 * breath) * sunlight)
+      love.graphics.draw(sunHalo, (SUN_X - 52) * ssx, (SUN_Y - 52) * ssy, 0, 104 / 64 * ssx, 104 / 64 * ssy)
+      love.graphics.setBlendMode("alpha")
+    end
+  end
   if not black then
     -- the sun's streak sits on the sky, so the far mountains cover it
     local sunlight = 1 - underground(camX + config.VIRTUAL_W / 2, camY + config.VIRTUAL_H / 2)
@@ -1595,7 +1630,9 @@ end
 
 -- Decorations drawn behind the player (they receive lighting)
 function overworld.drawDecor(camX, camY)
+  local perf = require("src.perf")
   require("src.airship").drawBack(camX, camY)
+  perf.lap("decor: airship")
   local vx0, vy0 = camX - 8, camY - 8
   local vx1, vy1 = camX + config.VIRTUAL_W + 8, camY + config.VIRTUAL_H + 8
   -- Backdrop behind the ground, so holes, the mine shaft and the caves show
@@ -1636,17 +1673,22 @@ function overworld.drawDecor(camX, camY)
     love.graphics.setColor(EARTH)
     love.graphics.rectangle("fill", deepFrom, vy0, x1 - deepFrom, vy1 - vy0)
   end
+  perf.lap("decor: earth backdrop polygons")
   -- (above the caves: the earth fading into the cave dark; below, each area's own backdrop,
   -- with the next area's bleeding over it at the borders: src.depthblend)
   for y = math.max(math.floor(vy0 / 8) * 8, CAVE_TOP - 120), math.min(vy1, CAVE_TOP), 8 do
     love.graphics.setColor(backdrop(y, (vx0 + vx1) / 2))
     love.graphics.rectangle("fill", vx0, y, vx1 - vx0, 8)
   end
+  perf.lap("decor: surface backdrop rows")
   require("src.entrances").drawBackdrop(camX, camY, 0, 0) -- (the Quarry's cut wall, over the earth backdrop, in world coordinates)
+  perf.lap("decor: Quarry wall")
   drawMountainDepth(camX, camY, vx0, vy0, vx1, vy1)
+  perf.lap("decor: mountain depth")
   if vy1 > CAVE_TOP then
     local index = catacombs.levelAt((math.max(vy0, CAVE_TOP) + vy1) / 2, (vx0 + vx1) / 2) or 1
     depthblend.draw(index, camX, camY, vx0, vy0, vx1, vy1, CAVE_TOP)
+    perf.lap("decor: cave backdrop (depthblend)")
     -- (the first area's far scenery fades in over its first stretch instead of starting at a hard line at the
     -- mouth of the caves: the earth's own backdrop is laid back over it, thinning out going down)
     for y = math.max(math.floor(vy0 / 8) * 8, CAVE_TOP), math.min(vy1, CAVE_TOP + SCENERY_FADE), 8 do
@@ -1659,8 +1701,10 @@ function overworld.drawDecor(camX, camY)
     love.graphics.setColor(0, 0, 0, 0.5)
     love.graphics.rectangle("fill", vx0, math.max(vy0, CAVE_TOP), vx1 - vx0, vy1 - math.max(vy0, CAVE_TOP))
   end
+  perf.lap("decor: dim over cave backdrop")
   catacombs.drawDecor(view(camX, camY))
   if vy0 > CAVE_TOP then
+    perf.lap("decor: surface scenery")
     return -- the rest is all on the surface
   end
   cullX0, cullX1 = vx0, vx1
@@ -1690,6 +1734,7 @@ function overworld.drawDecor(camX, camY)
   drawWinchHouse()
   drawHeadframe()
   drawWeeds()
+  perf.lap("decor: surface scenery")
 end
 
 function overworld.drawLitDecor(v, shadows)

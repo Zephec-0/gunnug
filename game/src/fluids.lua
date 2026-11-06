@@ -29,7 +29,8 @@ local C = 2 -- cell size in pixels
 local HALF = C / 2
 local POOL_CELL = 4 -- cavegen's pools come on a coarser grid: each of its cells fills several of ours
 local WATER_STEP = 0.025 -- water moves a cell per step: 80 px/s falling
-local SPREAD = 12 -- water slides sideways toward a drop up to this many cells away
+local SPREAD = 12 -- oil and lava slide sideways toward a drop up to this many cells away
+local WATER_SPREAD = 48 -- water does, farther: a longer reach levels a wide pool, and costs a scan along the row for each resting surface cell
 local SWEEP = 1.5 -- every so often all water near the hunter is woken (terrain may have changed)
 local K = 16384 -- key stride: key = gy * K + KOFF + gx (gx may be negative; KOFF keeps the sum clear of the row below)
 local KOFF = 8192
@@ -91,6 +92,9 @@ fluids.exposure = 0
 -- next one: pools floating in thin air where the new world has none)
 local blockVer = {}
 local runCache, runCacheCount = {}, 0
+-- The window of cells the surface lists (see findSurfaces) were made for: columns c0..c1 (whole blocks),
+-- rows y0..y1. A change to the water inside it (setWater) clears `valid`, and the lists are made again.
+local surfCache = { valid = false, b0 = 0, b1 = -1, c0 = 0, c1 = -1, y0 = 0, y1 = -1 }
 
 function fluids.clear()
   gas, water, fire, smoke, vents, braziers, columns = {}, {}, {}, {}, {}, {}, {}
@@ -103,6 +107,7 @@ function fluids.clear()
   dry, floodRows = {}, {}
   blockVer = {}
   runCache, runCacheCount = {}, 0
+  surfCache.valid = false
   active, waterRows, gasRows = {}, {}, {}
   gasTimer, fireTimer, drownTimer = TICK, TICK, TICK
   breathPlayer = nil
@@ -153,6 +158,17 @@ local function setWater(k, v)
     waterRows[r] = waterRows[r] - 1
   end
   water[k] = v or nil
+  local sc = surfCache
+  if sc.valid then
+    -- (a surface in the window reads the water in its own row and the 14 below it; a row's open stretches read the row above)
+    local gx = k % K - KOFF
+    if gx >= sc.c0 and gx <= sc.c1 then
+      local gy = rowOf(k)
+      if gy >= sc.y0 - 1 and gy <= sc.y1 + 14 then
+        sc.valid = false
+      end
+    end
+  end
 end
 
 local function setOil(k, v)
@@ -1338,9 +1354,28 @@ local stepList, stepMoved = {}, {}
 -- emptying a cell only helps the three cells over it and the two beside it. (The three under it used to
 -- be woken too, only to look around, find nothing and go back to sleep: most of a pouring pool's cost.)
 local UPWARD = { -K - 1, -K, -K + 1, -1, 1 }
+-- A cell leaving opens a gap that water in the row above it, up to SPREAD cells off, can now slide into,
+-- and clears the way along its own row for water that had been blocked by it: those cells are woken when
+-- the step ends (dirtyLo/dirtyHi: per row a cell left, the columns the gaps span). Without it a settled
+-- cell far from a new gap slept on until the next sweep, and a pool took many seconds to go flat after
+-- it was poured into.
+local dirtyLo, dirtyHi, dirtyRows = {}, {}, {}
 local function moveWater(k, n)
   setWater(k, nil)
   setWater(n, true)
+  do
+    local gx = k % K
+    local row = (k - gx) / K
+    local lo = dirtyLo[row]
+    if not lo then
+      dirtyLo[row], dirtyHi[row] = gx, gx
+      dirtyRows[#dirtyRows + 1] = row
+    elseif gx < lo then
+      dirtyLo[row] = gx
+    elseif gx > dirtyHi[row] then
+      dirtyHi[row] = gx
+    end
+  end
   stepMoved[n] = true
   if gas[n] then
     setGas(n, nil)
@@ -1391,18 +1426,39 @@ local function beginWaterStep(gx0, gy0, gx1, gy1)
   stepping = true
 end
 
--- Is there a drop within SPREAD cells along the row toward d, with open water-free cells all the way?
+-- Is there a drop within WATER_SPREAD cells along the row toward d, with open water-free cells all the way?
+-- Returns how many cells away the first one is (the cell beside the drop), or nil.
 local function slidesToward(k, d)
-  for i = 1, SPREAD do
+  for i = 1, WATER_SPREAD do
     local c = k + d * i
     if not free(c) then
-      return false
+      return nil
     end
     if free(c + K) then
-      return true
+      return i
     end
   end
-  return false
+  return nil
+end
+
+-- Wakes the water that the gaps of the step just ended opened a way for (see moveWater)
+local function wakeBesideGaps()
+  for i = #dirtyRows, 1, -1 do
+    local row = dirtyRows[i]
+    dirtyRows[i] = nil
+    local lo, hi = dirtyLo[row] - WATER_SPREAD, dirtyHi[row] + WATER_SPREAD
+    for r = row - 1, row do -- (the row above the gap, and the gap's own)
+      if (waterRows[r] or 0) > 0 then
+        local base = r * K
+        for gx = lo, hi do
+          if water[base + gx] then
+            active[base + gx] = true
+          end
+        end
+      end
+    end
+    dirtyLo[row], dirtyHi[row] = nil, nil
+  end
 end
 
 -- Works through up to `budget` cells of the step under way; returns how many it did
@@ -1453,12 +1509,20 @@ local function continueWaterStep(budget)
           moveWater(k, below + side)
         elseif free(below - side) and free(k - side) then
           moveWater(k, below - side)
-        elseif slidesToward(k, side) then
-          moveWater(k, k + side)
-        elseif slidesToward(k, -side) then
-          moveWater(k, k - side)
         else
-          active[k] = nil
+          -- (a drop along the row: the water runs straight to its lip, not a cell a step, so a mound
+          -- from a pour flattens at once instead of creeping outward)
+          local run = slidesToward(k, side)
+          if run then
+            moveWater(k, k + side * run)
+          else
+            run = slidesToward(k, -side)
+            if run then
+              moveWater(k, k - side * run)
+            else
+              active[k] = nil
+            end
+          end
         end
       end
     elseif not water[k] then
@@ -1484,6 +1548,9 @@ local function runSteps(dt, gx0, gy0, gx1, gy1)
   while budget > 0 do
     if stepping then
       budget = budget - continueWaterStep(budget)
+      if not stepping then
+        wakeBesideGaps()
+      end
     end
     if stepping or accWater < WATER_STEP or steps >= 2 then
       break
@@ -1700,6 +1767,7 @@ function fluids.update(dt, player, enemies)
   if not world then
     return
   end
+  local perf = require("src.perf") -- (a local here: this module's functions are near Lua's upvalue limit)
   lastPlayer, lastEnemies = player, enemies
   clock = clock + dt
   fluids.runJobs(ADD_BUDGET)
@@ -1709,6 +1777,7 @@ function fluids.update(dt, player, enemies)
   -- The flood around the hunter becomes real water (a margin past the
   -- simulated region, so it is there before it comes into view)
   fillFlood(gx0 - 20, gy0 - 20, gx1 + 20, gy1 + 20, floor(py / C), FLOOD_BUDGET)
+  perf.lap("water: queued jobs + flood fill")
 
   accSweep = accSweep + dt
   if accSweep >= SWEEP then
@@ -1718,8 +1787,10 @@ function fluids.update(dt, player, enemies)
   end
   wakeNewStrips(gx0, gy0, gx1, gy1)
   runSteps(dt, gx0, gy0, gx1, gy1)
+  perf.lap("water: cell steps")
   local gm = (VIEW_MARGIN - GAS_MARGIN) / C -- (the gas is stepped a little closer round the view than the water: cells further off wait)
   stepGasFrame(dt, gx0 + gm, gy0 + gm, gx1 - gm, gy1 - gm)
+  perf.lap("gas: steps")
   accSmoke = accSmoke + dt
   if accSmoke >= 0.05 then
     accSmoke = 0
@@ -1795,7 +1866,9 @@ function fluids.update(dt, player, enemies)
     end
   end
 
+  perf.lap("fire, smoke, columns, purge")
   fluids.updateLiquids(dt, player, enemies, px, py, b, gx0, gy0, gx1, gy1)
+  perf.lap("water: lava/acid/water vs hunter, creatures, props")
 
   -- The hunter: gas, fire and water
   local headK, midK = cellOf(px, b.y + 3), cellOf(px, py)
@@ -2464,8 +2537,16 @@ local function rowBlock(gy, block)
   return entry
 end
 
+local SURF_PAD = 12 -- rows kept above and below the view, so a little vertical movement does not make the lists again
 local function findSurfaces(view)
   local gx0, gy0, gx1, gy1 = visibleRange(view)
+  local b0, b1 = floor(gx0 / BLOCK), floor(gx1 / BLOCK)
+  local sc = surfCache
+  if sc.valid and sc.b0 == b0 and sc.b1 == b1 and gy0 >= sc.y0 and gy1 <= sc.y1 and not fluids.noSurfaceCache then
+    return -- (no water has changed in the window since the lists were made: they are what they would be again)
+  end
+  gy0, gy1 = gy0 - SURF_PAD, gy1 + SURF_PAD
+  sc.valid, sc.b0, sc.b1, sc.c0, sc.c1, sc.y0, sc.y1 = true, b0, b1, b0 * BLOCK, b1 * BLOCK + BLOCK - 1, gy0, gy1
   for i = #surfaces, 1, -1 do
     surfaces[i] = nil
   end
@@ -2475,7 +2556,6 @@ local function findSurfaces(view)
   if runCacheCount > 20000 then
     runCache, runCacheCount = {}, 0 -- (drop it all rather than let it grow as the hunter wanders)
   end
-  local b0, b1 = floor(gx0 / BLOCK), floor(gx1 / BLOCK)
   for gy = gy0, gy1 do
     if (waterRows[gy] or 0) > 0 then
       for block = b0, b1 do
@@ -2720,6 +2800,7 @@ end
 
 -- Water and smoke are drawn in front of the hunter, but lit
 function fluids.drawFront(view)
+  local perf = require("src.perf")
   local gx0, gy0, gx1, gy1 = visibleRange(view)
   local t = love.timer.getTime()
   -- Water, one pixel row at a time: rows of cells are split into runs of
@@ -2728,11 +2809,14 @@ function fluids.drawFront(view)
   -- while the body costs next to nothing. Cells the simulation treats as rock
   -- (a solid centre) at the end of a run lend their open pixels to it.
   findSurfaces(view)
+  perf.lap("water draw: find surfaces")
   drawReflections(view)
+  perf.lap("water draw: reflections")
   local mask = require("src.lighting").mask()
   if not (mask and drawWaterShaded(view, gx0, gy0, gx1, gy1, t, mask)) then
     drawWaterOld(gx0, gy0, gx1, gy1, t)
   end
+  perf.lap("water draw: the water itself")
   -- Smoke: single pixels, dithered by density and re-rolled a few times a
   -- second, so it reads as fine drifting grit instead of blocks. (The point
   -- tables are kept and reused frame to frame: smoke over a fire is thousands
@@ -2771,6 +2855,7 @@ function fluids.drawFront(view)
   if np > 0 then
     love.graphics.points(points)
   end
+  perf.lap("water draw: smoke")
   -- Oil: a dark, brown-black slick with a dull amber sheen along its top
   for gy = gy0, gy1 do
     if (oilRows[gy] or 0) > 0 then

@@ -55,6 +55,7 @@ local pickups = require("src.pickups")
 local Player = require("src.player")
 local props = require("src.props")
 local render = require("src.render")
+render.perf = require("src.perf") -- (the dev panel's timers and switches; reached through render so game.update and drawFrame take no new upvalue, they sit at Lua's limit)
 local save = require("src.save")
 local edgecue = require("src.edgecue")
 local settings = require("src.settings")
@@ -929,6 +930,8 @@ function game.update(dt)
   genSpent = 0
   local target = frameTarget(dt)
   dt = math.min(dt, 1 / 30) -- avoid huge steps after hitches
+  local perf = render.perf
+  perf.start("update")
 
   if pending then
     if pending.drawn then
@@ -976,7 +979,8 @@ function game.update(dt)
   save.update(dt, playing and not (itembar.isOpen() or menu.isOpen() or compare.isOpen()))
   toasts.update(dt)
   compare.update()
-  if scene.background then
+  perf.lap("audio, menus, saves")
+  if scene.background and not menu.isFrontEnd() then -- (nothing is built behind the title: pressing Play makes a new world, and what was built there is thrown away)
     -- (a bigger share of the frame goes to generating areas while nobody is playing)
     local px, py
     if player then
@@ -986,6 +990,7 @@ function game.update(dt)
     scene.background(menu.isOpen() or itembar.isOpen() or compare.isOpen(), px, py, target - lastWork)
     genSpent = love.timer.getTime() - g0
   end
+  perf.lap("building areas in the background")
   if playing then
     track(area)
     bounties.update(player, area)
@@ -1073,6 +1078,7 @@ function game.update(dt)
     end
   end
 
+  perf.lap("run bookkeeping, input")
   -- A dead hunter stays where he fell until the run is restarted (R)
   if not player.dead then
     local ob = player.body
@@ -1084,16 +1090,19 @@ function game.update(dt)
   player:syncPhysics(dt)
   enemies.syncPhysics(dt)
   props.snapshotVelocities()
+  perf.lap("hunter")
   physics.update(dt, player:center())
   if not player.dead then
     player:ride(dt)
   end
+  perf.lap("physics")
 
   targets.update(dt)
   props.update(dt)
   chests.update(dt)
   shop.update(dt, player)
   npcs.update(dt, player)
+  perf.lap("props, chests, shops, NPCs")
   -- random events happen in ordinary areas only: never in a boss arena, a shop or the overworld
   local eventArea = playing and area or nil
   if eventArea then
@@ -1104,19 +1113,29 @@ function game.update(dt)
     end
   end
   events.update(dt, player, eventArea)
-  bullets.update(dt, world)
-  enemies.update(dt, world, player)
+  perf.lap("events")
+  if not perf.off.bullets then
+    bullets.update(dt, world)
+  end
+  perf.lap("bullets")
+  if not perf.off.enemyAI then
+    enemies.update(dt, world, player)
+  end
+  perf.lap("enemies")
   fog.update(dt, world, player, enemies.nearby(), bullets)
   pickups.update(dt, world, player)
   fuser.update(dt, world, player, inv)
   effects.update(dt, world)
+  perf.lap("fog of war, pickups, effects")
   world:flushRepaints()
   world:refresh()
   hud.update(dt)
+  perf.lap("terrain repaint, HUD")
 
   if scene.update then
     scene.update(dt, player, game, effects)
   end
+  perf.lap("scene update: the rest (mine, bosses)")
   do
     -- Air, creatures and weather
     local view = { x = camX, y = camY, w = config.VIRTUAL_W, h = config.VIRTUAL_H }
@@ -1131,15 +1150,19 @@ function game.update(dt)
     if shopNow then
       areaNow = nil
     end
-    ambience.update(dt, world, player, areaNow, under, view)
-    critters.update(dt, world, player, areaNow, under, view)
-    weather.update(dt, 1 - under)
+    if not perf.off.ambient then
+      ambience.update(dt, world, player, areaNow, under, view)
+      critters.update(dt, world, player, areaNow, under, view)
+      weather.update(dt, 1 - under)
+    end
   end
+  perf.lap("critters, ambience, weather")
 
   local px, py = player:center()
   camera.update(dt, px, py, aimX, aimY)
   -- the terrain just outside the view, readied a little each frame
   world:prewarm(camX, camY, config.VIRTUAL_W, config.VIRTUAL_H)
+  perf.lap("camera, terrain prewarm")
 end
 
 local function drawLoading()
@@ -1181,25 +1204,30 @@ drawFrame = function()
     return
   end
   local camX, camY = camera.offset()
+  local perf = render.perf
+  perf.start("draw")
 
   -- Light map for this frame (scene ambient + every light source)
   local view = { x = camX, y = camY, w = config.VIRTUAL_W, h = config.VIRTUAL_H }
   lighting.begin(scene.ambient)
-  player:addLights(lighting)
-  enemies.addLights(lighting, view)
-  pickups.addLights(lighting, view)
-  props.addLights(lighting, view)
-  chests.addLights(lighting, view)
-  shop.addLights(lighting, view)
-  npcs.addLights(lighting, view)
-  events.addLights(lighting, view)
-  bullets.addLights(lighting)
-  effects.addLights(lighting)
-  fuser.addLights(lighting)
-  critters.addLights(lighting, view)
-  if scene.addLights then
-    scene.addLights(lighting, camX, camY)
+  if not perf.off.lights then
+    player:addLights(lighting)
+    enemies.addLights(lighting, view)
+    pickups.addLights(lighting, view)
+    props.addLights(lighting, view)
+    chests.addLights(lighting, view)
+    shop.addLights(lighting, view)
+    npcs.addLights(lighting, view)
+    events.addLights(lighting, view)
+    bullets.addLights(lighting)
+    effects.addLights(lighting)
+    fuser.addLights(lighting)
+    critters.addLights(lighting, view)
+    if scene.addLights then
+      scene.addLights(lighting, camX, camY)
+    end
   end
+  perf.lap("gather lights")
   lighting.render(camX, camY, function()
     world:draw(camX, camY, config.VIRTUAL_W, config.VIRTUAL_H)
   end, function()
@@ -1241,31 +1269,48 @@ drawFrame = function()
     render.eyeBlur() -- (one eye gone: a heavy, smeared vignette)
   end
   render.beginWorld()
-  if scene.drawBackground then
+  if scene.drawBackground and not perf.off.background then
     scene.drawBackground(camX, camY)
   end
+  perf.lap("background")
   love.graphics.push()
   love.graphics.translate(-camX, -camY)
-  if scene.drawDecor then
+  if scene.drawDecor and not perf.off.decor then
     scene.drawDecor(camX, camY)
   end
-  world:draw(camX, camY, config.VIRTUAL_W, config.VIRTUAL_H, lighting.terrainShader())
-  targets.draw()
-  props.draw(view)
-  chests.draw(view)
-  shop.draw(view)
-  npcs.draw(view, player)
-  events.draw(view)
-  enemies.draw(view)
+  perf.lap("decor: rest")
+  if not perf.off.terrain then
+    world:draw(camX, camY, config.VIRTUAL_W, config.VIRTUAL_H, lighting.terrainShader())
+  end
+  perf.lap("terrain")
+  if not perf.off.objects then
+    targets.draw()
+    props.draw(view)
+    chests.draw(view)
+    shop.draw(view)
+    npcs.draw(view, player)
+    events.draw(view)
+  end
+  perf.lap("props, chests, shops, NPCs, events")
+  if not perf.off.enemies then
+    enemies.draw(view)
+  end
+  perf.lap("enemies")
   player:draw()
-  effects.drawWorld()
-  critters.draw(view)
-  if scene.drawFront then
+  if not perf.off.effects then
+    effects.drawWorld()
+    critters.draw(view)
+  end
+  perf.lap("hunter, effects, critters")
+  if scene.drawFront and not perf.off.front then
     scene.drawFront(camX, camY)
   end
   love.graphics.pop()
+  perf.lap("front layer: oil and the rest")
 
-  lighting.drawMotes(camX, camY)
+  if not perf.off.motes then
+    lighting.drawMotes(camX, camY)
+  end
   local worldEnts
   if lighting.litSprites then
     -- (the lit sprites test: what stands in the world is drawn once more, for its silhouette)
@@ -1284,32 +1329,43 @@ drawFrame = function()
       player:draw()
     end)
   end
-  lighting.apply(worldEnts)
+  perf.lap("dust motes, lit sprites silhouette")
+  if not perf.off.apply then
+    lighting.apply(worldEnts)
+  end
 
   -- Emissive pass: glows that ignore the darkness
   love.graphics.push()
   love.graphics.translate(-camX, -camY)
-  if scene.drawEmissive then
-    scene.drawEmissive(camX, camY)
+  if not perf.off.emissive then
+    if scene.drawEmissive then
+      scene.drawEmissive(camX, camY)
+    end
+    critters.drawEmissive(view)
+    player:drawEmissive()
+    enemies.drawEmissive(view)
+    props.drawEmissive(view)
+    pickups.drawEmissive(view)
+    chests.drawEmissive(view)
+    shop.drawEmissive(view)
+    npcs.drawEmissive(view)
+    events.drawEmissive(view)
+    bullets.draw()
+    effects.drawEmissive()
   end
-  critters.drawEmissive(view)
-  player:drawEmissive()
-  enemies.drawEmissive(view)
-  props.drawEmissive(view)
-  pickups.drawEmissive(view)
-  chests.drawEmissive(view)
-  shop.drawEmissive(view)
-  npcs.drawEmissive(view)
-  events.drawEmissive(view)
-  bullets.draw()
-  effects.drawEmissive()
-  fog.draw(view) -- (after every light and glow: it hides them all)
+  perf.lap("glows (emissive pass)")
+  if not perf.off.fogdraw then
+    fog.draw(view) -- (after every light and glow: it hides them all)
+  end
   fuser.drawEmissive()
   if showPhysics then
     physics.drawDebug()
   end
   love.graphics.pop()
-  weather.drawScreen(love.timer.getDelta())
+  perf.lap("fog of war overlay")
+  if not perf.off.weather then
+    weather.drawScreen(love.timer.getDelta())
+  end
   -- A red flash when the hunter is hurt
   if player.hurtFlash > 0 then
     love.graphics.setColor(0.7, 0.05, 0.05, 0.28 * player.hurtFlash)
@@ -1320,7 +1376,9 @@ drawFrame = function()
     love.graphics.setColor(0, 0, 0, fade)
     love.graphics.rectangle("fill", 0, 0, config.VIRTUAL_W, config.VIRTUAL_H)
   end
+  perf.lap("weather, hurt flash")
   render.endWorld()
+  perf.lap("post: bloom, mood, scale to window")
 
   -- The crosshair goes on after the finished frame, so the bloom can't make it glow
   if not itembar.isOpen() and not menu.isOpen() and not compare.isOpen() and not player.dead then
@@ -1382,9 +1440,11 @@ drawFrame = function()
     love.graphics.setColor(0, 0, 0, restartFade)
     love.graphics.rectangle("fill", 0, 0, ww, wh)
   end
+  perf.lap("HUD and screen overlays")
   compare.draw(inv, render.uiScale())
   visuals.draw(render.uiScale())
   devpanel.draw(render.uiScale())
+  perf.draw(render.uiScale())
   toasts.draw(render.uiScale())
   menu.draw(render.uiScale())
   love.graphics.setColor(1, 1, 1)

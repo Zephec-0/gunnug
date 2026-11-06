@@ -264,6 +264,61 @@ function destruction.collapse(world, x0, y0, x1, y1, bw, bh)
   return total
 end
 
+-- A cave-in in rock: the slab breaks into jagged, irregular chunks (each pixel goes to the nearest of a jittered grid of
+-- seed points, so the pieces are angular shards, not boxes), roughly bw x bh across. Only the columns where
+-- `columnOK(x)` is true come down: the part of the slab resting on the cave's walls stays in the rock (a chunk cut
+-- out of the wall would only fall into its own pocket and sit there stuck), and a column beside a held one is
+-- spared too, so nothing is jammed against the wall it came out of. Returns how many pixels came down.
+local function seedHash(a, b, salt)
+  return (math.sin(a * 127.1 + b * 311.7 + salt * 74.7) * 43758.5453) % 1
+end
+
+function destruction.collapseRock(world, x0, y0, x1, y1, bw, bh, columnOK)
+  local ok = {}
+  for x = x0 - 1, x1 + 1 do
+    ok[x] = columnOK(x)
+  end
+  local groups = {}
+  for y = y0, y1 do
+    local gy = math.floor((y - y0) / bh)
+    for x = x0, x1 do
+      if ok[x] and ok[x - 1] and ok[x + 1] and world:inBounds(x, y) then
+        local id = world:get(x, y)
+        if solid[id] and not anchored[id] then
+          local gx = math.floor((x - x0) / bw)
+          local best, bestD, bestKey
+          for oy = -1, 1 do
+            for ox = -1, 1 do
+              local sx = gx + ox
+              local sy = gy + oy
+              local px = x0 + (sx + 0.5 + (seedHash(sx, sy, 1) - 0.5) * 0.95) * bw
+              local py = y0 + (sy + 0.5 + (seedHash(sx, sy, 2) - 0.5) * 0.95) * bh
+              local dx, dy = (x + 0.5 - px) / bw, (y + 0.5 - py) / bh
+              local d = dx * dx + dy * dy
+              if not bestD or d < bestD then
+                bestD, bestKey = d, sy * 4096 + sx
+              end
+            end
+          end
+          local g = groups[bestKey]
+          if not g then
+            g = { xs = {}, ys = {}, n = 0 }
+            groups[bestKey] = g
+          end
+          g.n = g.n + 1
+          g.xs[g.n], g.ys[g.n] = x, y
+        end
+      end
+    end
+  end
+  local total = 0
+  for _, g in pairs(groups) do
+    makeDebris(world, g.xs, g.ys, g.n)
+    total = total + g.n
+  end
+  return total
+end
+
 -- Digs a crater of the given radius at (cx, cy). Each pixel in range is
 -- removed with probability power / hardness. dx, dy is the impact direction
 -- (debris sprays back against it). Vault rock only gives to a dig with vaultDig set.

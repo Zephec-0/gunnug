@@ -2,7 +2,7 @@
 -- people who went in left behind. The terrain work and the ground colouring are done at build time (world tints
 -- and carved terraces); the standing dressing (graves, a pier, a crane, banners) is drawn every frame with the rest
 -- of the ground-level scenery (src.scenes.overworld).
---   The Old Mine   : the miners' graves, a notice board, a rope across the way down, a spilled cart
+--   The Old Mine   : a rope across the way down, a spilled cart
 --   Sunken Hollows : a pier into the lake, a swamped rowboat, the roof of a drowned cabin, nets drying on the beach
 --   The Quarry     : a stepped pit round the crevice, cut blocks, a derrick and a sled, the ground paling to the
 --                    quarry's own stone and rust
@@ -15,7 +15,7 @@ local STONEBRICK, STONE, AIR, SAND, SANDSTONE = materials.STONEBRICK, materials.
 local HOSTS = { SAND } -- (only the surface sand takes the colour, not the rock under it)
 
 local QUARRY_X, QUARRY_HALF = 4300, 19
-local MINE = { graves = 1360, notice = 1432, rope0 = 1590, rope1 = 1722 }
+local MINE = { rope0 = 1590, rope1 = 1722 }
 local NEEDLE_X0, NEEDLE_X1 = 5000, 5860
 local MOUTH_X = 5916 -- the face of the mountain where the doorway is cut (src.cavegen carveWalkIn)
 
@@ -283,47 +283,11 @@ local WOOD, WOOD_D, WOOD_L = { 0.36, 0.25, 0.15 }, { 0.22, 0.15, 0.10 }, { 0.52,
 local IRON = { 0.30, 0.30, 0.34 }
 local CLOTH = { 0.55, 0.22, 0.18 }
 
-local function cross(x, g, lean, hat)
-  R(WOOD_D, x + 1, g - 14, 3, 14)
-  R(WOOD_D, x - 2, g - 11, 9, 3)
-  R(WOOD, x + 2, g - 14, 1, 14)
-  R(WOOD, x - 2, g - 11, 9, 1)
-  if hat then
-    R({ 0.18, 0.13, 0.09 }, x - 1, g - 17, 7, 2)
-    R({ 0.18, 0.13, 0.09 }, x + 1, g - 20, 3, 3)
-  end
-  R({ 0.62, 0.50, 0.32 }, x - 3, g - 2, 11, 2, 0.8) -- (the mound)
-end
-
 local function drawMine(vx0, vx1)
-  if vx1 < MINE.graves - 40 or vx0 > MINE.rope1 + 40 then
+  if vx1 < MINE.rope0 - 40 or vx0 > MINE.rope1 + 40 then
     return
   end
   local s = surfaceAt
-  -- the miners' graves: a row of crosses, some with a hat left on, one mound fresher than the rest
-  for i = 0, 5 do
-    local x = MINE.graves + i * 15
-    local g = s(x + 2)
-    cross(x, g, 0, i == 1 or i == 4)
-    if i == 5 then
-      R({ 0.45, 0.30, 0.18 }, x - 2, g - 3, 9, 3) -- the fresh one: dark turned earth
-      R(WOOD_L, x + 7, g - 5, 2, 5)
-      R({ 1.0, 0.72, 0.3 }, x + 7, g - 7, 2, 2, 0.9) -- a lantern left burning at its head
-    end
-  end
-  -- the notice board at the head of the ramp: a plank with a painted cross, a nailed paper, crossed picks
-  local nx = MINE.notice
-  local g = s(nx)
-  R(WOOD_D, nx, g - 24, 3, 24)
-  R(WOOD_D, nx + 20, g - 24, 3, 24)
-  R(WOOD, nx - 2, g - 34, 27, 14)
-  R(WOOD_L, nx - 2, g - 34, 27, 1)
-  R(CLOTH, nx + 9, g - 32, 3, 10)
-  R(CLOTH, nx + 5, g - 29, 11, 3)
-  R({ 0.82, 0.76, 0.62 }, nx + 17, g - 31, 5, 6)
-  R(IRON, nx - 8, g - 9, 1, 9) -- a pick stuck in the sand beside it
-  R(IRON, nx - 11, g - 10, 7, 1)
-  R(WOOD_D, nx - 8, g - 8, 1, 8)
   -- a rope across the way down at the pit's two rims, sagging between posts
   for _, px in ipairs({ MINE.rope0, MINE.rope1 }) do
     local pg = s(px)

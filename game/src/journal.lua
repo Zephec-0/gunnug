@@ -1,5 +1,5 @@
--- The hunter's journal: torn pages left where the people who went down lived and worked, one or two at each of the
--- four ways down (the Old Mine, the lake, the Quarry, the Needle). Walk up and press E to read one. Each page read is
+-- The hunter's journal: torn pages left where the people who went down lived and worked, lying on the floors inside
+-- the dungeons (the Old Mine, the lake's caverns, the Quarry, the Needle and more), none out in the open. Walk up and press E to read one. Each page read is
 -- kept in the profile (the compendium's "Journal" tab, src.compendium) and can be read again from the world.
 -- Add a page here and it appears in the world and the compendium.
 --
@@ -8,38 +8,39 @@ local input = require("src.input")
 
 local journal = {}
 
--- x: where it lies. The y is the ground there (src.entrances.standY). where: its place in the compendium.
+-- area: the dungeon it lies in (the level's index, src.scenes.catacombs LAYOUT); it is placed on a floor spot when that
+-- area is spawned (setupArea). where: its place in the compendium.
 journal.PAGES = {
   {
-    id = "mine_notice", title = "Notice of Closure", where = "The Old Mine", x = 1452,
+    id = "mine_notice", title = "Notice of Closure", where = "The Old Mine", area = 1,
     text = "By order of the Gunnug Mining Co.: the lower workings are CLOSED until further notice. Any man found below the third level will be struck from the roll.\n\n- The Superintendent\n\nUnderneath, in pencil: \"The roll is already short.\"",
   },
   {
-    id = "mine_graves", title = "Names at the Head of the Row", where = "The Old Mine", x = 1442,
+    id = "mine_graves", title = "Names Cut into the Timbers", where = "The Old Mine", area = 1,
     text = "Five crosses and a sixth mound. Someone cut the names into the boards: Alder. Quill. The Pruitt boys. Old Tam.\n\nThe sixth board is blank. The lantern set at its head is still burning, and no one in the camp admits to filling it.",
   },
   {
-    id = "lake_ledger", title = "A Ledger, Swollen with Water", where = "The Sunken Hollows", x = -566,
+    id = "lake_ledger", title = "A Ledger, Swollen with Water", where = "The Sunken Hollows", area = 8,
     text = "Pumps ran day and night in the second shaft. March: the water rose a foot. April: a yard. May: the foreman says the lake is feeding the mine, not the mine the lake.\n\nNobody asked him how a lake gets under a mine.",
   },
   {
-    id = "lake_sketch", title = "Surveyor's Sketch", where = "The Sunken Hollows", x = -1258,
+    id = "lake_sketch", title = "Surveyor's Sketch", where = "The Sunken Hollows", area = 8,
     text = "The ground here was dry when we mapped it: three pegs, a cairn and a spring. I have drawn it as we found it, and written WATER across the middle in a hand I do not trust.\n\nIt was not there when I began the page.",
   },
   {
-    id = "quarry_order", title = "Foreman's Order", where = "The Quarry", x = 4172,
+    id = "quarry_order", title = "Foreman's Order", where = "The Quarry", area = 6,
     text = "Cut to the line. Do not cut past the line.\n\nThe stone below the sixth bench rings wrong, and the men say it answers back. Cut to the line.",
   },
   {
-    id = "quarry_count", title = "The Cut Count", where = "The Quarry", x = 4214,
+    id = "quarry_count", title = "The Cut Count", where = "The Quarry", area = 6,
     text = "Blocks cut: 4,112.\nBlocks hauled: 3,980.\nBlocks unaccounted for: 132, and one hall.\n\nWe counted twice. The hall is still there. It is not on the plan.",
   },
   {
-    id = "needle_scrawl", title = "Pilgrim's Scrawl", where = "The Needle", x = 5582,
+    id = "needle_scrawl", title = "Pilgrim's Scrawl", where = "The Needle", area = 10,
     text = "Scratched into the stone with something that was not a knife:\n\nUP. THE WAY IS UP. I have seen the stair from here. The flank climbs and climbs and the light at the top does not move.\n\nTell them I went willingly.",
   },
   {
-    id = "needle_banner", title = "The Last Banner", where = "The Needle", x = 5812,
+    id = "needle_banner", title = "The Last Banner", where = "The Needle", area = 10,
     text = "Red cloth tied to a dead man's staff, left where the stones begin. Whoever raised it did not mean it as a warning.\n\nIt reads like a welcome.",
   },
 }
@@ -94,11 +95,13 @@ function journal.clear()
   end
 end
 
--- A dungeon area has been spawned: its page lies on the first of the spots cavegen found
+-- A dungeon area has been spawned: its pages lie on the spots cavegen found, one each
 function journal.setupArea(index, spots)
+  local n = 0
   for _, p in ipairs(journal.PAGES) do
     if p.area == index then
-      local s = spots and spots[1]
+      n = n + 1
+      local s = spots and (spots[n] or spots[1]) -- (the spots are found apart; a page with none of its own shares the first)
       if s then
         p.x, p.y = s[1], s[2]
       end
@@ -187,22 +190,56 @@ function journal.draw(view)
   love.graphics.setColor(1, 1, 1, 1)
 end
 
--- Unread pages glow faintly
+-- (a soft round blob, alpha falling off smoothly from the middle to the edge: made once)
+local glow
+local function glowImage()
+  if not glow then
+    local data = love.image.newImageData(32, 32)
+    for y = 0, 31 do
+      for x = 0, 31 do
+        local dx, dy = (x + 0.5 - 16) / 16, (y + 0.5 - 16) / 16
+        local d = math.min(1, math.sqrt(dx * dx + dy * dy))
+        data:setPixel(x, y, 1, 1, 1, (1 - d) ^ 2)
+      end
+    end
+    glow = love.graphics.newImage(data)
+    glow:setFilter("linear", "linear")
+  end
+  return glow
+end
+
+-- Unread pages glow: a wide soft halo that fades out at its edges, a tighter warm one round the paper, and a pulse
 function journal.drawEmissive(view)
+  local img = glowImage()
   for _, p in ipairs(journal.PAGES) do
     if inView(view, p) and not isRead(p.id) then
       local g = ground(p)
       if g then
         local pulse = 0.5 + 0.5 * math.sin(clock * 2.2 + p.x)
-        R({ 1.0, 0.86, 0.5 }, 0.07 + 0.05 * pulse, p.x - 12, g - 24, 24, 26)
-        R({ 1.0, 0.9, 0.6 }, 0.12 + 0.08 * pulse, p.x - 4, g - 13, 8, 9)
+        local cx, cy = p.x, g - 8
+        love.graphics.setColor(1.0, 0.82, 0.45, 0.20 + 0.10 * pulse)
+        local r = 30
+        love.graphics.draw(img, cx - r, cy - r, 0, 2 * r / 32, 2 * r / 32)
+        love.graphics.setColor(1.0, 0.9, 0.6, 0.32 + 0.16 * pulse)
+        r = 13
+        love.graphics.draw(img, cx - r, cy - r, 0, 2 * r / 32, 2 * r / 32)
       end
     end
   end
   love.graphics.setColor(1, 1, 1, 1)
 end
 
-function journal.addLights() end
+-- ...and throw a little warm light on the cave round them
+function journal.addLights(lighting, view)
+  for _, p in ipairs(journal.PAGES) do
+    if p.x and inView(view, p) and not isRead(p.id) then
+      local g = ground(p)
+      if g then
+        lighting.add(p.x, g - 8, 46, 1.0, 0.82, 0.5, 0.35)
+      end
+    end
+  end
+end
 
 local function prompt(font, toScreen, wx, wy, text)
   local sx, sy = toScreen(wx, wy)

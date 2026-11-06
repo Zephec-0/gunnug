@@ -441,18 +441,27 @@ local function build()
       name = "The Biggest Fish"
       desc = "The last of them: the Angler Sharkwhale, with four great tusks. It was a small fish. Then something bigger ate it, then something bigger ate that. Shoot the teeth first."
     end
-    add("enemy", {
+    -- (the portrait is drawn the first time it is looked at, not with the catalogue: all of them at once was a half-second stall
+    -- the first time anything was discovered)
+    add("enemy", setmetatable({
       id = id,
       name = name,
       desc = desc,
-      image = enemyImage(id),
       boss = d.boss,
       stats = {
         { "Health", fmt(d.hp) },
         { "Damage", d.damage and fmt(d.damage) or (d.globDamage and fmt(d.globDamage)) or "-" },
         { "Gold", d.gold and (d.gold[1] .. "-" .. d.gold[2]) or "-" },
       },
-    })
+    }, {
+      __index = function(t, k)
+        if k == "image" then
+          local img = enemyImage(id) or false
+          rawset(t, "image", img)
+          return img
+        end
+      end,
+    }))
   end
   -- The conditions that can come on the hunter (src.status), and the journal's pages (src.journal)
   local status = require("src.status")

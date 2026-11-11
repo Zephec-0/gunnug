@@ -2,12 +2,12 @@
 -- hazards (src.fluids) and from a few enemies' attacks (Player:hurt maps the attacker to a condition), last a while,
 -- and play against each other:
 --
---   Soaked    from water, 12 s after leaving it, or three rolls (he shakes the water off).  Puts out Burning and washes
+--   Soaked    from water, 12 s after leaving it, or two rolls (he shakes the water off).  Puts out Burning and washes
 --             Oiled off; Burning can't take hold while it lasts. But shocks hurt 75% more and stun 50% longer.
 --   Oiled     from oil, 15 s (or until washed).  Burning lasts 80% longer and hurts 50% more; the hunter slides
 --             on the ground (a third of the grip). Can't be oiled while swimming.
 --   Burning   from fire, lava, flame attacks, 4 s.  2 damage every half second (3 if Oiled), a little faster on
---             the feet. Three rolls smother it; water puts it out. He sheds orange sparks and wisps, and lights
+--             the feet. Two rolls smother it; water puts it out. He sheds orange sparks and wisps, and lights
 --             any gas or oil he touches.
 --   Poisoned  from gas, acid, spitters, 6 s.  1-3 damage every 0.8 s by its stacks (gas builds them the longer he
 --             breathes it), and a slower walk.
@@ -26,8 +26,8 @@ status.DEFS = {
   soaked = {
     name = "Soaked",
     color = { 0.45, 0.75, 1.0 },
-    desc = "Water running off the hunter. It puts out any fire on him and keeps new fire from taking hold, but it carries a current: shocks hurt a good deal more and stun a good deal longer. Three rolls shake it off.",
-    stats = { { "From", "Water" }, { "Lasts", "12 s, 3 rolls" }, { "Fire", "Put out" }, { "Shock", "+75%" } },
+    desc = "Water running off the hunter. It puts out any fire on him and keeps new fire from taking hold, but it carries a current: shocks hurt a good deal more and stun a good deal longer. Two rolls shake it off.",
+    stats = { { "From", "Water" }, { "Lasts", "12 s, 2 rolls" }, { "Fire", "Put out" }, { "Shock", "+75%" } },
   },
   oiled = {
     name = "Oiled",
@@ -38,14 +38,14 @@ status.DEFS = {
   burning = {
     name = "Burning",
     color = { 1.0, 0.55, 0.15 },
-    desc = "He's on fire. It keeps hurting after he leaves the flames. Three rolls smother it, water puts it out, and a burning hunter lights any gas or oil he touches.",
-    stats = { { "From", "Fire, lava" }, { "Lasts", "4 s, 3 rolls" }, { "Damage", "2 / 0.5 s" }, { "Cure", "Rolls, water" } },
+    desc = "He's on fire. It keeps hurting after he leaves the flames. Two rolls smother it, water puts it out, and a burning hunter lights any gas or oil he touches.",
+    stats = { { "From", "Fire, lava" }, { "Lasts", "4 s, 2 rolls" }, { "Damage", "2 / 0.5 s" }, { "Cure", "Rolls, water" } },
   },
   poisoned = {
     name = "Poisoned",
     color = { 0.62, 0.86, 0.26 },
     desc = "Venom or fumes working through him. It ticks harder the more of it he has taken in, and slows him. Breathing gas builds it up.",
-    stats = { { "From", "Gas, acid" }, { "Lasts", "6 s" }, { "Damage", "1-3 / 0.8 s" }, { "Slows", "Up to 16%" } },
+    stats = { { "From", "Gas, acid" }, { "Lasts", "12 s" }, { "Damage", "1-3 / 0.8 s" }, { "Slows", "Up to 16%" } },
   },
   shocked = {
     name = "Shocked",
@@ -57,11 +57,11 @@ status.DEFS = {
 
 -- Which condition an attacker (a source id, see src.deaths) leaves behind, and for how long
 local SOURCE = {
-  spitter = { "poisoned", 5 },
-  bloater = { "poisoned", 4 },
-  hopper = { "poisoned", 3 },
-  acid = { "poisoned", 4 },
-  gas = { "poisoned", 3 },
+  spitter = { "poisoned", 10 },
+  bloater = { "poisoned", 8 },
+  hopper = { "poisoned", 6 },
+  acid = { "poisoned", 8 },
+  gas = { "poisoned", 6 },
   wisp = { "burning", 3 },
   slagback = { "burning", 4 },
   lava = { "burning", 5 },
@@ -77,10 +77,10 @@ local SOURCE = {
   tarcrawler = { "oiled", 10 },
 }
 
-local DURATION = { soaked = 12, oiled = 15, burning = 4, poisoned = 6, shocked = 0.8 }
+local DURATION = { soaked = 12, oiled = 15, burning = 4, poisoned = 12, shocked = 0.8 }
 
 local BURN_TICK, POISON_TICK = 0.5, 0.8
-local ROLLS_TO_SHAKE = 3 -- rolls that shake off Soaked or put out Burning
+local ROLLS_TO_SHAKE = 2 -- rolls (seen through to the end) that shake off Soaked or put out Burning
 
 function status.reset(player)
   player.status = {}
@@ -175,6 +175,13 @@ function status.onFirst(p, kind)
   end)
 end
 
+-- The condition's icon for a death source that was one (fire, lava, poison, gas, acid, a shock), for the wanted poster
+local DEATH_ICON = { fire = "burning", lava = "burning", poison = "poisoned", gas = "poisoned", acid = "poisoned", shock = "shocked", lightning = "shocked" }
+function status.iconForSource(source)
+  local kind = source and DEATH_ICON[source]
+  return kind and status.icon(kind) or nil
+end
+
 -- The condition an attacker leaves, if any (called when it hurts the hunter)
 function status.fromSource(p, source)
   local m = source and SOURCE[source]
@@ -222,6 +229,32 @@ local function drip(p, color, rate, dt, up)
   end
 end
 
+-- A dodge roll that went through to the end (src.player calls this as the roll finishes; one cut short by a jump
+-- does not count): each one wears Soaked and Burning down, and the second shakes the water off or puts the fire out
+function status.rollFinished(p)
+  local S = p.status
+  if not S or p.dead then
+    return
+  end
+  local cx, cy = p:center()
+  for _, kind in ipairs({ "soaked", "burning" }) do
+    local s = S[kind]
+    if s and s.t > 0 then
+      s.rolls = (s.rolls or 0) + 1
+      if s.rolls >= ROLLS_TO_SHAKE then
+        S[kind] = nil
+        for _ = 1, 6 do
+          local c = kind == "burning" and { 0.55, 0.52, 0.5 } or { 0.6, 0.82, 1 }
+          effects.particle(cx + (love.math.random() - 0.5) * 8, cy + (love.math.random() - 0.5) * 12, (love.math.random() - 0.5) * 40, -10 - love.math.random() * 25, 0.6, c, 20)
+        end
+        if kind == "burning" then
+          effects.popup(cx, p.body.y - 8, "Put out", { 1, 0.75, 0.4 })
+        end
+      end
+    end
+  end
+end
+
 function status.update(p, dt)
   local S = p.status
   if not S or p.dead then
@@ -237,24 +270,6 @@ function status.update(p, dt)
     end
   end
   local cx, cy = p:center()
-  -- Each roll (counted as it begins) wears Soaked and Burning down: the third shakes the water off or puts the fire out
-  local rolling = p.rollT ~= nil
-  if rolling and not p.statusRolling then
-    for _, kind in ipairs({ "soaked", "burning" }) do
-      local s = S[kind]
-      if s then
-        s.rolls = (s.rolls or 0) + 1
-        if s.rolls >= ROLLS_TO_SHAKE then
-          S[kind] = nil
-          for _ = 1, 6 do
-            local c = kind == "burning" and { 0.55, 0.52, 0.5 } or { 0.6, 0.82, 1 }
-            effects.particle(cx + (love.math.random() - 0.5) * 8, cy + (love.math.random() - 0.5) * 12, (love.math.random() - 0.5) * 40, -10 - love.math.random() * 25, 0.6, c, 20)
-          end
-        end
-      end
-    end
-  end
-  p.statusRolling = rolling
   if S.soaked then
     drip(p, { 0.6, 0.82, 1 }, 5, dt)
   end

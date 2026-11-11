@@ -73,6 +73,14 @@ end
 
 function livewire.update(dt, player)
   clock = clock + dt
+  for _, w in ipairs(wires) do
+    if w.flash then
+      w.flash = w.flash - dt
+      if w.flash <= 0 then
+        w.flash = nil
+      end
+    end
+  end
   lastPlayer = player
   local pcx, pcy = player:center()
   for _, w in ipairs(wires) do
@@ -107,13 +115,27 @@ function livewire.shot(x, y)
   for _, w in ipairs(wires) do
     if not w.dead and not w.cut and math.abs(x - w.x) < 6 and y > w.y and y < w.y + LEN + 4 then
       w.cut = true
-      if w.state ~= "arc" then
-        w.state, w.t = "arc", 0.35
-        w.arc = w.arc or reach(w)
-        if lastPlayer then
-          fire(w, lastPlayer)
-        end
+      -- It goes at once, in a burst of electricity: a flash, sparks flung every way and the glass in pieces. Whoever
+      -- is under it still takes the one shock (and the pool under it the current), but there is no arc to wait for.
+      w.arc = w.arc or reach(w)
+      if w.state ~= "arc" and lastPlayer then
+        fire(w, lastPlayer)
       end
+      w.dead = true
+      w.flash = 0.3
+      local tx, ty = tip(w)
+      local rnd = love.math.random
+      for _ = 1, 26 do
+        local a = rnd() * math.pi * 2
+        local sp = 60 + rnd() * 150
+        effects.particle(tx, ty - 4, math.cos(a) * sp, math.sin(a) * sp - 20, 0.2 + rnd() * 0.3, rnd() < 0.5 and { 0.85, 0.95, 1 } or { 0.5, 0.8, 1 }, 200, true)
+      end
+      for _ = 1, 10 do
+        effects.particle(w.x + (rnd() - 0.5) * 4, w.y + rnd() * LEN, (rnd() - 0.5) * 90, -10 - rnd() * 60, 0.6 + rnd() * 0.4, rnd() < 0.5 and { 0.78, 0.92, 1.0 } or { 0.55, 0.7, 0.85 }, 520)
+      end
+      pcall(function()
+        require("src.audio").playAt("wisp_crackle", tx, ty, 1, 1.6)
+      end)
       return true
     end
   end
@@ -223,6 +245,14 @@ end
 
 function livewire.drawEmissive(view)
   for _, w in ipairs(wires) do
+    if inView(view, w) and w.flash then
+      -- the burst: a bright ring of light that swells and fades
+      local k = 1 - w.flash / 0.3
+      local tx, ty = tip(w)
+      love.graphics.setColor(0.8, 0.95, 1, 0.8 * (1 - k))
+      local d = 18 + 40 * k
+      love.graphics.draw(glowImage(), tx - d / 2, ty - 4 - d / 2, 0, d / 32, d / 32)
+    end
     if inView(view, w) and not w.dead then
       local tx, ty = tip(w)
       if w.state == "charge" then
@@ -255,6 +285,10 @@ end
 
 function livewire.addLights(lighting, view)
   for _, w in ipairs(wires) do
+    if inView(view, w) and w.flash then
+      local tx, ty = tip(w)
+      lighting.add(tx, ty - 4, 80, 0.7, 0.9, 1, 1.2 * (w.flash / 0.3))
+    end
     if inView(view, w) and not w.dead then
       local tx, ty = tip(w)
       if w.state == "arc" then

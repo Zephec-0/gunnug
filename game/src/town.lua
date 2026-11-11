@@ -22,8 +22,8 @@ local story = require("src.story")
 local town = {}
 
 town.PORCH_H = 8 -- how far the porch stands above the street
-town.PORCH_HALF = 28 -- half its width
-local STEP_W, STEPS = 3, 3 -- steps on the left end of each porch, 2 px a rise
+town.PORCH_HALF = 31 -- half its width (the buildings are 62 wide: the porch holds all of one)
+local STEP_W, STEPS = 3, 3 -- steps on the outer ends of each porch, 2 px a rise
 
 town.LOTS = {
   { id = "apothecary", x = 520, accent = { 0.38, 0.55, 0.42 }, sign = "APOTHECARY" },
@@ -81,8 +81,9 @@ function town.build(world, surface, WOOD, SAND, AIR)
   ctx = { world = world, surface = surface, WOOD = WOOD, SAND = SAND, AIR = AIR }
   for _, l in ipairs(town.LOTS) do
     local lo = l.x - town.PORCH_HALF - STEP_W * STEPS
+    local hi = l.x + town.PORCH_HALF + STEP_W * STEPS
     local minS = math.huge
-    for x = lo, l.x + town.PORCH_HALF do
+    for x = lo, hi do
       minS = math.min(minS, surface(x))
     end
     l.ground = minS
@@ -90,6 +91,19 @@ function town.build(world, surface, WOOD, SAND, AIR)
     l.built = false
   end
   town.sync(true)
+end
+
+-- The nearest other lot on a side (dir -1 / 1) close enough that the two porches meet
+local function neighbour(l, dir)
+  local reach = 2 * town.PORCH_HALF + 2 * STEP_W * STEPS + 2
+  local best
+  for _, n in ipairs(town.LOTS) do
+    local d = (n.x - l.x) * dir
+    if d > 0 and d <= reach and (not best or d < (best.x - l.x) * dir) then
+      best = n
+    end
+  end
+  return best
 end
 
 -- The columns a lot's porch and steps fill: { x, top } each
@@ -100,17 +114,29 @@ local function columns(l)
   for x = x0, x1 do
     out[#out + 1] = { x, l.top }
   end
-  local lo = x0 - STEP_W * STEPS
-  -- the steps, from the porch's edge outward, evenly down to the street as it
-  -- is where they end (so a dip in the ground never makes a step too tall
-  -- to walk up: 5 px is the most)
-  local rise = math.max(town.PORCH_H, surface(lo - 1) - l.top)
-  for j = 1, STEPS do
-    local top = l.top + math.floor(rise * j / (STEPS + 1))
-    for k = 0, STEP_W - 1 do
-      local x = x0 - STEP_W * (j - 1) - 1 - k
-      if surface(x) > top then
-        out[#out + 1] = { x, top }
+  for _, dir in ipairs({ -1, 1 }) do
+    local n = neighbour(l, dir)
+    local edge = dir < 0 and x0 or x1
+    if n then
+      -- another porch close by: the left one closes the little gap between them
+      if dir > 0 then
+        for x = x1 + 1, n.x - town.PORCH_HALF - 1 do
+          out[#out + 1] = { x, l.top }
+        end
+      end
+    else
+      -- the steps, from the porch's edge outward, evenly down to the street as it
+      -- is where they end (so a dip in the ground never makes a step too tall
+      -- to walk up: 5 px is the most)
+      local rise = math.max(town.PORCH_H, surface(edge + dir * (STEP_W * STEPS + 1)) - l.top)
+      for j = 1, STEPS do
+        local top = l.top + math.floor(rise * j / (STEPS + 1))
+        for k = 0, STEP_W - 1 do
+          local x = edge + dir * (STEP_W * (j - 1) + 1 + k)
+          if surface(x) > top then
+            out[#out + 1] = { x, top }
+          end
+        end
       end
     end
   end
@@ -602,7 +628,7 @@ local function hall(l)
   R(WOOD_D, cx + 30, P - 26, 2, 26)
 end
 
--- The welcome sign at the west end of the street, and a telegraph pole at each end
+-- The welcome sign at the west end of the street
 local function streetExtras(surface)
   local gl = surface(STREET_X0 + 6)
   R(WOOD_D, STREET_X0 - 2, gl - 22, 2, 22)
@@ -610,23 +636,6 @@ local function streetExtras(surface)
   love.graphics.setColor(1, 1, 1)
   local img = textImage("GUNNUG", { 0.50, 0.36, 0.22 }, CREAM)
   love.graphics.draw(img, STREET_X0 + 10 - math.floor(img:getWidth() / 2), gl - 28)
-  -- telegraph poles with a wire between them, sagging over the rooftops
-  local g0, g1 = surface(STREET_X0 - 8), surface(STREET_X1 + 8)
-  local top0, top1 = g0 - 92, g1 - 92
-  for _, p in ipairs({ { STREET_X0 - 8, g0, top0 }, { STREET_X1 + 8, g1, top1 } }) do
-    R(WOOD_D, p[1] - 1, p[3], 3, p[2] - p[3])
-    R(WOOD, p[1] - 5, p[3] + 2, 11, 2)
-    R(CREAM_D, p[1] - 5, p[3] + 1, 1, 1)
-    R(CREAM_D, p[1] + 5, p[3] + 1, 1, 1)
-  end
-  love.graphics.setColor(0.12, 0.1, 0.1, 0.85)
-  local px, py = STREET_X0 - 3, top0 + 1
-  for x = STREET_X0 - 3, STREET_X1 + 13, 6 do
-    local t = (x - (STREET_X0 - 3)) / ((STREET_X1 + 13) - (STREET_X0 - 3))
-    local y = top0 + (top1 - top0) * t + math.sin(t * math.pi) * 12 + 1
-    love.graphics.line(px, py, x, y)
-    px, py = x, y
-  end
 end
 
 local function inView(view, x0, x1)

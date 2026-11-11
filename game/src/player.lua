@@ -641,6 +641,7 @@ function Player:update(dt, aimX, aimY)
     self.rollT = self.rollT + dt
     if self.rollT >= cfg.rollTime then
       self.rollT = nil
+      status.rollFinished(self) -- (a roll that ran its whole course puts the fire out, a jump out of one does not)
     end
   end
   if not self.rollT then

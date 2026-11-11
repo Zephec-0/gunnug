@@ -30,3 +30,34 @@ Things that bit:
 In those processes area 1 gets about 5x fewer generation steps per slice (210-240 ticks per step instead of about 1000-1900), same total work (about 216,000 ticks), so the Old Mine takes about 15-20 s instead of 4-6 s. Not seed dependent (40 seeds in one process were all fine). JIT is on in the bad runs (`jit.status` true); forcing the JIT off gives about 96 per step; `jit.flush()` / `jit.on(f, true)` mid-build did not help; raising `maxtrace`/`maxmcode` did not help. Cause unknown. The main cost is `love.math.noise` once per pixel in the fill loops at `cavegen.lua` ~271 and ~331 (about 3.9 s of the 4.2 s build).
 
 Ideas left: build the next run's first area while the recap is open (needs the world build split from the run-state reset in `newRun`, `game.lua` ~406; stats like `runs`/`countReset` must not change until Restart is pressed); cache the noise fill; move generation to a `love.thread`.
+
+# 2026-11-10 pass: 120 fps target
+
+## The big one: LuaJIT was throwing its compiled code away
+LuaJIT keeps 1000 traces and 512 KB of machine code by default, and flushes everything when either is full. Counted with `jit.attach(fn, "trace")`: in a fight, 80 flushes and 160,000 traces compiled per 750 frames (a flush about every 9 frames). `src/jittune.lua` raises the limits (`maxtrace=60000`, `maxmcode=262144`, `sizemcode=256`); a session settles at about 20,000 traces and never flushes. It must be required first in every Lua state (main.lua, `src/genthread.lua`). This is very likely what the "slow first-area build in 1 run of 6-8" below was, too.
+
+| Headless, vsync off | before | after |
+|---|---|---|
+| Fight, area 1 (machine gun: scatter, incendiary, ricochet, splitting, shock, venom, glowing, seeker; ~40 monsters) | 72 fps, p95 23 ms | 192 fps, p95 7.0 ms |
+| Fight, area 3 | 42 fps, p95 36 ms | 181 fps, p95 7.2 ms |
+| Fight, area 5 | 55 fps, p95 27 ms | 160 fps, p95 8.0 ms |
+| Same with explosive + cluster rounds, area 1 / 3 | 28 / 21 fps | 90 / 77 fps |
+| Fly-through camp -> bottom of area 3 at 300 px/s | 75 fps, p99 37 ms, 637 frames over 16.7 ms, worst 265 ms | 190 fps, p99 10 ms, 8 over 16.7 ms, worst 23 ms |
+| Garbage per frame in the fight | 330-500 KB | 110-140 KB |
+
+## The rest
+- `main.lua` `love.run`: LÖVE's loop without the 1 ms sleep while vsync is on (measured 1.5 ms a frame).
+- `World:prewarm`: by the clock (1.2 ms, 4 ms when what it paints is within 40 px of the view), nearest tile first, margin stretched the way the view moves. Painting costs 0.15-0.8 us per pixel (10-54 ms a tile, most in the deep areas: tint layers); it is all compiled code with no single hot spot, so it is scheduled better, not made faster.
+- `World:repaintDeferred` without a tick (an area merged from a worker): painted tiles go on `world.stale` and prewarm repaints them in strips. Was one 370 ms frame when area 1 arrived with the hunter by the shaft.
+- `World:flushRepaints`: 3 ms a frame (7 ms with more than 120,000 px waiting), in bands of 24 rows and columns of 256.
+- `fluids.runJobs`: `love.timer.getTime` instead of `os.clock`, and pauses every 64 cells inside a pool.
+- `World:importRegion`: the id swap table as an FFI byte array; `MERGE_ROWS` 16; genworker uses `love.timer.getTime`.
+- `save.update`: the periodic write goes to a writer thread (see the comment in `src/save.lua`); explicit flushes are still synchronous.
+
+## Method
+`docs/perf/bench2-main.lua`: `SCEN=combat` (BENCH_AREAS, AMMO, GUN, NEN) keeps N monsters round the hunter and fires at the nearest; `SCEN=travel` flies camp -> shaft -> down; `SCEN=paint` times `repaintRect`. Per-lap averages come from the dev panel's laps (perf.lap replaced by a raw recorder). `XT=1` adds named timers, `JITSTAT=1` counts traces and flushes, `PROF=l` runs `jit.profile` (one window, GC stopped; starting the profiler flushes every trace, so short windows show mostly the compiler), `SHOTS=n` takes a screenshot every n frames.
+- A frame's delta belongs to the frame before the one being drawn: attribute spikes to the previous frame's laps.
+- Wrapping functions with `...` to time them stops the JIT compiling through them: use fixed-arity wrappers.
+- `sed -i` in Git Bash strips the CRs from these CRLF files.
+
+Left: `catacombs.spawnProps` (8-20 ms, all of an area in one frame), `World:exportRegion` on submit (8 ms), bullets/glows/smoke with explosive loadouts.

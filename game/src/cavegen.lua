@@ -1679,8 +1679,8 @@ function cavegen.generate(world, area, seed, tick)
     shop = shop,
     shops = shops, -- one, or two (left, right) in a boss area
     arena = arena, -- { x0, x1, top, floorY, cx, braziers = { {x, y} }, gates = { {x0, y0, x1, y1} } }
-    crates = findFloorSpots(scaled(40), 16, avoid),
-    ironCrates = findFloorSpots(scaled(12), 19, avoid),
+    crates = findFloorSpots(scaled(20), 16, avoid), -- (half as many as before; the metal crates are gone)
+    ironCrates = {},
     chests = sky and sky.chestSpots or findFloorSpots(scaled(9), 22, avoidForEnemies), -- weapon chests, away from the entrance and shop (the sky's are on its side branches)
     glows = findFloorSpots(scaled(area.glowCount or 150), 6, avoid), -- glowing fungus clusters
     level = level,
@@ -1702,7 +1702,7 @@ function cavegen.generate(world, area, seed, tick)
   -- reference area }, placed last so the rest of the layout is unchanged
   result.breakables = {} -- { { name, spots = { {x, groundY} } } }
   for _, b in ipairs(area.breakables or {}) do
-    result.breakables[#result.breakables + 1] = { name = b[1], spots = findFloorSpots(scaled(b[2]), 16, avoid) }
+    result.breakables[#result.breakables + 1] = { name = b[1], spots = findFloorSpots(scaled(math.ceil(b[2] / 2)), 16, avoid) }
   end
 
   -- Stalactites: tapering cones of the area's rock hanging from the cave
@@ -2106,7 +2106,7 @@ function cavegen.generate(world, area, seed, tick)
   -- cell within 4 px of them becomes vault rock. The gate, the plug and anything already special are left alone.
   local function wallInVault(rects)
     local SH = 4
-    local keep = { [materials.WOOD] = true, [materials.STONEBRICK] = true, [materials.BEDROCK] = true, [materials.IRON] = true }
+    local keep = { [materials.WOOD] = true, [materials.HARDWOOD] = true, [materials.STONEBRICK] = true, [materials.BEDROCK] = true, [materials.IRON] = true }
     for _, r in ipairs(rects) do
       for yy = r[2] - SH, r[4] + SH do
         for xx = r[1] - SH, r[3] + SH do
@@ -2265,13 +2265,71 @@ function cavegen.generate(world, area, seed, tick)
               world:fillRect(xx, y1 - 7, xx, y1, 0)
             end
             local gx0 = dirx == 1 and gateX or gateX - 2
-            world:fillRect(gx0, y1 - 8, gx0 + 2, y1 + 1, WOODID)
+            -- A reservoir over the chamber, if there is room for one and a cave beside it: a second brim-full chamber with
+            -- its own plank gate on the other side. The chamber's gate is then sealed (camp timber, which can't be shot
+            -- away) and is only lifted once the reservoir has been let out (src.sluice watches it).
+            local res
+            local yR0, yR1 = cy - 34, cy - 16
+            local dirR = -dirx
+            local roomy = true
+            for yy = yR0 - 6, yR1 + 4, 3 do
+              for xx = cx - 24, cx + 24, 3 do
+                if not world:isSolid(xx, yy) or not inProfile(xx, yy, 6) or avoidForEnemies(xx, yy) then
+                  roomy = false
+                end
+              end
+            end
+            local distR
+            if roomy then
+              for dist = 20, 150, 2 do
+                local ex = cx + dirR * (dist + 24)
+                if ex < X0 + BORDER + 12 or ex > X1 - BORDER - 12 then
+                  break -- (the corridor and its sump stay inside the area)
+                end
+                if not world:isSolid(cx + dirR * dist, yR1 - 4) then
+                  distR = dist
+                  break
+                end
+              end
+            end
+            if distR then
+              res = { x0 = x0, y0 = yR0, x1 = x1, y1 = yR1 }
+              world:fillRect(x0, yR0, x1, yR1, 0)
+              local gateXR = dirR == 1 and x1 + 1 or x0 - 1
+              for dist = 1, 150 do
+                local xx = dirR == 1 and x1 + dist or x0 - dist
+                if dist > 4 and not world:isSolid(xx, yR1 - 4) then
+                  break
+                end
+                world:fillRect(xx, yR1 - 7, xx, yR1, 0)
+              end
+              local gxR = dirR == 1 and gateXR or gateXR - 2
+              world:fillRect(gxR, yR1 - 8, gxR + 2, yR1 + 1, WOODID)
+              -- its sump, outside its gate and down the side of the chamber, to take the reservoir's water
+              local sxR = dirR == 1 and gxR + 4 or gxR - 4 - 11
+              world:fillRect(sxR, yR1 + 1, sxR + 11, yR1 + 70, 0)
+              local rpool = { cells = {}, level = yR0 }
+              for yy = yR0, yR1, POOL_CELL do
+                for xx = x0, x1, POOL_CELL do
+                  rpool.cells[#rpool.cells + 1] = math.floor(xx / POOL_CELL) * POOL_CELL
+                  rpool.cells[#rpool.cells + 1] = math.floor(yy / POOL_CELL) * POOL_CELL
+                end
+              end
+              water[#water + 1] = rpool
+              res.plug = { x0 = gxR, y0 = yR1 - 8, x1 = gxR + 2, y1 = yR1 + 1 }
+              res.dir = dirR
+              wallInVault({ { x0, yR0, x1, yR1 }, { dirR == 1 and x1 + 1 or gxR - 3, yR1 - 7, dirR == 1 and gxR + 2 or x0 - 1, yR1 + 1 } })
+            end
+            world:fillRect(gx0, y1 - 8, gx0 + 2, y1 + 1, res and materials.HARDWOOD or WOODID)
             -- the sump: a pit cut in the corridor floor just outside the gate, deep enough to take the chamber's water
-            -- when the gate goes (the hunter jumps it to reach the chest afterwards)
-            local sx0 = dirx == 1 and gx0 + 3 or gx0 - 3 - 21
-            world:fillRect(sx0, y1 + 1, sx0 + 21, y1 + 46, 0)
+            -- when the gate goes (narrow enough to jump)
+            local sx0 = dirx == 1 and gx0 + 3 or gx0 - 3 - 11
+            world:fillRect(sx0, y1 + 1, sx0 + 11, y1 + 72, 0)
             world:repaintRegion(x0 - 8, y0 - 8, x1 + 100, y1 + 8)
             world:repaintRegion(x0 - 100, y0 - 8, x1 + 8, y1 + 8)
+            if res then
+              world:repaintRegion(x0 - 100, yR0 - 8, x1 + 100, yR1 + 80)
+            end
             -- the water: every cell of the room, as a pool
             local pool = { cells = {}, level = y0 }
             for yy = y0, y1, POOL_CELL do
@@ -2281,9 +2339,8 @@ function cavegen.generate(world, area, seed, tick)
               end
             end
             water[#water + 1] = pool
-            local cor0, cor1 = math.min(x0, x1 + (dirx == 1 and 1 or -1) * 3), math.max(x1, x0)
             wallInVault({ { x0, y0, x1, y1 }, { dirx == 1 and x1 + 1 or gx0 - 3, y1 - 7, dirx == 1 and gx0 + 2 or x0 - 1, y1 + 1 } })
-            result.sluices[#result.sluices + 1] = { x = cx, y = y1 + 1, room = { x0 = x0, y0 = y0, x1 = x1, y1 = y1 }, gate = { x0 = gx0, y0 = y1 - 8, x1 = gx0 + 2, y1 = y1 + 1 }, dir = dirx }
+            result.sluices[#result.sluices + 1] = { x = cx, y = y1 + 1, room = { x0 = x0, y0 = y0, x1 = x1, y1 = y1 }, gate = { x0 = gx0, y0 = y1 - 8, x1 = gx0 + 2, y1 = y1 + 1 }, dir = dirx, reservoir = res }
             break
           end
         end

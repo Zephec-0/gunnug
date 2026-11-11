@@ -1623,6 +1623,8 @@ DEFS.step_dirt = { gen = stepSound(0.09, 0.25, 1.6, 90, 0.5, 40), volume = 0.04,
 DEFS.step_sand = { gen = stepSound(0.12, 0.12, 1.9, 0, 0, 1), volume = 0.03, cooldown = 0.08 }
 DEFS.step_rock = { gen = stepSound(0.07, 0.5, 1.1, 150, 0.4, 55, 1900), volume = 0.045, cooldown = 0.08 }
 DEFS.step_wood = { gen = stepSound(0.1, 0.35, 0.7, 180, 0.9, 38, 640), volume = 0.048, cooldown = 0.08 }
+-- the camp's porch boards: a soft, hollow knock
+DEFS.step_plank = { gen = stepSound(0.11, 0.2, 0.45, 140, 0.8, 34, 420), volume = 0.04, cooldown = 0.08 }
 DEFS.step_metal = { gen = stepSound(0.16, 0.6, 0.6, 210, 0.35, 30, 1320), volume = 0.042, cooldown = 0.08 }
 DEFS.step_ash = { gen = stepSound(0.1, 0.08, 1.7, 0, 0, 1), volume = 0.027, cooldown = 0.08 }
 DEFS.step_water = {

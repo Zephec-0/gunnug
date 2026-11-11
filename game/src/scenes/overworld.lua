@@ -26,6 +26,7 @@ local town = require("src.town")
 local targets = require("src.targets")
 local barrens = require("src.barrens")
 local controlstone = require("src.controlstone")
+local firehints = require("src.firehints")
 local footprints = require("src.footprints")
 local lensflare = require("src.lensflare")
 local World = require("src.world")
@@ -81,7 +82,7 @@ local FRAME_TOP = PIT_Y - 150 -- the headframe's crossbeam, high enough to be se
 local GEN_BUDGET = 0.010
 
 local SPAWN_X = 990
-local CAMPFIRE_X = 972 -- (just right of the tent, clear of the doctor's lot)
+local CAMPFIRE_X = 860 -- (west of the tent, just past the practice dummy, well clear of the stores and the hat stand)
 local TENT_X = 930
 local STONE_X = 876 -- the stone with the controls carved in it (src.controlstone), between the practice range and the tent
 -- (the camp's people and the bounty board live on the lots of the town, src.town)
@@ -619,6 +620,13 @@ end
 
 -- E at a boss pedestal in an arena
 function overworld.interact(player)
+  -- (E at the campfire: its smoke shows the controls)
+  if firehints.interact(player, CAMPFIRE_X, surface(CAMPFIRE_X)) then
+    for _ = 1, 6 do
+      fluids.addSmoke(CAMPFIRE_X + (love.math.random() - 0.5) * 6, surface(CAMPFIRE_X) - 10, 1.4)
+    end
+    return true
+  end
   return catacombs.interact(player)
 end
 
@@ -646,17 +654,8 @@ function overworld.populate(world)
   local function ground(x)
     return world:findGround(x, 160)
   end
-  -- The camp's practice range, just west of the tent: a DPS dummy and a few
-  -- crates to kick about
+  -- The camp's practice range, just west of the tent: a DPS dummy
   enemies.spawn("dummy", 832, ground(832))
-  -- (the crates stand just west of the dummy now, clear of the stone with the controls on it)
-  for i, x in ipairs({ 816, 824 }) do
-    props.spawn("crate", x, ground(x) - 7)
-    if i == 1 then
-      props.spawn("crate", x + 7, ground(x) - 20)
-    end
-  end
-  props.spawn("crate", 846, ground(846) - 7)
   -- Where the camp's people set up once they are freed (src.npcs; only
   -- drawn for a profile that has them)
   for _, lot in ipairs(town.LOTS) do
@@ -667,11 +666,10 @@ function overworld.populate(world)
     end
   end
   -- The hat stand, by the spawn: the hat worn into a run sets a rule for it (src.meta HATS)
-  npcs.setHatStand(930, ground(930))
+  npcs.setHatStand(950, ground(950))
   -- The Bartender, once the hunter has fallen three times: drinking at the oasis pond's west bank
   npcs.setPond(POND_X0 - 6, ground(POND_X0 - 6))
   props.spawn("crate", 1700, ground(1700) - 7)
-  props.spawn("ironCrate", 2335, ground(2335) - 8.5)
   -- Pots, pouches and lamps along the plain, by the camp and the ruins
   for _, o in ipairs({
     { "urn", 1288 }, { "urn", 2040 }, { "urn", 2480 },
@@ -680,7 +678,7 @@ function overworld.populate(world)
     { "skullCandle", 420 }, { "skullCandle", 2150 },
     { "emberPot", 1024 }, { "emberPot", 1880 }, { "emberPot", 2600 },
   }) do
-    -- (nothing breakable stands in the camp itself: only the crates by the tent)
+    -- (nothing breakable stands in the camp itself)
     if o[2] < 380 or o[2] > 1420 then
       local def = props.defs[o[1]]
       props.spawn(o[1], o[2], ground(o[2]) - def.height / 2 - 0.5)
@@ -843,6 +841,7 @@ function overworld.update(dt, player, game, effects)
   local px, py = player:center()
   town.sync() -- (a person has moved in, or the save file changed)
   town.tick(dt) -- (the hall's bell, on the hour)
+  firehints.update(dt, player, CAMPFIRE_X, surface(CAMPFIRE_X))
   smokeTimer = smokeTimer - dt
   if smokeTimer <= 0 then
     smokeTimer = 0.2
@@ -1820,6 +1819,7 @@ end
 function overworld.drawScreen(toScreen, font, player)
   catacombs.drawScreen(toScreen, font, player)
   drawEntranceNames(toScreen, font, player)
+  firehints.drawScreen(toScreen, font, player, CAMPFIRE_X, surface(CAMPFIRE_X))
 end
 
 -- The last of the evening sun falling straight down the mine shaft: a warm
@@ -1886,6 +1886,7 @@ function overworld.drawEmissive(camX, camY)
     love.graphics.setColor(1, 0.85, 0.45)
     love.graphics.rectangle("fill", CAMPFIRE_X + i, cg - 2 - math.max(1, h - 2), 1, math.max(1, h - 2))
   end
+  firehints.draw(CAMPFIRE_X, cg)
 end
 
 return overworld

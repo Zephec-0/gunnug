@@ -263,23 +263,37 @@ local function cast(x, y, w, h)
   casting[#casting + 1] = { x = x, y = y, w = w, h = h }
 end
 
+local campMode = false -- (the camp pages draw their frames a whole art pixel thick with square corners, like their pictures)
+
 local function panel(x, y, w, h, alpha, edge)
+  -- (edges snapped to the screen's pixels and the border a whole number of them, so every panel's frame is the same
+  -- crisp thickness whatever fractions its position and size came out at)
+  local x0, y0 = math.floor(x + 0.5), math.floor(y + 0.5)
+  w, h = math.floor(x + w + 0.5) - x0, math.floor(y + h + 0.5) - y0
+  x, y = x0, y0
   cast(x, y, w, h)
   love.graphics.setColor(0.045, 0.035, 0.065, alpha or 0.9)
-  love.graphics.rectangle("fill", x, y, w, h, u, u)
-  love.graphics.setLineWidth(math.max(1, u * 0.4))
+  local rad = campMode and 0 or u
+  love.graphics.rectangle("fill", x, y, w, h, rad, rad)
+  local lw = campMode and math.max(1, math.floor(u)) or math.max(1, math.floor(u * 0.4 + 0.5))
+  love.graphics.setLineWidth(lw)
   local e = edge or BORDER
   love.graphics.setColor(e[1], e[2], e[3], (e[4] or 0.75))
-  love.graphics.rectangle("line", x, y, w, h, u, u)
+  love.graphics.rectangle("line", x + lw / 2, y + lw / 2, w - lw, h - lw, rad, rad)
 end
 
 -- A focus frame: a bright edge with small corner ticks, pulsing gently
 local function focusFrame(x, y, w, h, color)
   color = color or ACCENT
   local pulse = 0.75 + 0.25 * math.sin(clock * 5)
-  love.graphics.setLineWidth(math.max(1, u * 0.5))
+  local x0, y0 = math.floor(x + 0.5), math.floor(y + 0.5)
+  w, h = math.floor(x + w + 0.5) - x0, math.floor(y + h + 0.5) - y0
+  x, y = x0, y0
+  local lw = campMode and math.max(1, math.floor(u)) or math.max(1, math.floor(u * 0.4 + 0.5))
+  local rad = campMode and 0 or u
+  love.graphics.setLineWidth(lw)
   love.graphics.setColor(color[1], color[2], color[3], pulse)
-  love.graphics.rectangle("line", x, y, w, h, u, u)
+  love.graphics.rectangle("line", x + lw / 2, y + lw / 2, w - lw, h - lw, rad, rad)
   local t = math.max(2, math.floor(u * 2))
   local k = math.max(1, math.floor(u * 0.6))
   love.graphics.setColor(1, 1, 1, pulse)
@@ -1367,7 +1381,7 @@ local function drawDrinkBottle(shape, color, cx, baseY, p)
   return #rows * p
 end
 
-PAGES.camp = function()
+local function campBody()
   local ww, wh = love.graphics.getDimensions()
   love.graphics.setColor(0.015, 0.01, 0.025, 0.93)
   love.graphics.rectangle("fill", 0, 0, ww, wh)
@@ -1377,6 +1391,19 @@ PAGES.camp = function()
   pageTitle(person.name, X(14), Y(9))
   markPrice(marks .. (marks == 1 and " mark" or " marks"), X(386), Y(11), F.body, meta.SIGIL_COLOR)
   shadowPrint(person.blurb or "Upgrades last for every run.", X(14), Y(26), F.small, FAINT)
+
+  -- Some of the people have a picture of their own (src.camppages)
+  local custom = require("src.camppages")[campNpc]
+  if custom then
+    custom({
+      u = u, X = X, Y = Y, F = F, widget = widget, panel = panel, slotBox = slotBox, focusFrame = focusFrame, button = button,
+      shadowPrint = shadowPrint, printCentered = printCentered, wrapped = wrapped, markPrice = markPrice, fitText = fitText,
+      cast = cast, act = act, confirm = confirm, pop = pop, teachList = teachList,
+      runGold = menu.runGold, gunRoom = menu.gunRoom, runPerks = menu.runPerks,
+      TEXT = TEXT, DIM = DIM, FAINT = FAINT, ACCENT = ACCENT, WARM = WARM, DANGER = DANGER, RARITY = RARITY, SLOT_REST = SLOT_REST,
+    })
+    return
+  end
 
   -- Upgrades, one card each
   local x, y, w = X(14), Y(36), math.floor(176 * u)
@@ -1957,6 +1984,15 @@ PAGES.camp = function()
     end
   elseif #list > 0 then
     wrapped("Choose something you have seen to teach him.", gx, dy, gw, F.small, FAINT)
+  end
+end
+
+PAGES.camp = function()
+  campMode = true
+  local ok, err = pcall(campBody)
+  campMode = false
+  if not ok then
+    error(err, 0)
   end
 end
 

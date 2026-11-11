@@ -15,6 +15,7 @@ local BEDROCK = materials.BEDROCK
 local solid = materials.solid
 local defs = materials.defs
 local floor = math.floor
+local getTime = (love.timer and love.timer.getTime) or os.clock
 
 local World = {}
 World.__index = World
@@ -68,6 +69,7 @@ function World.new(width, height, left, top)
   end
   self.ct = self.tiles[1] -- the tile last looked up (a cache: neighbouring lookups are near each other)
   self.dirtyTiles = {} -- tiles written since their texture was last updated (see World:refresh)
+  self.stale = {} -- painted pieces waiting to be painted again, a strip at a time (see repaintDeferred, prewarm)
   return self
 end
 
@@ -157,32 +159,96 @@ end
 -- Gets the tiles just outside the view ready before they are seen: their
 -- lazy parts painted a strip at a time, then their texture made. A tile of
 -- unexplored ground painted all at once the moment it came into view was a
--- ~30 ms hitch. Call once a frame; it does one small piece of work.
-local PREWARM_ROWS = 24
+-- ~30 ms hitch (painting costs 0.15 to 0.8 microseconds a pixel, 10-50 ms a tile, most in the deep areas with
+-- their layers of tint). Call once a frame.
+--
+-- It works by the clock, not by a fixed piece: strips of PREWARM_ROWS rows until PREWARM_BUDGET is used up, or
+-- PREWARM_RUSH when what it is painting is about to be seen (a tile that reaches the screen unfinished is painted
+-- to the end there and then by World:draw, whatever that costs). The nearest work goes first, and the margin it
+-- looks at is stretched the way the view is moving (LEAD_TIME seconds of travel, LEAD_MAX px at most), so a fall
+-- down a shaft has the ground below ready. The pieces repaintDeferred left stale are done here too.
+local PREWARM_ROWS = 8
+local PREWARM_BUDGET, PREWARM_RUSH = 0.0012, 0.004
+local RUSH_GAP = 40 -- px from the view: nearer than this, the bigger budget
+local LEAD_TIME, LEAD_MAX = 1.2, 512
+
+-- How far a rectangle (x1, y1 exclusive) is from the view: 0 when they overlap
+local function gapTo(x0, y0, x1, y1, vx0, vy0, vx1, vy1)
+  local dx = math.max(0, vx0 - x1, x0 - vx1)
+  local dy = math.max(0, vy0 - y1, y0 - vy1)
+  return dx > dy and dx or dy
+end
+
 function World:prewarm(viewX, viewY, viewW, viewH)
+  local now = getTime()
+  -- which way the view is going, and how fast (smoothed: the camera's own easing and kicks are in it)
+  local vx, vy = 0, 0
+  if self.pwT then
+    local dt = now - self.pwT
+    if dt > 0 and dt < 0.25 then
+      local k = math.min(1, dt * 6)
+      vx = self.pwVX + ((viewX - self.pwX) / dt - self.pwVX) * k
+      vy = self.pwVY + ((viewY - self.pwY) / dt - self.pwVY) * k
+    end
+  end
+  self.pwT, self.pwX, self.pwY, self.pwVX, self.pwVY = now, viewX, viewY, vx, vy
+  local lx = math.max(-LEAD_MAX, math.min(LEAD_MAX, vx * LEAD_TIME))
+  local ly = math.max(-LEAD_MAX, math.min(LEAD_MAX, vy * LEAD_TIME))
   local m = TILE
-  local tx0 = math.max(0, floor((viewX - m - self.left) / TILE))
-  local tx1 = math.min(self.tilesX - 1, floor((viewX + viewW + m - self.left) / TILE))
-  local ty0 = math.max(0, floor((viewY - m - self.top) / TILE))
-  local ty1 = math.min(self.tilesY - 1, floor((viewY + viewH + m - self.top) / TILE))
-  for ty = ty0, ty1 do
-    for tx = tx0, tx1 do
-      local tile = self.tiles[ty * self.tilesX + tx + 1]
-      if not tile.image then
-        if not tile.data then
-          newData(tile)
-          tile.lazyY = tile.y
-          return
-        elseif tile.lazyY < tile.y1 then
-          paintLazy(tile, tile.lazyY + PREWARM_ROWS)
-          return
-        else
-          tile.image = love.graphics.newImage(tile.data)
-          tile.image:setWrap("clamp", "clamp")
-          tile.dirty = false
-          return
+  local vx1, vy1 = viewX + viewW, viewY + viewH
+  local tx0 = math.max(0, floor((viewX - m + math.min(0, lx) - self.left) / TILE))
+  local tx1 = math.min(self.tilesX - 1, floor((vx1 + m + math.max(0, lx) - self.left) / TILE))
+  local ty0 = math.max(0, floor((viewY - m + math.min(0, ly) - self.top) / TILE))
+  local ty1 = math.min(self.tilesY - 1, floor((vy1 + m + math.max(0, ly) - self.top) / TILE))
+  local deadline = now + PREWARM_BUDGET
+  local stale = self.stale
+  while true do
+    -- the nearest piece of work: an unpainted tile round the view, or a stale piece anywhere
+    local best, bestGap, bestStale
+    for ty = ty0, ty1 do
+      for tx = tx0, tx1 do
+        local tile = self.tiles[ty * self.tilesX + tx + 1]
+        if not tile.image then
+          local gap = gapTo(tile.x, tile.y, tile.x1, tile.y1, viewX, viewY, vx1, vy1)
+          if not bestGap or gap < bestGap then
+            best, bestGap = tile, gap
+          end
         end
       end
+    end
+    for i = 1, #stale do
+      local r = stale[i]
+      local gap = gapTo(r[1], r[2], r[3] + 1, r[4] + 1, viewX, viewY, vx1, vy1)
+      if not bestGap or gap < bestGap then
+        best, bestGap, bestStale = r, gap, i
+      end
+    end
+    if not best then
+      return
+    end
+    if bestGap < RUSH_GAP then
+      deadline = now + PREWARM_RUSH
+    end
+    if bestStale then
+      local y1 = math.min(best[4], best[2] + PREWARM_ROWS - 1)
+      self:repaintRect(best[1], best[2], best[3], y1)
+      best[2] = y1 + 1
+      if best[2] > best[4] then
+        stale[bestStale] = stale[#stale]
+        stale[#stale] = nil
+      end
+    elseif not best.data then
+      newData(best)
+      best.lazyY = best.y
+    elseif best.lazyY < best.y1 then
+      paintLazy(best, best.lazyY + PREWARM_ROWS)
+    else
+      best.image = love.graphics.newImage(best.data)
+      best.image:setWrap("clamp", "clamp")
+      best.dirty = false
+    end
+    if getTime() >= deadline then
+      return
     end
   end
 end
@@ -385,6 +451,15 @@ end
 function World:importRegion(x0, y0, x1, y1, bd, fromRow, toRow, trans)
   local w = x1 - x0 + 1
   local src = ffi.cast("uint8_t*", bd:getFFIPointer())
+  -- (the swap table as a byte array, made once: looked up through a Lua table, a wide area's rows were 5-10 ms a step)
+  local lut = trans and trans.lut
+  if trans and not lut then
+    lut = ffi.new("uint8_t[256]")
+    for k = 0, 255 do
+      lut[k] = trans[k]
+    end
+    trans.lut = lut
+  end
   local last = math.min(toRow, y1 - y0)
   local ya, yb = y0 + (fromRow or 0), y0 + last
   for ty = floor((ya - self.top) / TILE), floor((yb - self.top) / TILE) do
@@ -398,9 +473,9 @@ function World:importRegion(x0, y0, x1, y1, bd, fromRow, toRow, trans)
         for y = ry0, ry1 do
           local from = src + ((y - y0) * w + (rx0 - x0))
           local to = c + ((y - t.y) * t.w + (rx0 - t.x) + 1)
-          if trans then
+          if lut then
             for k = 0, n - 1 do
-              to[k] = trans[from[k]]
+              to[k] = lut[from[k]]
             end
           else
             ffi.copy(to, from, n)
@@ -552,7 +627,8 @@ function World:repaintLater(x0, y0, x1, y1)
   end
   local m = SHADE_DEPTH + 1
   for _, r in ipairs(q) do
-    if x0 <= r[3] + m and x1 >= r[1] - m and y0 <= r[4] + m and y1 >= r[2] - m then
+    -- (not into a box that is already part painted: the rows done would be missed)
+    if not r.going and x0 <= r[3] + m and x1 >= r[1] - m and y0 <= r[4] + m and y1 >= r[2] - m then
       r[1], r[2] = math.min(r[1], x0), math.min(r[2], y0)
       r[3], r[4] = math.max(r[3], x1), math.max(r[4], y1)
       return
@@ -561,15 +637,46 @@ function World:repaintLater(x0, y0, x1, y1)
   q[#q + 1] = { x0, y0, x1, y1 }
 end
 
+-- Repaints what was queued, by the clock: bands of FLUSH_ROWS rows until FLUSH_BUDGET is used up, and what is left
+-- next frame. A crater is done in the frame it is dug, as before; a cave-in or a row of blasts (40 ms and more in
+-- one frame, when it was all done at once) shows up over a few frames instead. With a lot waiting (more than
+-- FLUSH_BACKLOG pixels) the budget is the bigger FLUSH_RUSH, so the picture never falls far behind the ground.
+local FLUSH_ROWS, FLUSH_COLS = 24, 256
+local FLUSH_BUDGET, FLUSH_RUSH, FLUSH_BACKLOG = 0.003, 0.007, 120000
 function World:flushRepaints()
   local q = self.repaintQueue
-  if not q then
+  if not q or not q[1] then
     return
   end
+  local m = SHADE_DEPTH + 1
+  local waiting = 0
   for i = 1, #q do
     local r = q[i]
-    q[i] = nil
-    self:repaintRegion(r[1], r[2], r[3], r[4])
+    waiting = waiting + (r[3] - r[1] + 1) * (r[4] - r[2] + 1)
+  end
+  local deadline = getTime() + (waiting > FLUSH_BACKLOG and FLUSH_RUSH or FLUSH_BUDGET)
+  while q[1] do
+    local r = q[1]
+    if not r.going then
+      -- (the box with the margin its change can shade, cut into columns so that one band is never a long job)
+      r[1], r[2], r[3], r[4] = r[1] - m, r[2] - m, r[3] + m, r[4] + m
+      r.going = true
+      local x = r[1] + FLUSH_COLS
+      while x <= r[3] do
+        q[#q + 1] = { x, r[2], math.min(r[3], x + FLUSH_COLS - 1), r[4], going = true }
+        x = x + FLUSH_COLS
+      end
+      r[3] = math.min(r[3], r[1] + FLUSH_COLS - 1)
+    end
+    local y1 = math.min(r[4], r[2] + FLUSH_ROWS - 1)
+    self:repaintRect(r[1], r[2], r[3], y1)
+    r[2] = y1 + 1
+    if r[2] > r[4] then
+      table.remove(q, 1)
+    end
+    if getTime() >= deadline then
+      return
+    end
   end
 end
 
@@ -952,7 +1059,15 @@ function World:repaintDeferred(x0, y0, x1, y1, tick)
         local ix0, iy0 = math.max(x0, tile.x), math.max(y0, tile.y)
         local ix1, iy1 = math.min(x1, tile.x1 - 1), math.min(y1, math.min(tile.y1 - 1, done - 1))
         if ix0 <= ix1 and iy0 <= iy1 then
-          self:repaintRect(ix0, iy0, ix1, iy1, tick)
+          if tick then
+            self:repaintRect(ix0, iy0, ix1, iy1, tick)
+          else
+            -- (nobody to yield to: an area a worker thread built is merged in the middle of a frame, and painting
+            -- every tile already painted in its rectangle at once was a stall of up to 370 ms as it arrived.
+            -- World:prewarm paints them again a strip at a time, the ones in view first)
+            local stale = self.stale
+            stale[#stale + 1] = { ix0, iy0, ix1, iy1 }
+          end
         end
       end
     end
@@ -1005,11 +1120,13 @@ end
 local EDGE_MARGIN = 480
 
 -- Draws the tiles overlapping the view rectangle (world coordinates)
+local texel = { 0, 0 }
 function World:draw(viewX, viewY, viewW, viewH, shader)
   love.graphics.setColor(1, 1, 1)
   if shader then
     love.graphics.setShader(shader)
   end
+  local texelW, texelH -- (the tile size the shader was last told)
   -- (the tiles at the world's edge also cover the margin beyond it)
   local tx0 = math.max(0, floor((viewX - EDGE_MARGIN - self.left) / TILE))
   local tx1 = math.min(self.tilesX - 1, floor((viewX + viewW + EDGE_MARGIN - self.left) / TILE))
@@ -1033,8 +1150,11 @@ function World:draw(viewX, viewY, viewW, viewH, shader)
           tile.image:replacePixels(tile.data)
           tile.dirty = false
         end
-        if shader then
-          shader:send("texel", { 1 / tile.w, 1 / tile.h })
+        if shader and (tile.w ~= texelW or tile.h ~= texelH) then
+          -- (sent when the size changes, which is only at the world's edge: a table per tile per frame was garbage)
+          texelW, texelH = tile.w, tile.h
+          texel[1], texel[2] = 1 / tile.w, 1 / tile.h
+          shader:send("texel", texel)
         end
         if left + top + right + bottom == 0 then
           love.graphics.draw(tile.image, tile.x, tile.y)

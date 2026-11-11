@@ -230,8 +230,11 @@ end
 -- whenever an area finished generating.
 local ADD_BUDGET = 0.0015
 local addDeadline = 0
+-- (love.timer's clock: os.clock only ticks about once a millisecond here, so a 1.5 ms budget ran to 2-3. And the
+-- pools pause part-way too, every POOL_PAUSE cells: one big pool between two pauses was an 8-14 ms frame)
+local POOL_PAUSE = 64
 local function pause()
-  if os.clock() > addDeadline then
+  if love.timer.getTime() > addDeadline then
     coroutine.yield()
   end
 end
@@ -246,7 +249,7 @@ end
 
 -- Runs the queued pool jobs for up to `budget` seconds (all of them if budget is nil)
 function fluids.runJobs(budget)
-  addDeadline = budget and (os.clock() + budget) or math.huge
+  addDeadline = budget and (love.timer.getTime() + budget) or math.huge
   while addJobs[1] do
     local ok, err = coroutine.resume(addJobs[1])
     if not ok then
@@ -265,6 +268,9 @@ addNow = function(info)
   for _, p in ipairs(info.gas or {}) do
     pause()
     for i = 1, #p.cells, 2 do
+      if i % POOL_PAUSE == 1 then
+        pause()
+      end
       local gx, gy = p.cells[i] / C, p.cells[i + 1] / C
       for oy = 0, sub - 1 do
         for ox = 0, sub - 1 do
@@ -304,6 +310,9 @@ addNow = function(info)
   for _, p in ipairs(info.water or {}) do
     pause()
     for i = 1, #p.cells, 2 do
+      if i % POOL_PAUSE == 1 then
+        pause()
+      end
       local gx, gy = p.cells[i] / C, p.cells[i + 1] / C
       for oy = 0, sub - 1 do
         for ox = 0, sub - 1 do
@@ -324,6 +333,9 @@ addStatic = function(cells, pools, tops, setter)
   for _, p in ipairs(pools or {}) do
     pause()
     for i = 1, #p.cells, 2 do
+      if i % POOL_PAUSE == 1 then
+        pause()
+      end
       local gx, gy = p.cells[i] / C, p.cells[i + 1] / C
       for oy = 0, sub - 1 do
         for ox = 0, sub - 1 do
@@ -340,7 +352,10 @@ addStatic = function(cells, pools, tops, setter)
       end
     end
   end
-  for _, k in ipairs(added) do
+  for n, k in ipairs(added) do
+    if n % 2048 == 0 then
+      pause()
+    end
     if not cells[k - K] and not solidAt(k - K) and k % 4 == 0 then
       local gx, gy = coords(k)
       tops[#tops + 1] = { gx * C + HALF, gy * C }
@@ -1609,7 +1624,7 @@ function fluids.updateLiquids(dt, player, enemies, px, py, b, gx0, gy0, gx1, gy1
     if player.acidTimer <= 0 then
       player.acidTimer = 0.4
       player:hurtOverTime(ACID_DAMAGE, { 0.7, 1, 0.3 }, "acid")
-      require("src.status").apply(player, "poisoned", 4)
+      require("src.status").apply(player, "poisoned", 8)
       audio.play("hurt", 0.3)
       for _ = 1, 5 do
         effects.particle(px + (r() - 0.5) * 6, py + (r() - 0.5) * 8, (r() - 0.5) * 30, -20 - r() * 40, 0.5, { 0.7, 1, 0.3 }, -20, true)
@@ -1882,7 +1897,7 @@ function fluids.update(dt, player, enemies)
       local c = math.max(gas[headK] or 0, gas[midK] or 0)
       local ramp = 1 + (fluids.gasDwell or 0) * 0.25
       player:hurtOverTime(math.floor((inCol and COLUMN_DAMAGE or GAS_DAMAGE * (0.6 + c)) * ramp + 0.5), GAS_COLOR, "gas")
-      require("src.status").apply(player, "poisoned", 3, { stacks = 1 + math.floor((fluids.gasDwell or 0) / 2.5) }) -- (the longer he breathes it, the deeper it sets)
+      require("src.status").apply(player, "poisoned", 6, { stacks = 1 + math.floor((fluids.gasDwell or 0) / 2.5) }) -- (the longer he breathes it, the deeper it sets)
       audio.play("hurt", 0.35)
     end
     if love.math.random() < dt * 6 then

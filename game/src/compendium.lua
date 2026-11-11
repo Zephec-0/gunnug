@@ -555,7 +555,23 @@ end
 -- Draws an entry's image fitted into a box (whole-number scale where it can),
 -- centred. silhouette draws it as a flat dark shape (not yet discovered).
 local silhouetteShader
-function compendium.drawIcon(entry, x, y, w, h, silhouette, alpha)
+-- The whole-number scale an entry's art fits a w x h box at (what drawIcon uses): a page that shows several
+-- takes the smallest of them, so the pixels are the same size across all of its pictures
+function compendium.fitScale(entry, w, h)
+  local img = entry and entry.image
+  if not img then
+    return nil
+  end
+  local iw, ih = img:getDimensions()
+  local pad = iw == icons.HD_SIZE + 2 * icons.HD_PAD and icons.HD_PAD or 0
+  local s = math.min(w / (iw - 2 * pad), h / (ih - 2 * pad))
+  if s >= 1 then
+    s = math.floor(s)
+  end
+  return s
+end
+
+function compendium.drawIcon(entry, x, y, w, h, silhouette, alpha, scale)
   local img = entry.image
   if not img then
     return
@@ -564,8 +580,8 @@ function compendium.drawIcon(entry, x, y, w, h, silhouette, alpha)
   -- (the item and perk images carry room for a drop shadow: fit the art, not the room)
   local pad = iw == icons.HD_SIZE + 2 * icons.HD_PAD and icons.HD_PAD or 0
   local cw, ch = iw - 2 * pad, ih - 2 * pad
-  local s = math.min(w / cw, h / ch)
-  if s >= 1 then
+  local s = scale or math.min(w / cw, h / ch)
+  if not scale and s >= 1 then
     s = math.floor(s)
   end
   local dx = math.floor(x + (w - cw * s) / 2 - pad * s)

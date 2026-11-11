@@ -11,6 +11,7 @@ require("love.math")
 require("love.image")
 require("love.data")
 require("love.filesystem")
+require("src.jittune") -- (this thread has a Lua state, and so a JIT, of its own)
 local ffi = require("ffi")
 
 local inCh, outCh = love.thread.getChannel(inName), love.thread.getChannel(outName)

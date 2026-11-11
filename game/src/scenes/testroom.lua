@@ -28,7 +28,7 @@ local OX = 700
 -- (see populate), on a flat floor
 local EV_X0 = OX + 1024
 local EV_STEP = 200
-local EV_KINDS = { "carnival", "gambler", "tinker", "shrine", "cavein", "hunt" }
+local EV_KINDS = { "carnival", "gambler", "tinker", "shrine", "hunt" }
 -- Past the events row: the perk gallery, every perk lying in two rows (floor and a platform above it)
 local PERK_X0 = EV_X0 + 60 + #EV_KINDS * EV_STEP + 40
 local PERK_STEP = 18

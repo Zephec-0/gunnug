@@ -4,7 +4,7 @@
 --   gambler    a gambler's den: a slot machine and a game of high-low
 --   tinker     a travelling tinker who re-rolls the bonuses on a weapon
 --   shrine     a shrine of the fallen: pay for a blessing, or gamble on one
---   cavein     a miner buried under a cave-in: dig him out before time runs out
+--   (cavein: a miner buried under a cave-in, dug out before time ran out: no longer rolled, the code is left)
 --   hunt       a marked beast: kill it before the clock runs out
 -- Conversation and games happen in src.menu's generic dialog page.
 local audio = require("src.audio")
@@ -33,7 +33,7 @@ local timer = 120
 local lastKind
 local world
 
-local KINDS = { "carnival", "gambler", "tinker", "shrine", "cavein", "hunt", "altar", "ghost" }
+local KINDS = { "carnival", "gambler", "tinker", "shrine", "hunt", "altar", "ghost" }
 
 -- Events whose stage and logic live elsewhere (src.events: the violet altar that trades a
 -- curse for a boon, the ghost merchant). Set by src.events:

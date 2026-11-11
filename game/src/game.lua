@@ -867,7 +867,7 @@ end
 -- Saves on the way out (main.lua calls this from love.quit)
 function game.quit()
   keepRun()
-  save.flush()
+  save.close() -- (flushes, and stops the thread the periodic writes go to)
 end
 
 -- The window lost focus: pause, if the setting says so
@@ -1004,6 +1004,11 @@ function game.update(dt)
         -- The picture for the wanted poster, taken as he falls
         local source = player.lastSource
         deathPhoto = enemies.defs[source] and enemies.photo(player.lastEnemy, source) or false
+        if not deathPhoto then
+          -- Killed by a condition (burning, poison, a shock): the poster shows its icon
+          local img = require("src.status").iconForSource(source)
+          deathPhoto = img and { image = img, w = img:getWidth(), h = img:getHeight() } or false
+        end
       end
       deadTime = deadTime + dt
       if deadTime >= RECAP_DELAY then

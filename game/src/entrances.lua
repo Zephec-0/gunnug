@@ -301,10 +301,14 @@ local function drawMine(vx0, vx1)
   end
 end
 
--- the beach's ground line at column x (the first solid cell going down), remembered
+-- the beach's ground line at column x (the first solid cell going down), remembered while it holds
 local groundCache = {}
 local function groundTop(x)
   local g = groundCache[x]
+  -- (the cache is checked each time: digging the beach away takes the growth on it down with it)
+  if g and not (theWorld:isSolid(x, g) and not theWorld:isSolid(x, g - 1)) then
+    g = nil
+  end
   if not g then
     local y = surfaceAt(x) - 40
     while y < surfaceAt(x) + 300 and not theWorld:isSolid(x, y) do

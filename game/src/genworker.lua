@@ -28,7 +28,7 @@ local EXTRA = {
   ["The Quarry"] = { right = 64 },
   ["The Mesosphere"] = { left = 64, right = 64 },
 }
-local MERGE_ROWS = 48 -- rows of the rectangle copied per step of a merge
+local MERGE_ROWS = 16 -- rows of the rectangle copied per step of a merge (the clock is looked at after each step)
 
 local ffiOk = pcall(require, "ffi")
 local workers = {}
@@ -196,7 +196,7 @@ local function identity()
   return t
 end
 
--- One step of a merge, until `deadline` (os.clock). Returns true when it is finished.
+-- One step of a merge, until `deadline` (love.timer.getTime). Returns true when it is finished.
 local function mergeStep(m, deadline, world)
   local res = m.res
   local r = res.region
@@ -235,7 +235,7 @@ local function mergeStep(m, deadline, world)
     while m.row < rows do
       world:importRegion(r[1], r[2], r[3], r[4], res.bytes, m.row, m.row + MERGE_ROWS - 1, m.trans)
       m.row = m.row + MERGE_ROWS
-      if os.clock() > deadline then
+      if love.timer.getTime() > deadline then
         return false
       end
     end
@@ -256,7 +256,7 @@ end
 -- complete handler(i, info, res) is called; for one that could not be built, handler(i, nil, res) (res.err says why).
 -- wait: keep going (sleeping a little) until something has been handled or `budget` has run out.
 function genworker.pump(world, budget, handler, wait)
-  local deadline = os.clock() + budget
+  local deadline = love.timer.getTime() + budget
   local handled = false
   repeat
     for _, w in ipairs(workers) do
@@ -290,16 +290,16 @@ function genworker.pump(world, budget, handler, wait)
     end
     local m = merges[1]
     if m then
-      if mergeStep(m, math.max(deadline, os.clock() + 0.0005), world) then
+      if mergeStep(m, math.max(deadline, love.timer.getTime() + 0.0005), world) then
         table.remove(merges, 1)
         handler(m.res.i, m.res.info, m.res)
         handled = true
       end
     end
-    if wait and not handled and os.clock() < deadline then
+    if wait and not handled and love.timer.getTime() < deadline then
       love.timer.sleep(0.001)
     end
-  until not wait or handled or os.clock() >= deadline
+  until not wait or handled or love.timer.getTime() >= deadline
   return handled
 end
 

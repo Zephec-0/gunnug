@@ -24,6 +24,7 @@ local slots = {} -- index -> profile table, false if empty (loaded lazily)
 local active -- index of the slot in use, or nil
 local dirty = false
 local flushTimer = 0
+local lastText = {} -- slot -> the text known to be in its file: read and found good, or written, this session (see the writer thread)
 
 -- Called as onDiscover(category, id) the first time a profile records something
 save.onDiscover = nil
@@ -199,10 +200,100 @@ end
 
 local function load(i)
   if slots[i] == nil then
-    local p = readFile(path(i)) or readFile(path(i, "bak"))
+    local p
+    if love.filesystem.getInfo(path(i)) then
+      local ok, text = pcall(love.filesystem.read, path(i))
+      p = ok and save.decode(text) or nil
+      lastText[i] = p and text or nil -- (a good file: its text is the backup for the next write)
+    end
+    p = p or readFile(path(i, "bak"))
     slots[i] = p and repair(p) or false
   end
   return slots[i] or nil
+end
+
+-- The writer thread ---------------------------------------------------------------
+--
+-- The profile is written every few seconds while it changes (save.update), and the write (the old file read back
+-- and checked, the backup written, the file written) took about 7 ms of a frame each time: a dropped frame every
+-- five seconds of a fight. Those periodic writes go to a small thread instead. The main thread still makes the
+-- text; the thread only puts it on disk, backup first, in the order it was sent.
+--
+-- What keeps it safe:
+--   * the backup it writes is the text this session knows to be in the file (lastText: what it read and found
+--     good when the profile was loaded, or what it last wrote), so it is always a good copy and nothing has to
+--     be read back;
+--   * a write when that text is not known, and every write that is asked for outright (save.flush on quitting, dying or
+--     leaving for the title, a new profile, a new name), is done on the main thread as before, after waiting for
+--     the thread to finish what it has (drain), so the file is on disk when the call returns and nothing is ever
+--     written out of order;
+--   * erasing a profile waits for the thread too;
+--   * no threads, or the thread failing: everything is written on the main thread, as before.
+local writer -- { thread, inCh, outCh, pending }, false if there is none to be had
+local WRITER_CODE = [[
+require("love.filesystem")
+local inCh, outCh = love.thread.getChannel("save_writer_in"), love.thread.getChannel("save_writer_out")
+while true do
+  local job = inCh:demand()
+  if job == "quit" then
+    break
+  end
+  if job.bak then
+    love.filesystem.write(job.bakName, job.bak)
+  end
+  local ok, err = love.filesystem.write(job.name, job.text)
+  outCh:push(ok and "ok" or ("could not write " .. job.name .. ": " .. tostring(err)))
+end
+]]
+
+local function startWriter()
+  if writer == nil then
+    writer = false
+    if love.thread then
+      local ok, w = pcall(function()
+        local t = { inCh = love.thread.getChannel("save_writer_in"), outCh = love.thread.getChannel("save_writer_out"), pending = 0 }
+        t.inCh:clear()
+        t.outCh:clear()
+        t.thread = love.thread.newThread(WRITER_CODE)
+        t.thread:start()
+        return t
+      end)
+      if ok then
+        writer = w
+      end
+    end
+  end
+  return writer
+end
+
+-- Takes in the thread's answers; with wait, until everything it was sent is on disk
+local function drain(wait)
+  local w = writer
+  if not w then
+    return
+  end
+  while w.pending > 0 do
+    local res
+    if wait then
+      res = w.outCh:demand(0.25)
+    else
+      res = w.outCh:pop()
+    end
+    if res then
+      w.pending = w.pending - 1
+      if res ~= "ok" then
+        print("save: " .. res)
+        lastText = {} -- (what is on disk is not known any more: the next write checks it again)
+      end
+    elseif not w.thread:isRunning() then
+      -- (the thread has died: back to writing on the main thread, and the profile is written again in full)
+      print("save: the writer thread stopped (" .. tostring(w.thread:getError()) .. ")")
+      writer, lastText, dirty = false, {}, true
+      return
+    elseif not wait then
+      return
+    end
+  end
 end
 
 local function write(i)
@@ -210,6 +301,7 @@ local function write(i)
   if not p then
     return
   end
+  drain(true) -- (anything the thread still has goes to disk first)
   local text = save.encode(p)
   -- Keep the last good copy before overwriting it
   if love.filesystem.getInfo(path(i)) then
@@ -222,6 +314,27 @@ local function write(i)
   if not ok then
     print("save: could not write " .. path(i) .. ": " .. tostring(err))
   end
+  lastText[i] = ok and text or nil
+end
+
+-- The periodic write: handed to the thread when this session knows what is in the file (see above)
+local function writeLater(i)
+  local p = slots[i]
+  if not p then
+    return
+  end
+  local w = lastText[i] and startWriter()
+  if not w then
+    return write(i)
+  end
+  drain(false)
+  if not writer or not lastText[i] then
+    return write(i)
+  end
+  local text = save.encode(p)
+  w.inCh:push({ name = path(i), text = text, bakName = path(i, "bak"), bak = lastText[i] })
+  w.pending = w.pending + 1
+  lastText[i] = text
 end
 
 -- The profile in slot i, or nil if it is empty
@@ -254,6 +367,8 @@ end
 
 -- Deletes the profile in slot i (and its backup and any saved run)
 function save.erase(i)
+  drain(true)
+  lastText[i] = nil
   love.filesystem.remove(path(i))
   love.filesystem.remove(path(i, "bak"))
   save.clearRun(i)
@@ -276,8 +391,19 @@ function save.flush()
   if active and dirty then
     write(active)
   end
+  drain(true) -- (whatever the writer thread was given is on disk when this returns)
   dirty = false
   flushTimer = 0
+end
+
+-- The game is closing: everything on disk, and the writer thread told to stop (writes after this, if any, are
+-- made on the main thread)
+function save.close()
+  save.flush()
+  if writer then
+    writer.inCh:push("quit")
+  end
+  writer = false
 end
 
 -- Counts time played and writes the profile every few seconds while it changes
@@ -291,7 +417,12 @@ function save.update(dt, playing)
   end
   flushTimer = flushTimer + dt
   if dirty and flushTimer >= FLUSH_INTERVAL then
-    save.flush()
+    -- (the periodic write: on the writer thread, so it costs the frame only the making of the text)
+    if active then
+      writeLater(active)
+    end
+    dirty = false
+    flushTimer = 0
   end
 end
 
@@ -414,6 +545,8 @@ end
 
 -- For tests: forget what's cached so files are read again
 function save.reset()
+  drain(true)
+  lastText = {}
   slots, runs, active, dirty = {}, {}, nil, false
 end
 

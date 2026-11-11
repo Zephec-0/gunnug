@@ -475,7 +475,7 @@ end
 
 local STEP_SOUND = {
   [materials.DIRT] = "step_dirt", [materials.SAND] = "step_sand", [materials.SANDSTONE] = "step_rock", [materials.ROCK] = "step_rock",
-  [materials.BEDROCK] = "step_rock", [materials.WOOD] = "step_wood", [materials.BRICK] = "step_rock", [materials.STONEBRICK] = "step_rock",
+  [materials.BEDROCK] = "step_rock", [materials.WOOD] = "step_wood", [materials.HARDWOOD] = "step_plank", [materials.BRICK] = "step_rock", [materials.STONEBRICK] = "step_rock",
   [materials.GOLDORE] = "step_rock", [materials.IRON] = "step_metal", [materials.SLATE] = "step_rock", [materials.BLUECLAY] = "step_dirt",
   [materials.SULFUR] = "step_dirt", [materials.BILECLAY] = "step_dirt", [materials.TAILINGS] = "step_dirt", [materials.BASALT] = "step_rock",
   [materials.ASH] = "step_ash", [materials.DIAMONDORE] = "step_rock", [materials.ICE] = "step_rock",

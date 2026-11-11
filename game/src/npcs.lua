@@ -498,39 +498,42 @@ local function drawGunsmith(x, g, facing, pose, k, alpha)
     love.graphics.pop()
     return
   end
-  -- boots and trousers
-  r(BOOT, -4, -2, 3, 2)
+  -- boots and trousers: short legs, so he is squat and barrel-chested
+  r(BOOT, -4, -2, 4, 2)
   r(BOOT, 1, -2, 4, 2)
-  r(TROUSER, -4, -6, 3, 4)
-  r(TROUSER, 1, -6, 3, 4)
+  r(TROUSER, -4, -4, 3, 2)
+  r(TROUSER, 1, -4, 3, 2)
+  love.graphics.translate(0, 2)
   -- back arm, behind the body
-  r(SHIRT_D, -5, -13, 1, 4)
-  r(SKIN_D, -5, -9, 1, 2)
+  r(SHIRT_D, -7, -13, 2, 5)
+  r(SKIN_D, -7, -8, 2, 2)
   -- shirt and the leather apron over it
-  r(SHIRT, -4, -13, 8, 7)
-  r(APRON, -2, -12, 6, 8)
-  r(APRON_D, -2, -12, 6, 1)
-  r(APRON_D, -1, -13, 1, 1)
-  r(APRON_D, 0, -8, 3, 1) -- a pocket
+  r(SHIRT, -6, -13, 12, 9)
+  r(APRON, -4, -12, 9, 9)
+  r(APRON_D, -4, -12, 9, 1)
+  r(APRON_D, -3, -13, 1, 1)
+  r(APRON_D, 2, -13, 1, 1)
+  r(APRON_D, 0, -7, 4, 1) -- a pocket
+  r(IRON_L, 3, -6, 1, 2) -- a punch in it
   -- front arm: hanging, or swinging the hammer
   if pose == "hammer" then
     local up = k < 0.62
     if up then
       local lift = math.min(1, k / 0.5)
       local hy = -13 - math.floor(lift * 4)
-      r(SHIRT, 3, -13, 2, 2)
-      r(SKIN, 4, hy, 1, -hy - 11)
-      r(WOOD_D, 4, hy - 2, 1, 3) -- the handle
-      r(IRON_L, 3, hy - 3, 3, 2) -- the head
+      r(SHIRT, 5, -13, 2, 3)
+      r(SKIN, 6, hy, 2, -hy - 10)
+      r(WOOD_D, 6, hy - 2, 1, 3) -- the handle
+      r(IRON_L, 5, hy - 3, 3, 2) -- the head
     else
-      r(SHIRT, 3, -13, 2, 2)
-      r(SKIN, 4, -11, 3, 1)
-      r(WOOD_D, 6, -12, 2, 1)
-      r(IRON_L, 8, -13, 2, 3)
+      r(SHIRT, 5, -13, 2, 3)
+      r(SKIN, 6, -10, 3, 2)
+      r(WOOD_D, 8, -11, 2, 1)
+      r(IRON_L, 10, -12, 2, 3)
     end
   else
-    r(SHIRT, 3, -13, 2, 3)
-    r(SKIN, 4, -10, 1, 3)
+    r(SHIRT, 5, -13, 2, 4)
+    r(SKIN, 5, -9, 2, 3)
   end
   -- head: a grey beard, a flat cap with goggles pushed up on it
   r(SKIN, -2, -18, 5, 4)
@@ -776,8 +779,10 @@ local function drawTaxidermist(x, g, facing, stitching, k)
   end
   r(BOOT, -3, -2, 3, 2)
   r(BOOT, 1, -2, 3, 2)
-  r(TROUSER, -3, -6, 2, 4)
-  r(TROUSER, 1, -6, 2, 4)
+  r(TROUSER, -3, -8, 2, 6)
+  r(TROUSER, 1, -8, 2, 6)
+  love.graphics.translate(0, -2)
+  -- (a long thin man: legs and neck stretched)
   r(T_SLEEVE_D, -4, -14, 1, 5)
   r(T_SLEEVE, -3, -14, 6, 6)
   r(T_APRON, -3, -12, 6, 9)
@@ -801,6 +806,10 @@ local function drawTaxidermist(x, g, facing, stitching, k)
   r(BRASS, 0, -18, 1, 1)
   r(BRASS, -1, -19, 4, 1)
   r(T_SKIN, 0, -15, 3, 1)
+  r(T_SKIN, 3, -16, 1, 2) -- a long nose
+  r({ 0.14, 0.12, 0.13 }, -2, -25, 5, 5) -- a tall black top hat
+  r({ 0.14, 0.12, 0.13 }, -3, -20, 7, 1)
+  r({ 0.55, 0.14, 0.14 }, -2, -21, 5, 1)
   love.graphics.pop()
 end
 
@@ -1122,7 +1131,7 @@ function npcs.drawScreen(toScreen, font, player)
   end
   for id, s in pairs(camp) do
     if meta.atCamp(id) and s.say then
-      local sx, sy = toScreen(s.x, s.y - 30)
+      local sx, sy = toScreen(s.x, s.y - (({ apothecary = 33, taxidermist = 32, cartographer = 32 })[id] or 30))
       bubble(font, s.say.text, sx, sy, s.say.age)
     end
   end

@@ -50,33 +50,42 @@ local CANVAS, CANVAS_D = { 0.55, 0.48, 0.36 }, { 0.40, 0.34, 0.25 }
 -- a hat style ("hood", "cap", "bowler"), its colour, a face (beard or
 -- moustache) colour and style, and a prop in the front hand
 local LOOKS = {
+  -- Tall, thin and stooped, in a long teal robe to his boots, a pointed hood, a bandolier of vials
   apothecary = {
     skin = { 0.86, 0.68, 0.55 },
-    shirt = { 0.30, 0.46, 0.34 }, shirtD = { 0.20, 0.32, 0.24 },
-    vest = { 0.62, 0.55, 0.40 }, trouser = { 0.26, 0.22, 0.20 },
-    hat = "hood", hatCol = { 0.24, 0.40, 0.30 },
-    face = nil, prop = "flask", coat = true,
+    shirt = { 0.22, 0.62, 0.66 }, shirtD = { 0.14, 0.42, 0.48 },
+    vest = { 0.80, 0.66, 0.40 }, trouser = { 0.26, 0.22, 0.20 },
+    hat = "pointed", hatCol = { 0.30, 0.72, 0.74 },
+    face = nil, prop = "flask", coat = true, robe = true,
+    up = 2, tor = 1, lean = 1, nose = 2, vials = true,
   },
+  -- Short and wiry, a wide-brimmed explorer's hat, a big pack with a bedroll, a map in hand
   cartographer = {
     skin = { 0.80, 0.62, 0.48 },
     shirt = { 0.52, 0.38, 0.24 }, shirtD = { 0.38, 0.27, 0.16 },
     vest = { 0.68, 0.60, 0.44 }, trouser = { 0.30, 0.30, 0.34 },
-    hat = "cap", hatCol = { 0.36, 0.26, 0.16 },
+    hat = "wide", hatCol = { 0.36, 0.26, 0.16 },
     face = { 0.40, 0.30, 0.22 }, faceStyle = "stubble", prop = "scroll", goggles = true,
+    up = -2, pack = true, lean = 1,
   },
+  -- Broad and bald, a head mirror, a mask, a long white apron spattered red, a saw
   sawbone = {
     skin = { 0.78, 0.74, 0.66 },
     shirt = { 0.62, 0.74, 0.72 }, shirtD = { 0.44, 0.56, 0.55 },
     vest = { 0.90, 0.88, 0.84 }, trouser = { 0.28, 0.30, 0.32 },
-    hat = "hood", hatCol = { 0.66, 0.78, 0.76 },
-    face = { 0.55, 0.52, 0.50 }, faceStyle = "stubble", prop = "saw", goggles = true, coat = true,
+    hat = "mirror", hatCol = { 0.66, 0.78, 0.76 },
+    face = nil, prop = "saw", apron = { 0.92, 0.91, 0.88 }, mask = true, gore = true,
+    up = 2, tor = 1, girth = 2,
   },
+  -- Short and stout, a bowler, a big handlebar moustache, a white apron, sleeve garters
   bartender = {
     skin = { 0.84, 0.64, 0.52 },
     shirt = { 0.88, 0.86, 0.80 }, shirtD = { 0.70, 0.68, 0.62 },
     vest = { 0.40, 0.14, 0.16 }, trouser = { 0.16, 0.16, 0.20 },
     hat = "bowler", hatCol = { 0.20, 0.17, 0.17 },
-    face = { 0.22, 0.14, 0.10 }, faceStyle = "moustache", prop = "mug",
+    face = { 0.22, 0.14, 0.10 }, faceStyle = "handlebar", prop = "mug",
+    apron = { 0.90, 0.89, 0.84 }, garters = true,
+    up = -2, girth = 2,
   },
   -- the random events' people (src.randevents)
   carny = {
@@ -123,6 +132,11 @@ function people.draw(id, x, g, facing, pose, k, alpha)
   end
   local drink = pose == "drink"
   local stride = pose == "walk" and math.floor((k or 0) * 4) % 2 or 0
+  -- build: legs longer or shorter (up), a longer torso (tor), wider (girth, each side), a stoop (lean)
+  local up = drink and 0 or (L.up or 0)
+  local tor = L.tor or 0
+  local gw = L.girth or 0
+  local lean = L.lean or 0
   if drink then
     -- crouched at the water's edge: knees up, the whole body lower and a little forward
     r(BOOT, -3, -2, 3, 2)
@@ -134,60 +148,107 @@ function people.draw(id, x, g, facing, pose, k, alpha)
   else
     r(BOOT, -3 + stride, -2, 3, 2)
     r(BOOT, 1 - stride, -2, 3, 2)
-    r(L.trouser, -3 + stride, -7, 2, 5)
-    r(L.trouser, 1 - stride, -7, 2, 5)
+    r(L.trouser, -3 + stride, -7 - up, 2, 5 + up)
+    r(L.trouser, 1 - stride, -7 - up, 2, 5 + up)
   end
-  -- a long coat reaches down over the trousers
+  -- a long coat or robe reaches down over the trousers
   if L.coat and not drink then
-    r(L.shirt, -4, -8, 8, 6)
-    r(L.shirtD, -4, -8, 1, 6)
+    r(L.shirt, -4 - gw, -8 - up, 8 + gw * 2, 6 + up)
+    r(L.shirtD, -4 - gw, -8 - up, 1, 6 + up)
+    if L.robe then
+      r(L.shirtD, -4 - gw, -3, 8 + gw * 2, 1) -- the hem
+      r(L.shirtD, 0, -8 - up, 1, 6 + up)
+    end
   end
-  r(L.shirtD, -4, -14, 1, 5)
-  r(L.shirt, -3, -14, 6, 7)
-  r(L.vest, -2, -13, 4, 6)
-  r(L.shirtD, 0, -13, 1, 6) -- the front opening
+  -- a pack on his back, with a bedroll over it
+  if L.pack and not drink then
+    local py = -14 - up
+    r(CANVAS_D, -7 - gw, py + 1, 3, 8)
+    r(CANVAS, -7 - gw, py + 1, 2, 8)
+    r(WOOD_D, -7 - gw, py + 5, 3, 1)
+    r({ 0.55, 0.30, 0.20 }, -8 - gw, py - 1, 5, 2)
+    r({ 0.40, 0.20, 0.14 }, -8 - gw, py, 5, 1)
+    r(IRON_L, -6 - gw, py + 9, 2, 1) -- a tin cup
+  end
+  love.graphics.translate(0, -up)
+  r(L.shirtD, -4 - gw, -14 - tor, 1, 5 + tor)
+  r(L.shirt, -3 - gw, -14 - tor, 6 + gw * 2, 7 + tor)
+  r(L.vest, -2 - gw, -13 - tor, 4 + gw * 2, 6 + tor)
+  r(L.shirtD, 0, -13 - tor, 1, 6 + tor) -- the front opening
+  if L.vials then
+    for i = 0, 3 do
+      r(KC[2 + (i % 2) * 17], -2 + i, -12 - tor + i * 2, 1, 2)
+      r(WOOD_L, -2 + i, -13 - tor + i * 2, 1, 1)
+    end
+  end
+  if L.apron then
+    r(L.apron, -3 - gw, -9, 6 + gw * 2, 5 + up)
+    r({ 0.80, 0.79, 0.74 }, -3 - gw, -9, 6 + gw * 2, 1)
+    if L.gore then
+      r({ 0.62, 0.14, 0.12 }, -1, -7, 2, 2)
+      r({ 0.62, 0.14, 0.12 }, -3 - gw + 1, -5 + math.floor(up / 2), 1, 2)
+      r({ 0.50, 0.10, 0.10 }, 1 + gw - 1, -6, 1, 3)
+    end
+  end
+  if L.garters then
+    r({ 0.78, 0.14, 0.16 }, -3 - gw, -12 - tor, 1, 1)
+    r({ 0.78, 0.14, 0.16 }, 2 + gw, -12 - tor, 1, 1)
+  end
   -- front arm and what it holds
   local bob = (pose == "work") and math.floor(math.sin(k * math.pi * 2) + 0.5) or 0
-  r(L.shirt, 3, -13, 1, 3)
+  local ax = 3 + gw
+  r(L.shirt, ax, -13 - tor, 1, 3 + tor)
   if drink then
     -- a cupped hand dips down to the water and comes up to the mouth
     local lift = math.max(0, math.sin((k or 0) * math.pi * 2))
     local hy = -8 - math.floor(lift * 7 + 0.5)
-    r(L.shirt, 3, -13, 1, math.max(1, hy + 15))
-    r(L.skin, 3, hy, 3, 2)
+    r(L.shirt, ax, -13, 1, math.max(1, hy + 15))
+    r(L.skin, ax, hy, 3, 2)
     if lift > 0.4 then
-      r({ 0.55, 0.78, 0.95 }, 4, hy - 1, 1, 1) -- (water running off it)
+      r({ 0.55, 0.78, 0.95 }, ax + 1, hy - 1, 1, 1) -- (water running off it)
     end
   else
-    r(L.skin, 3, -10 + bob, 2, 1)
+    r(L.skin, ax, -10 + bob, 2, 1)
   end
+  local px = gw
   if drink then
     -- (no mug: his hands are full of water)
   elseif L.prop == "flask" then
-    r({ 0.60, 0.95, 0.70 }, 5, -12 + bob, 2, 3)
-    r({ 0.85, 0.90, 0.85 }, 5, -13 + bob, 2, 1)
+    r({ 0.60, 0.95, 0.70 }, 5 + px, -12 + bob, 2, 3)
+    r({ 0.85, 0.90, 0.85 }, 5 + px, -13 + bob, 2, 1)
   elseif L.prop == "scroll" then
-    r({ 0.86, 0.78, 0.58 }, 4, -14 + bob, 2, 7)
-    r({ 0.52, 0.40, 0.26 }, 4, -14 + bob, 2, 1)
-    r({ 0.52, 0.40, 0.26 }, 4, -8 + bob, 2, 1)
+    r({ 0.86, 0.78, 0.58 }, 4 + px, -14 + bob, 2, 7)
+    r({ 0.52, 0.40, 0.26 }, 4 + px, -14 + bob, 2, 1)
+    r({ 0.52, 0.40, 0.26 }, 4 + px, -8 + bob, 2, 1)
   elseif L.prop == "saw" then
-    r(IRON_L, 5, -15 + bob, 1, 7)
-    r(IRON_D, 6, -15 + bob, 1, 7)
-    r({ 0.45, 0.22, 0.20 }, 5, -9 + bob, 2, 2)
+    r(IRON_L, 5 + px, -15 + bob, 1, 7)
+    r(IRON_D, 6 + px, -15 + bob, 1, 7)
+    r({ 0.45, 0.22, 0.20 }, 5 + px, -9 + bob, 2, 2)
   elseif L.prop == "mug" then
-    r({ 0.78, 0.76, 0.70 }, 5, -12 + bob, 2, 3)
-    r({ 0.95, 0.80, 0.40 }, 5, -12 + bob, 2, 1)
+    r({ 0.78, 0.76, 0.70 }, 5 + px, -12 + bob, 2, 3)
+    r({ 0.95, 0.80, 0.40 }, 5 + px, -12 + bob, 2, 1)
   end
-  -- head
-  r(L.skin, -2, -19, 5, 5)
-  r(L.skin, 3, -17, 1, 1)
+  -- head (it follows the stoop and the longer torso)
+  love.graphics.translate(lean, -tor)
+  local hw = (L.faceStyle == "handlebar") and 1 or 0
+  r(L.skin, -2, -19, 5 + hw, 5)
+  r(L.skin, 3 + hw, -17, 1 + (L.nose or 0), 1)
   r(EYE, 1, -17, 1, 1)
   if L.face and L.faceStyle == "moustache" then
     r(L.face, -1, -16, 5, 1)
     r(L.face, -2, -17, 1, 1)
     r(L.face, 4, -17, 1, 1)
+  elseif L.face and L.faceStyle == "handlebar" then
+    r(L.face, -2, -17, 1, 1)
+    r(L.face, -1, -16, 6, 1)
+    r(L.face, 5, -17, 1, 1)
+    r(L.face, -1, -15, 2, 1) -- a little chin tuft
   elseif L.face then
     r(L.face, -1, -15, 4, 1)
+  end
+  if L.mask then
+    r({ 0.88, 0.89, 0.85 }, -2, -16, 6, 2)
+    r({ 0.70, 0.72, 0.70 }, -2, -16, 6, 1)
   end
   if L.goggles then
     r({ 0.55, 0.85, 0.9 }, 1, -18, 2, 2)
@@ -199,14 +260,37 @@ function people.draw(id, x, g, facing, pose, k, alpha)
     r(L.hatCol, -3, -18, 1, 4)
     r(L.hatCol, 3, -18, 1, 2)
     r({ L.hatCol[1] * 0.7, L.hatCol[2] * 0.7, L.hatCol[3] * 0.7 }, -3, -21, 7, 1)
+  elseif L.hat == "pointed" then
+    -- a deep hood drawn up to a long point that flops back
+    r(L.hatCol, -3, -21, 7, 3)
+    r(L.hatCol, -3, -18, 1, 5)
+    r(L.hatCol, 3, -18, 1, 2)
+    r(L.hatCol, -2, -24, 4, 3)
+    r(L.hatCol, -4, -26, 3, 3)
+    r(L.hatCol, -5, -27, 2, 1)
+    r({ L.hatCol[1] * 0.7, L.hatCol[2] * 0.7, L.hatCol[3] * 0.7 }, -3, -21, 7, 1)
+  elseif L.hat == "wide" then
+    -- a wide brim all round, a band, a feather
+    r(L.hatCol, -2, -23, 5, 3)
+    r({ L.hatCol[1] * 0.7, L.hatCol[2] * 0.7, L.hatCol[3] * 0.7 }, -6, -20, 13, 1)
+    r(L.hatCol, -5, -21, 11, 1)
+    r({ 0.80, 0.30, 0.22 }, -2, -21, 5, 1)
+    r({ 0.85, 0.80, 0.60 }, 3, -26, 1, 4)
+    r({ 0.85, 0.80, 0.60 }, 4, -25, 1, 2)
+  elseif L.hat == "mirror" then
+    -- bald, a leather band with a round head mirror on it
+    r({ 0.40, 0.30, 0.22 }, -2, -20, 5, 1)
+    r(IRON_L, 1, -22, 3, 3)
+    r({ 0.9, 0.95, 1.0 }, 2, -21, 1, 1)
+    r(L.skin, -2, -21, 4, 1)
   elseif L.hat == "cap" then
     r(L.hatCol, -2, -21, 6, 2)
     r(L.hatCol, 3, -20, 3, 1)
     r({ 0.85, 0.80, 0.60 }, -2, -23, 1, 3) -- a feather
   elseif L.hat == "bowler" then
-    r(L.hatCol, -2, -22, 5, 3)
-    r(L.hatCol, -3, -19, 7, 1)
-    r({ 0.50, 0.12, 0.12 }, -2, -20, 5, 1)
+    r(L.hatCol, -2, -22, 5 + hw, 3)
+    r(L.hatCol, -3, -19, 7 + hw, 1)
+    r({ 0.50, 0.12, 0.12 }, -2, -20, 5 + hw, 1)
   end
   love.graphics.pop()
 end

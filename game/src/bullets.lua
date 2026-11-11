@@ -582,9 +582,31 @@ function bullets.update(dt, w)
     if inWater then
       if not b.wet then
         b.wet = true
-        for _ = 1, 3 do
-          effects.particle(b.x, b.y, (love.math.random() - 0.5) * 30, -20 - love.math.random() * 30, 0.4, { 0.7, 0.85, 1 }, 200, true)
+        -- A splash where it went in: a spray of droplets thrown back up and out of the surface (pixels only; the
+        -- water itself is not disturbed). The entry is found between where it was last dry and here.
+        local sx, sy = b.x, b.y
+        if b.dryX then
+          local n = 8
+          for k = 1, n do
+            local t = k / n
+            local px, py = b.dryX + (b.x - b.dryX) * t, b.dryY + (b.y - b.dryY) * t
+            if fluids.waterAt(px, py) then
+              sx, sy = px, py
+              break
+            end
+          end
         end
+        local power = math.min(1, b.speed / 700)
+        local drops = 6 + math.floor(power * 6)
+        for _ = 1, drops do
+          local rnd = love.math.random
+          local up = 50 + rnd() * 90 * (0.5 + power)
+          local side = (rnd() - 0.5) * 90 - (b.dx or 0) * 20
+          local c = rnd() < 0.4 and { 0.92, 0.97, 1 } or { 0.62, 0.82, 0.98 }
+          effects.particle(sx + (rnd() - 0.5) * 3, sy - 1, side, -up, 0.35 + rnd() * 0.3, c, 420)
+        end
+        effects.particle(sx - 2, sy - 1, -35, -60, 0.4, { 0.92, 0.97, 1 }, 420)
+        effects.particle(sx + 2, sy - 1, 35, -60, 0.4, { 0.92, 0.97, 1 }, 420)
       end
       b.speed = b.speed * math.exp(-2.5 * dt)
       if love.math.random() < dt * 25 then
@@ -595,6 +617,7 @@ function bullets.update(dt, w)
       end
     else
       b.wet = nil
+      b.dryX, b.dryY = b.x, b.y
     end
     steer(b, dt)
     trailFx(b, dt)

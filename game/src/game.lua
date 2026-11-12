@@ -1026,7 +1026,7 @@ function game.update(dt)
       deadTime, deathPhoto = 0, nil
     end
   end
-  if itembar.isOpen() or menu.isOpen() or compare.isOpen() then
+  if itembar.isOpen() or menu.isOpen() or compare.isOpen() or require("src.journal").isReading() then
     restartHeld, restartFade = 0, 0
     return
   end
@@ -1191,7 +1191,9 @@ end
 local drawFrame
 
 function game.draw()
+  render.screen.begin()
   drawFrame()
+  render.screen.finish()
   lastWork = love.timer.getTime() - frameT0 - genSpent
 end
 
@@ -1490,6 +1492,10 @@ function game.keypressed(key)
     compare.keypressed(key)
     return true -- and so does the compare prompt
   end
+  if require("src.journal").isReading() then
+    require("src.journal").close() -- (a page being read: the world waits, and any key puts it away)
+    return true
+  end
   if input.is("fuse", key) and not player.dead then
     fuser.toggle(inv, player)
     return true
@@ -1585,6 +1591,10 @@ function game.mousepressed(x, y, button)
     return
   end
   if compare.isOpen() then
+    return
+  end
+  if require("src.journal").isReading() then
+    require("src.journal").close()
     return
   end
   if itembar.mousepressed(inv, x, y, button) or pending or itembar.isOpen() then

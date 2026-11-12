@@ -347,6 +347,13 @@ function Player:loseHealth(amount)
   local cx = self:center()
   local vulnerable = self:gunStat("vulnerable")
   amount = math.max(1, math.floor(amount * perks.prod("dmgTaken") * (1 + vulnerable) + 0.5))
+  if self.wearingDown then
+    -- (fire and poison wear him down to his last point of health and no further: see hurtOverTime)
+    amount = math.min(amount, self.hp - 1)
+    if amount <= 0 then
+      return 0
+    end
+  end
   if self.hp - amount <= 0 and perks.has("second_wind") and not self.inventory.secondWindUsed then
     -- Second Wind: the first killing blow leaves the hunter standing
     self.inventory.secondWindUsed = true
@@ -386,8 +393,14 @@ function Player:hurtOverTime(amount, color, source)
   if self.dead or require("src.dev").noDamage then
     return
   end
-  self.lastSource, self.lastEnemy = source, nil
+  -- Burning and poison (the conditions, flames and gas clouds) never kill: they stop at 1 health
+  self.wearingDown = source == "fire" or source == "poison" or source == "gas"
   amount = self:loseHealth(amount)
+  self.wearingDown = nil
+  if amount <= 0 then
+    return
+  end
+  self.lastSource, self.lastEnemy = source, nil
   self.hurtFlash = math.max(self.hurtFlash, 0.35)
   edgecue.hit(amount, self.maxHp, 0, true) -- (a faint haze while it lasts)
   local cx = self:center()

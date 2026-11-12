@@ -56,6 +56,7 @@ local DEFAULTS = {
   fullscreen = false,
   borderless = false, -- windowed fullscreen: a borderless window the size of the desktop
   vsync = true,
+  brightness = 1, -- the whole picture, interface included (0.5 ... 1.5, see src.screen)
   postfx = true, -- bloom, colour grading and the menu's warp
   dither = 0, -- anti-banding noise: 0 off ... 5 (see render.DITHER_NAMES)
   -- The visuals panel (F4, see src.visuals)
@@ -90,6 +91,7 @@ local function apply()
   local render = require("src.render")
   render.dither = values.dither
   render.bloom = values.visBloom
+  render.screen.brightness = values.brightness
   local adj = render.adj
   adj.ditherAmt, adj.bright, adj.gamma = values.visDitherAmt, values.visBright, values.visGamma
   adj.contrast, adj.sat, adj.vig, adj.aberr = values.visContrast, values.visSat, values.visVig, values.visAberr
@@ -127,7 +129,14 @@ local function apply()
         elseif wasBorderless or w >= dw or h >= dh then
           -- (a window as big as the screen is no window: a smaller one, centred)
           flags.x, flags.y = nil, nil
-          keepingCanvases(function() love.window.updateMode(math.floor(dw * 0.67), math.floor(dh * 0.67), flags) end)
+          local nw, nh = math.floor(dw * 0.67), math.floor(dh * 0.67)
+          local config = require("src.config")
+          local n = math.floor(math.min(dw / config.VIRTUAL_W, dh / config.VIRTUAL_H) * 0.75)
+          if n >= 2 then
+            -- (a whole number of game pixels: nothing has to be scaled, see src.screen)
+            nw, nh = config.VIRTUAL_W * n, config.VIRTUAL_H * n
+          end
+          keepingCanvases(function() love.window.updateMode(nw, nh, flags) end)
         else
           keepingCanvases(function() love.window.updateMode(w, h, flags) end)
         end

@@ -420,6 +420,7 @@ local QUEEN_SCALES = { 6, 5, 4, 3, 2 }
 -- Each area's monsters are tougher: damage rises with the area (toughness,
 -- which scales health and gold, is set where they are placed)
 local DAMAGE_PER_AREA = 0.35
+local FIRST_AREA_DAMAGE = 0.7 -- the Old Mine's monsters hit this much softer: the run's first minutes
 
 -- Native armour: deeper monsters take a flat amount less from every direct hit
 -- (a hit still does at least ARMOR_FLOOR of its damage). Burning, poison and
@@ -445,6 +446,42 @@ local near = {}
 local GLOB_LIFE = 4
 
 local DRAW_REF, GLOW_REF = {}, {} -- filled in once the drawing functions exist (below)
+
+-- The animation clock. Some monsters were drawn as a few held poses (a ghoul's two-frame shuffle), others moved a
+-- little every frame (a bloater's swell, a spirit's sway), and side by side the two read as different kinds of
+-- picture. So every monster's pose is now held for one tick of this clock, twelve a second: its timers (and the
+-- time its drawing reads) only move on between ticks. Where it stands still follows the game every frame.
+-- nil = off (every frame, as before).
+enemies.ANIM_FPS = 12
+do -- (a block of its own: this file is at the limit of 200 locals)
+local realTime = love.timer.getTime
+local heldNow = 0
+local function heldTime()
+  return heldNow
+end
+function enemies.posed(fn, e)
+  local fps = enemies.ANIM_FPS
+  if not fps or not fn then
+    return fn and fn(e)
+  end
+  local tick = math.floor((enemies.clock or realTime)() * fps)
+  if e.animTick ~= tick then
+    e.animTick = tick
+    e.heldPhase, e.heldFlap, e.heldStep = e.phase, e.flap, e.stepT
+  end
+  local p, f, st = e.phase, e.flap, e.stepT
+  e.phase, e.flap, e.stepT = e.heldPhase, e.heldFlap, e.heldStep
+  heldNow = tick / fps
+  local was = love.timer.getTime
+  love.timer.getTime = heldTime
+  local ok, err = pcall(fn, e)
+  love.timer.getTime = was
+  e.phase, e.flap, e.stepT = p, f, st
+  if not ok then
+    error(err, 0)
+  end
+end
+end
 
 local list = {}
 local globs = {}
@@ -576,7 +613,7 @@ local function newEnemy(kind, x, y, toughness, level, swarm)
     state = def.dummy and "still" or def.ground and "idle" or "sleep",
     level = level or 1,
     swarm = swarm, -- the colony this monster belongs to: { members = {...}, awake }
-    dmgMul = (1 + ((level or 1) - 1) * DAMAGE_PER_AREA) * require("src.meta").enemyDmgMul(),
+    dmgMul = ((level or 1) <= 1 and FIRST_AREA_DAMAGE or 1 + ((level or 1) - 1) * DAMAGE_PER_AREA) * require("src.meta").enemyDmgMul(),
     facing = love.math.random() < 0.5 and -1 or 1,
     timer = love.math.random() * 2, -- general-purpose state timer
     cooldown = 0,
@@ -683,9 +720,9 @@ end
 -- Draws a specimen (body, then its glowing parts). Returns false if this
 -- kind's drawing failed outside the world.
 function enemies.drawSpecimen(e)
-  local ok = pcall(DRAW_REF[e.kind] or function() end, e)
+  local ok = pcall(enemies.posed, DRAW_REF[e.kind], e)
   if ok then
-    ok = pcall(GLOW_REF[e.kind] or function() end, e)
+    ok = pcall(enemies.posed, GLOW_REF[e.kind], e)
   end
   love.graphics.setColor(1, 1, 1)
   return ok
@@ -6299,7 +6336,7 @@ function enemies.draw(view, lit)
         shader:send("tint", { tr, tg, tb })
         shader:send("amount", amount)
       end
-      DRAW[e.kind](e)
+      enemies.posed(DRAW[e.kind], e)
       if shader then
         love.graphics.setShader()
       end
@@ -6334,7 +6371,7 @@ function enemies.drawEmissive(view)
     if onScreen(e, view) then
       love.graphics.push()
       love.graphics.translate(staggerOffset(e), 0)
-      GLOW[e.kind](e)
+      enemies.posed(GLOW[e.kind], e)
       if e.elite then
         -- The elite's crest: a small diamond per affix, bobbing over its head
         local b = e.body

@@ -24,7 +24,7 @@ local hitboxes = {} -- slot rectangles from the last draw: { x, y, w, h, ref }
 local drag -- { ref } while an item is being dragged
 local perkCache = {} -- perk id -> the table the UI draws and tooltips
 
-local WEAPON_SIZE, ITEM_SIZE, GUN_SLOT_SIZE = 18, 14, 13
+local WEAPON_SIZE, ITEM_SIZE, GUN_SLOT_SIZE = 18, 16, 13
 
 local fontFace = require("src.fonts")
 local function font(px)
@@ -299,10 +299,22 @@ local function drawGlow(x, y, size, ix, iy, box, col, alpha, u)
 end
 
 local GUN_FILL = 0.92 -- how much of a slot a gun's model fills
+
+-- The scale for a picture that may be `fit` window pixels to its pixel at most: a whole number of game pixels
+-- when that still fills most of the room, otherwise the largest whole number of window pixels
+local function wholeFit(fit)
+  local whole = math.max(1, math.floor(fit + 0.02))
+  local cell = require("src.render").cell()
+  local onGrid = math.floor(whole / cell) * cell
+  if onGrid >= whole * 0.75 then
+    return onGrid
+  end
+  return whole
+end
 local gunCanvases = setmetatable({}, { __mode = "k" }) -- gun -> "WxH@q" -> { canvas } its model is drawn into
 
 -- Draws a weapon icon or item badge centred in a box
-local function drawThing(thing, x, y, size, u, alpha)
+local function drawThing(thing, x, y, size, u, alpha, gunCells)
   alpha = alpha or 1
   if isWeapon(thing) and gunhud.supports(thing) then
     -- The drawn models (each with its own reload animation) come in different
@@ -311,6 +323,24 @@ local function drawThing(thing, x, y, size, u, alpha)
     -- bilinear", like the game's own screen), instead of snapping to 1x or 2x
     local w, h = gunhud.size(thing)
     local fit = math.min(size * GUN_FILL / w, size * GUN_FILL / h) -- screen pixels per model pixel
+    local artCell = cellOf(u)
+    if gunCells then
+      fit = gunCells * artCell -- (the weapon card: every gun at the same scale, whatever its length)
+    end
+    if fit < artCell then
+      -- Too small a box for the model at the game's own pixel size: the gun as it lies on the ground (the model
+      -- at half size), at a whole number of game pixels, the same sprite as in the world
+      -- (while it is being reloaded, or a Gatling's barrels turn, the sprite is made from the moving model)
+      local moving = (thing.isReloading and thing:isReloading()) or (thing.def.model == "gatling" and (thing.spin or 0) ~= (thing.barSpin or 0))
+      thing.barSpin = thing.spin
+      local icon = moving and gunhud.groundLive(thing) or gunhud.groundImage(thing)
+      local iw, ih = icon:getDimensions()
+      local s = wholeFit(math.min(size * GUN_FILL / iw, size * GUN_FILL / ih))
+      love.graphics.setColor(1, 1, 1, alpha)
+      love.graphics.draw(icon, math.floor(x + (size - iw * s) / 2), math.floor(y + (size - ih * s) / 2), 0, s, s)
+      return
+    end
+    fit = math.floor(fit / artCell) * artCell -- (a whole number of game pixels to the model pixel: crisp, no resampling)
     local q0 = math.max(1, math.ceil(fit))
     -- (each gun keeps its own canvas, drawn again only while its picture can change: reloading, or a
     -- Gatling's barrels; redrawing every gun's model every frame was most of the bar's cost)
@@ -353,7 +383,7 @@ local function drawThing(thing, x, y, size, u, alpha)
     -- (the HD image has room for a drop shadow round the art)
     local pad = img:getWidth() == itemIcons.HD_SIZE + 2 * itemIcons.HD_PAD and itemIcons.HD_PAD or 0
     local iw = img:getWidth() - 2 * pad
-    local s = math.max(1, math.floor(size * 0.7 / iw)) -- (well inside the slot, not up against its rim)
+    local s = wholeFit(size * 0.9 / iw) -- (the art's own rim keeps it off the slot's)
     local box = iw * s
     local ix, iy = x + (size - box) / 2, y + (size - box) / 2
     local rarity = thing.rarity and thing.rarity ~= "common" and items.rarities[thing.rarity]
@@ -776,7 +806,7 @@ local function drawGunCard(inv, gun, x, y, u, o)
   local boxY, boxH = sy + (rows - 1) * step + sw + 2.5 * u, 32 * u
   love.graphics.setColor(0.05, 0.04, 0.08, 0.9)
   love.graphics.rectangle("fill", x + 4 * u, boxY, cardW - 8 * u, boxH, u, u)
-  drawThing(gun, x + (cardW - 30 * u) / 2, boxY + u, 30 * u, u)
+  drawThing(gun, x + (cardW - 30 * u) / 2, boxY + u, 30 * u, u, nil, 2)
   if o.index then
     shadowPrint("[" .. o.index .. "]", x + 6 * u, boxY + boxH - textFont:getHeight() - 0.5 * u, textFont, { 0.75, 0.78, 0.86 })
   end
@@ -906,7 +936,7 @@ local function drawPanel(inv, u)
     end
   end
 
-  local hint = "Drag ammo between slots; drag a weapon or item off the bar to drop it.   1-3 / wheel: switch   " .. input.label("inventory") .. ": close"
+  local hint = "Drag ammo between slots.   Shift + click: onto held gun / back to bar   Ctrl + click: drop   1-3 / wheel: switch   " .. input.label("inventory") .. ": close"
   shadowPrint(hint, math.floor((ww - textFont:getWidth(hint)) / 2), y + cardH + 4 * u, textFont, { 1, 1, 1, 0.75 })
 end
 
@@ -956,6 +986,17 @@ function itembar.draw(inv, u)
 
   local mx, my = love.mouse.getPosition()
   drawFuseHints(inv, u, mx, my)
+  local dropTarget = itembar.dropTarget and itembar.dropTarget(inv, mx, my)
+  if dropTarget then
+    itembar.dropMark(dropTarget)
+  else
+    if itembar.equipTarget then
+      local equipTarget, _, way = itembar.equipTarget(inv, mx, my)
+      if equipTarget then
+        itembar.equipMark(equipTarget, way)
+      end
+    end
+  end
   if drag then
     local thing = inv:get(drag.ref)
     if thing then
@@ -1010,9 +1051,115 @@ function itembar.groundIcon(gun)
 end
 
 -- Returns true if the click was used by the item bar
+-- What Ctrl + click would drop: the hitbox of a filled weapon, item or gun slot under the mouse (not perks, not a
+-- locked fuser), while Ctrl is held and the bar is open
+local function ctrlDropTarget(inv, x, y)
+  if not isOpen or drag or not (love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl")) then
+    return nil
+  end
+  local h = hitTest(x, y)
+  if not h or h.ref.kind == "perk" or h.ref.kind == "fuseToggle" or (h.ref.kind == "fuse" and inv.fuse.locked) then
+    return nil
+  end
+  return inv:get(h.ref) and h or nil
+end
+
+-- What Shift + click would move, while Shift is held and the bar is open: the hitbox under the mouse, where its
+-- item would go, and which way the arrow points. A loose item in the bar goes down onto the gun in hand (its first
+-- free slot); an item on a gun goes up to the bar (its first free slot). Nothing for weapons, perks or the fuser,
+-- and nothing when there is no free slot to take it.
+local function shiftEquipTarget(inv, x, y)
+  if not isOpen or drag or not (love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")) then
+    return nil
+  end
+  local h = hitTest(x, y)
+  if not h or not inv:get(h.ref) then
+    return nil
+  end
+  if h.ref.kind == "item" then
+    local gun = inv:selectedGun()
+    if gun then
+      for i = 1, gun.slotCount do
+        if not gun.slots[i] then
+          return h, { kind = "gunSlot", gun = gun, index = i }, "down"
+        end
+      end
+    end
+  elseif h.ref.kind == "gunSlot" then
+    for i = 1, inventory.ITEM_SLOTS do
+      if not inv:get({ kind = "item", index = i }) then
+        return h, { kind = "item", index = i }, "up"
+      end
+    end
+  end
+  return nil
+end
+
+-- The little yellow arrow at a slot's top right corner: down (onto the gun) or up (back to the bar)
+local function drawEquipMark(h, dir)
+  local c = require("src.render").cell()
+  local n = 5
+  local x, y = math.floor(h.x + h.w - (n - 1) * c), math.floor(h.y - c)
+  love.graphics.setColor(0.08, 0.06, 0.02, 0.95)
+  love.graphics.rectangle("fill", x - c, y - c, (n + 2) * c, (n + 2) * c)
+  love.graphics.setColor(1, 0.86, 0.25, 1)
+  love.graphics.rectangle("fill", x + 2 * c, y, c, n * c) -- the shaft
+  local head, barbs = dir == "up" and 1 or n - 2, dir == "up" and 2 or n - 3
+  love.graphics.rectangle("fill", x + c, y + head * c, 3 * c, c) -- the head
+  love.graphics.rectangle("fill", x, y + barbs * c, c, c)
+  love.graphics.rectangle("fill", x + 4 * c, y + barbs * c, c, c)
+  love.graphics.setColor(1, 1, 1, 1)
+end
+
+local function dropFrom(inv, ref)
+  local thing = inv:get(ref)
+  if not thing then
+    return
+  end
+  if isWeapon(thing) then
+    if itembar.onDropWeapon then
+      inv:set(ref, nil)
+      itembar.onDropWeapon(thing)
+    end
+  elseif itembar.onDrop then
+    inv:set(ref, nil)
+    itembar.onDrop(thing)
+  end
+end
+
+-- The little red X at a slot's top right corner
+local function drawDropMark(h)
+  local c = require("src.render").cell()
+  local n = 5
+  local x, y = math.floor(h.x + h.w - (n - 1) * c), math.floor(h.y - c)
+  love.graphics.setColor(0.08, 0.02, 0.03, 0.95)
+  love.graphics.rectangle("fill", x - c, y - c, (n + 2) * c, (n + 2) * c)
+  love.graphics.setColor(0.95, 0.2, 0.2, 1)
+  for i = 0, n - 1 do
+    love.graphics.rectangle("fill", x + i * c, y + i * c, c, c)
+    love.graphics.rectangle("fill", x + (n - 1 - i) * c, y + i * c, c, c)
+  end
+  love.graphics.setColor(1, 1, 1, 1)
+end
+itembar.dropTarget, itembar.dropMark = ctrlDropTarget, drawDropMark
+itembar.equipTarget, itembar.equipMark = shiftEquipTarget, drawEquipMark
+
 function itembar.mousepressed(inv, x, y, button)
   if not isOpen or button ~= 1 then
     return false
+  end
+  local target = ctrlDropTarget(inv, x, y)
+  if target then
+    dropFrom(inv, target.ref)
+    return true
+  end
+  local from, to = shiftEquipTarget(inv, x, y)
+  if from then
+    inv:move(from.ref, to)
+    pcall(function()
+      require("src.audio").play("select")
+    end)
+    return true
   end
   local h = hitTest(x, y)
   if h and h.ref.kind == "fuseToggle" then

@@ -20,7 +20,7 @@ local GREEN = { 0.30, 0.55, 0.25 }
 local floor, max, min = math.floor, math.max, math.min
 
 local function PS(u)
-  return max(1, floor(u))
+  return require("src.render").cell()
 end
 
 -- The page's one art pixel, in screen pixels (set as each page starts): every outline, shadow edge, highlight and bit of

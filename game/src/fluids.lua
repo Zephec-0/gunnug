@@ -594,6 +594,29 @@ local function igniteOil(k)
   smoke[k - K] = math.min(1, (smoke[k - K] or 0) + 0.3)
 end
 
+-- Lights any lamp oil within `reach` cells of a point (a bullet passing or landing: any shot sets oil alight).
+-- Returns true if some caught. Costs a row lookup when there is no oil about.
+function fluids.lightOil(x, y, reach)
+  if not world then
+    return false
+  end
+  reach = reach or 1
+  local gx, gy = floor(x / C), floor(y / C)
+  local caught = false
+  for dy = -reach, reach do
+    if (oilRows[gy + dy] or 0) > 0 then
+      for dx = -reach, reach do
+        local k = key(gx + dx, gy + dy)
+        if oil[k] then
+          igniteOil(k)
+          caught = true
+        end
+      end
+    end
+  end
+  return caught
+end
+
 -- Spills `cells` cells of oil at (x, y): each goes into the nearest free cell
 -- around it, and they all start to flow
 function fluids.addOil(x, y, cells)
@@ -1534,6 +1557,19 @@ local function continueWaterStep(budget)
             run = slidesToward(k, -side)
             if run then
               moveWater(k, k - side * run)
+            elseif water[below] and not water[k - K] and free(k - 1) and water[below - 1] then
+              -- A loose cell of a pool's part-filled top row (resting on water, open above, room to its left): it
+              -- closes up leftward as far as the row is clear, so what is left over lies as one run against the
+              -- pool's edge and the surface is flat but for one step, not a scatter of bumps
+              local to = k - 1
+              for _ = 2, WATER_SPREAD do
+                if free(to - 1) and water[to - 1 + K] then
+                  to = to - 1
+                else
+                  break
+                end
+              end
+              moveWater(k, to)
             else
               active[k] = nil
             end
@@ -2790,7 +2826,7 @@ local function drawWaterShaded(view, gx0, gy0, gx1, gy1, t, mask)
   for _, l in ipairs(surfaceLines) do
     for sx = l[1], l[2] - 1 do
       if not world:isSolid(sx, l[3] - 1) then
-        local off = math.sin(sx * 0.35 + t * 2.2) > 0.5 and 1 or 0
+        local off = 0 -- (a level line: stepping parts of it down a pixel for a ripple read as a broken surface)
         np = np + 1
         local pt = pool[np]
         if not pt then

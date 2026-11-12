@@ -566,7 +566,7 @@ function compendium.fitScale(entry, w, h)
   local pad = iw == icons.HD_SIZE + 2 * icons.HD_PAD and icons.HD_PAD or 0
   local s = math.min(w / (iw - 2 * pad), h / (ih - 2 * pad))
   if s >= 1 then
-    s = math.floor(s)
+    s = require("src.render").snap(math.floor(s))
   end
   return s
 end
@@ -582,7 +582,7 @@ function compendium.drawIcon(entry, x, y, w, h, silhouette, alpha, scale)
   local cw, ch = iw - 2 * pad, ih - 2 * pad
   local s = scale or math.min(w / cw, h / ch)
   if not scale and s >= 1 then
-    s = math.floor(s)
+    s = require("src.render").snap(math.floor(s))
   end
   local dx = math.floor(x + (w - cw * s) / 2 - pad * s)
   local dy = math.floor(y + (h - ch * s) / 2 - pad * s)

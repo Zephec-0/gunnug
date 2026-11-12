@@ -48,19 +48,27 @@ local function blowPlug(g)
     require("src.bullets").blast(cx, cy, 4, 3.2, 14, 8, "keg")
     require("src.audio").play("explosion", 0.8, 0.7)
   end)
-  -- the plug is brick: the blast may leave a stump, so clear it
-  for y = p.y0, p.y1 do
-    for x = p.x0, p.x1 do
-      if world:get(x, y) == materials.STONEBRICK then
+  -- The fire takes the whole mouth out: the plug top to bottom (the blast alone may leave a stump of brick), and
+  -- the lip of the oil trough in front of it, so what is left is a doorway to walk through
+  local x0, x1 = p.x0, p.x1
+  if g.dir == 1 then
+    x1 = p.x1 + 48
+  else
+    x0 = p.x0 - 48
+  end
+  for y = p.y0, p.y1 - 1 do
+    for x = x0, x1 do
+      local id = world:get(x, y)
+      if id ~= materials.AIR and (id == materials.STONEBRICK or x < p.x0 or x > p.x1) then
         world:setRaw(x, y, materials.AIR)
-        if love.math.random() < 0.15 then
+        if love.math.random() < 0.1 then
           effects.particle(x, y, -g.dir * (30 + love.math.random() * 80), -love.math.random() * 60, 0.9, { 0.45, 0.44, 0.5 }, 480)
         end
       end
     end
   end
-  world:repaintRegion(p.x0 - 3, p.y0 - 3, p.x1 + 3, p.y1 + 3)
-  require("src.physics").rebuildRegion(p.x0 - 3, p.y0 - 3, p.x1 + 3, p.y1 + 3)
+  world:repaintRegion(x0 - 3, p.y0 - 3, x1 + 3, p.y1 + 3)
+  require("src.physics").rebuildRegion(x0 - 3, p.y0 - 3, x1 + 3, p.y1 + 3)
   pcall(function()
     require("src.fluids").wake(p.x0 - 10, p.y0 - 10, p.x1 + 10, p.y1 + 10)
   end)
@@ -81,7 +89,9 @@ function gasline.update(dt, player)
         end
         -- (the plug can also be taken out some other way, by a blast: then it is simply open)
         local mid = math.floor((g.plug.x0 + g.plug.x1) / 2)
-        if world:get(mid, g.plug.y1 - 2) ~= materials.STONEBRICK then
+        -- (looked for above the slit: the slit itself is open air, and reading that made every plug count as
+        -- already open, so the fire in the chamber never blew it)
+        if world:get(mid, g.plug.y0 + 3) ~= materials.STONEBRICK then
           g.state = "open"
         end
       end

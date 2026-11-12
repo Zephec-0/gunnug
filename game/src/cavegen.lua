@@ -2219,19 +2219,40 @@ function cavegen.generate(world, area, seed, tick)
         end
       end
     end
-    -- A sluice cache (src.sluice): a chamber sealed in the rock, brim full of water, with a chest at the bottom of it.
-    -- A short corridor runs out to the nearest cave and is stopped by a plank gate: break the gate and the water
-    -- pours out into the cave, leaving the chest dry. It is a flood to get out of the way of, and a reward.
+    -- A sluice cache (src.sluice): a dry chamber sealed in the rock with a chest in it. A corridor tall enough to walk
+    -- runs out to the nearest cave and is stopped by a gate. The puzzle is beside it: a reservoir brim full of water
+    -- over the chamber, with a plank gate of its own. Let the reservoir out and the chest's gate lifts.
     result.sluices = {}
     for _cache = 1, (level >= 3 and 2 or 1) do
     if level >= 2 then
       local WOODID = materials.WOOD
-      for _ = 1, 120 do
+      -- Is there room over a chamber at (cx, cy) for the reservoir, and a cave beside it to let it out into?
+      -- (the same test the building below makes; asked first so spots that have it are taken before ones without)
+      local function reservoirFits(cx, cy, dirR)
+        for yy = cy - 52, cy - 24, 3 do
+          for xx = cx - 24, cx + 24, 3 do
+            if not world:isSolid(xx, yy) or not inProfile(xx, yy, 6) or avoidForEnemies(xx, yy) then
+              return false
+            end
+          end
+        end
+        for dist = 20, 150, 2 do
+          local ex = cx + dirR * (dist + 24)
+          if ex < X0 + BORDER + 12 or ex > X1 - BORDER - 12 then
+            return false
+          end
+          if not world:isSolid(cx + dirR * dist, cy - 32) then
+            return true
+          end
+        end
+        return false
+      end
+      for attempt = 1, 400 do
         tick()
         local cx = math.floor(X0 + BORDER + 50 + rng:random() * (W - 2 * BORDER - 100))
         local cy = math.floor(Y0 + 150 + rng:random() * (H - 450))
         local solid = true
-        for yy = cy - 18, cy + 12, 3 do
+        for yy = cy - 24, cy + 12, 3 do
           for xx = cx - 24, cx + 24, 3 do
             if not world:isSolid(xx, yy) or not inProfile(xx, yy, 6) or avoidForEnemies(xx, yy) or (result.vault and math.abs(xx - result.vault.x) < 40 and math.abs(yy - result.vault.y) < 50) or (result.sluices[1] and math.abs(xx - result.sluices[1].x) < 80 and math.abs(yy - result.sluices[1].y) < 60) then
               solid = false
@@ -2251,25 +2272,26 @@ function cavegen.generate(world, area, seed, tick)
               end
             end
           end
-          if bestD and bestD <= 90 then
-            -- the room: 36 wide, 18 tall, floor at cy + 8
-            local x0, x1, y0, y1 = cx - 18, cx + 18, cy - 10, cy + 8
+          if bestD and bestD <= 90 and (attempt > 320 or reservoirFits(cx, cy, -dirx)) then
+            -- the room: 36 wide, 26 tall, floor at cy + 8
+            local DOOR = 24 -- how tall the corridor and its gate are (the hunter is 19)
+            local x0, x1, y0, y1 = cx - 18, cx + 18, cy - 17, cy + 8
             world:fillRect(x0, y0, x1, y1, 0)
-            -- the corridor out, 8 px tall, level with the floor, stopped by a three-px gate at the chamber's mouth
+            -- the corridor out, tall enough to walk, level with the floor, stopped by a three-px gate at the chamber's mouth
             local gateX = dirx == 1 and x1 + 1 or x0 - 1
             for dist = 1, 90 do
               local xx = dirx == 1 and x1 + dist or x0 - dist
               if dist > 4 and not world:isSolid(xx, cy + 4) then
                 break
               end
-              world:fillRect(xx, y1 - 7, xx, y1, 0)
+              world:fillRect(xx, y1 - DOOR + 1, xx, y1, 0)
             end
             local gx0 = dirx == 1 and gateX or gateX - 2
             -- A reservoir over the chamber, if there is room for one and a cave beside it: a second brim-full chamber with
             -- its own plank gate on the other side. The chamber's gate is then sealed (camp timber, which can't be shot
             -- away) and is only lifted once the reservoir has been let out (src.sluice watches it).
             local res
-            local yR0, yR1 = cy - 34, cy - 16
+            local yR0, yR1 = cy - 46, cy - 28 -- (ten pixels of rock between it and the chest's room)
             local dirR = -dirx
             local roomy = true
             for yy = yR0 - 6, yR1 + 4, 3 do
@@ -2320,27 +2342,16 @@ function cavegen.generate(world, area, seed, tick)
               res.dir = dirR
               wallInVault({ { x0, yR0, x1, yR1 }, { dirR == 1 and x1 + 1 or gxR - 3, yR1 - 7, dirR == 1 and gxR + 2 or x0 - 1, yR1 + 1 } })
             end
-            world:fillRect(gx0, y1 - 8, gx0 + 2, y1 + 1, res and materials.HARDWOOD or WOODID)
-            -- the sump: a pit cut in the corridor floor just outside the gate, deep enough to take the chamber's water
-            -- when the gate goes (narrow enough to jump)
-            local sx0 = dirx == 1 and gx0 + 3 or gx0 - 3 - 11
-            world:fillRect(sx0, y1 + 1, sx0 + 11, y1 + 72, 0)
+            -- the chest's gate: sealed timber while there is a reservoir to let out, plain planks to shoot away if not
+            world:fillRect(gx0, y1 - DOOR, gx0 + 2, y1 + 1, res and materials.HARDWOOD or WOODID)
             world:repaintRegion(x0 - 8, y0 - 8, x1 + 100, y1 + 8)
             world:repaintRegion(x0 - 100, y0 - 8, x1 + 8, y1 + 8)
             if res then
               world:repaintRegion(x0 - 100, yR0 - 8, x1 + 100, yR1 + 80)
             end
-            -- the water: every cell of the room, as a pool
-            local pool = { cells = {}, level = y0 }
-            for yy = y0, y1, POOL_CELL do
-              for xx = x0, x1, POOL_CELL do
-                pool.cells[#pool.cells + 1] = math.floor(xx / POOL_CELL) * POOL_CELL
-                pool.cells[#pool.cells + 1] = math.floor(yy / POOL_CELL) * POOL_CELL
-              end
-            end
-            water[#water + 1] = pool
-            wallInVault({ { x0, y0, x1, y1 }, { dirx == 1 and x1 + 1 or gx0 - 3, y1 - 7, dirx == 1 and gx0 + 2 or x0 - 1, y1 + 1 } })
-            result.sluices[#result.sluices + 1] = { x = cx, y = y1 + 1, room = { x0 = x0, y0 = y0, x1 = x1, y1 = y1 }, gate = { x0 = gx0, y0 = y1 - 8, x1 = gx0 + 2, y1 = y1 + 1 }, dir = dirx, reservoir = res }
+            -- (the chest's room is dry: the water is all in the reservoir)
+            wallInVault({ { x0, y0, x1, y1 }, { dirx == 1 and x1 + 1 or gx0 - 3, y1 - DOOR + 1, dirx == 1 and gx0 + 2 or x0 - 1, y1 + 1 } })
+            result.sluices[#result.sluices + 1] = { x = cx, y = y1 + 1, room = { x0 = x0, y0 = y0, x1 = x1, y1 = y1 }, gate = { x0 = gx0, y0 = y1 - DOOR, x1 = gx0 + 2, y1 = y1 + 1 }, dir = dirx, reservoir = res }
             break
           end
         end
@@ -2364,7 +2375,7 @@ function cavegen.generate(world, area, seed, tick)
       local cx = math.floor(X0 + BORDER + 50 + rng:random() * (W - 2 * BORDER - 100))
       local cy = math.floor(Y0 + 150 + rng:random() * (H - 450))
       local solid = true
-      for yy = cy - 16, cy + 12, 3 do
+      for yy = cy - 26, cy + 12, 3 do
         for xx = cx - 24, cx + 24, 3 do
           if not world:isSolid(xx, yy) or not inProfile(xx, yy, 6) or avoidForEnemies(xx, yy) then
             solid = false
@@ -2392,22 +2403,23 @@ function cavegen.generate(world, area, seed, tick)
           end
         end
         if bestD and bestD <= 80 then
-          local x0, x1, y0, y1 = cx - 16, cx + 16, cy - 8, cy + 8
+          local DOOR = 24 -- how tall the corridor and the plug are (the hunter is 19)
+          local x0, x1, y0, y1 = cx - 16, cx + 16, cy - 17, cy + 8
           world:fillRect(x0, y0, x1, y1, 0)
-          -- the corridor: 8 tall (floor at the chamber's floor), out to the cave
+          -- the corridor: tall enough to walk (floor at the chamber's floor), out to the cave
           local plugX
           for dist = 1, 90 do
             local xx = dirx == 1 and x1 + dist or x0 - dist
             if dist > 4 and not world:isSolid(xx, cy + 4) then
               break
             end
-            world:fillRect(xx, y1 - 7, xx, y1, 0)
+            world:fillRect(xx, y1 - DOOR + 1, xx, y1, 0)
             plugX = xx
           end
           -- the plug: 6 thick, across the whole corridor, at its far (cave) end, with a slit 2 tall through its top
           local p0 = dirx == 1 and plugX - 5 or plugX
           local p1 = p0 + 5
-          world:fillRect(p0, y1 - 8, p1, y1 + 1, BRICKID)
+          world:fillRect(p0, y1 - DOOR, p1, y1 + 1, BRICKID)
           world:fillRect(p0, y1 - 3, p1, y1, 0) -- (the slit: 4 tall, two of the fluid grid's cells, down at floor level where the oil lies)
           world:repaintRegion(x0 - 8, y0 - 8, x1 + 100, y1 + 8)
           world:repaintRegion(x0 - 100, y0 - 8, x1 + 8, y1 + 8)
@@ -2420,24 +2432,24 @@ function cavegen.generate(world, area, seed, tick)
             end
           end
           gas[#gas + 1] = pool
-          wallInVault({ { x0, y0, x1, y1 }, { dirx == 1 and x1 + 1 or p0, y1 - 7, dirx == 1 and p1 or x0 - 1, y1 + 1 } })
+          wallInVault({ { x0, y0, x1, y1 }, { dirx == 1 and x1 + 1 or p0, y1 - DOOR + 1, dirx == 1 and p1 or x0 - 1, y1 + 1 } })
           local mouthX = dirx == 1 and p1 + 1 or p0 - 1
           -- a level trough outside the plug, 44 px long with a low lip at its far end, so the oil stays where it is poured
           -- (a floor that slopes away would let it all run off): rock under, headroom over
           for dist = 0, 46 do
             local xx = mouthX + dirx * dist
             world:fillRect(xx, y1 + 1, xx, y1 + 9, ROCKID)
-            world:fillRect(xx, y1 - 14, xx, y1, 0)
+            world:fillRect(xx, y1 - DOOR - 2, xx, y1, 0)
             if dist >= 44 then
               world:fillRect(xx, y1 - 3, xx, y1, ROCKID) -- (the lip)
             end
           end
-          world:repaintRegion(mouthX - 4, y1 - 16, mouthX + dirx * 50, y1 + 12)
-          world:repaintRegion(mouthX - dirx * 50, y1 - 16, mouthX + 4, y1 + 12)
+          world:repaintRegion(mouthX - 4, y1 - DOOR - 4, mouthX + dirx * 50, y1 + 12)
+          world:repaintRegion(mouthX - dirx * 50, y1 - DOOR - 4, mouthX + 4, y1 + 12)
           result.gaslines[#result.gaslines + 1] = {
             x = cx, y = y1 + 1, dir = dirx,
             room = { x0 = x0, y0 = y0, x1 = x1, y1 = y1 },
-            plug = { x0 = p0, y0 = y1 - 8, x1 = p1, y1 = y1 + 1 },
+            plug = { x0 = p0, y0 = y1 - DOOR, x1 = p1, y1 = y1 + 1 },
             slit = { x = mouthX, y = y1 - 2 },
             barrels = { { mouthX + dirx * 14, y1 + 1 }, { mouthX + dirx * 30, y1 + 1 } },
           }

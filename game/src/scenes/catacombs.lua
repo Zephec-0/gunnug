@@ -56,7 +56,7 @@ local THEMES = {
     backDeep = { 0.06, 0.05, 0.09 },
     pillars = { { 0.03, 0.025, 0.05 }, { 0.16, 0.13, 0.22 }, { 0.10, 0.08, 0.15 } },
     monsters = { ghoul = 38, bat = 28, spitter = 14, hopper = 6, miner = 28, roller = 10, worm = 12, wisp = 8 , torchbearer = 6, tarcrawler = 8, arcbeetle = 4 }, -- per 1920x3680; an old mine: skeletal miners, rollers and worms in the rock
-    boss = { "warden", "dreadbat" }, -- one of the two, chosen per run
+    -- (no roaming boss for now: was boss = { "warden", "dreadbat" }, one of the two per run)
     waterPools = 30,
     swarms = { swarmbat = 4 }, -- colonies of bats under the ceilings
     -- Breakables beside the crates { prop, count per 1920x3680 }: pots and pouches of coin, candle-lit skulls and lanterns
@@ -87,7 +87,7 @@ local THEMES = {
     pillars = { { 0.02, 0.03, 0.05 }, { 0.10, 0.14, 0.22 }, { 0.06, 0.08, 0.14 } },
     monsters = { ghoul = 20, bat = 14, spitter = 20, hopper = 44, bloater = 10, worm = 12, roller = 14, miner = 5, wisp = 8 , arcbeetle = 12 }, -- a fen: hoppers everywhere
     wires = 6,
-    boss = "matron",
+    -- (no roaming boss for now: was boss = "matron")
     waterPools = 60,
     swarms = { swarmbat = 2 },
     breakables = { { "sporePod", 36 }, { "urn", 10 }, { "pouch", 14 }, { "lantern", 8 }, { "waterJug", 8 }, { "oilBarrel", 5 } }, -- glowing spore pods in the fen

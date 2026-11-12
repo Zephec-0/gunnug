@@ -358,8 +358,9 @@ function status.hud(p)
     st.surface = { 0.75, 1.0, 0.4, 0.7 }
   end
   -- How the rows near the surface look: oil on top, then water, then the blood (depth in HUD pixels)
-  local oilDepth = st.oiled and 2 or 0
-  local waterDepth = oilDepth + (st.soaked and 3 or 0)
+  -- (switched off: oil and water in the bottle did not read. They show as drips off the outside, src.hud)
+  local oilDepth = 0
+  local waterDepth = 0
   function st.liquid(r, g, b, depth, now)
     if depth >= 0 and depth < oilDepth then
       -- the oil: near black, a violet sheen

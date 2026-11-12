@@ -159,6 +159,68 @@ F("deathcycle", "Death Cycle", "DY", { 0.7, 0.2, 0.45 }, "attachment", { ramp = 
 F("executorseye", "Executioner's Eye", "EE", { 0.95, 0.35, 0.3 }, "attachment", { far = 1, critChance = 0.25, execute = 2, refill = 2, laser = 1 },
   "A laser sight, +25% crit, double damage on the wounded, long-range bonus, and kills refill two rounds.")
 
+-- (2026-11-12: thirty more, from commons, uncommons and a few rares; some items are in more than one)
+F("rimebolt", "Rimebolt Rounds", "RB", { 0.6, 0.85, 1.0 }, "ammo", { freeze = 1, shock = 1, damage = 1.05 },
+  "Frost and lightning: chills what it hits and arcs to the next enemy. +5% damage.")
+F("firebomb", "Firebomb Rounds", "FB", { 1.0, 0.5, 0.2 }, "ammo", { incendiary = 1, explosive = 1, blastSize = 0.3, damage = 0.9, fireDelay = 1.15 },
+  "Explodes in a wider blast and sets everything in it alight. -10% damage, fires a little slower.")
+F("lance", "Lance Rounds", "LN", { 0.75, 0.8, 0.9 }, "ammo", { pierce = 2, damage = 1.4, impactForce = 1.5, recoil = 1.25, fireDelay = 1.1 },
+  "A heavy shot that goes through two enemies: +40% damage and more shove. Kicks, and fires a little slower.")
+F("needlestorm", "Needlestorm", "NS", { 0.8, 0.85, 0.9 }, "ammo", { pellets = 4, damage = 0.6, spread = 1.2, bulletSpeed = 1.2 },
+  "+4 fast needles per shot in a tight fan, each 40% weaker.")
+F("lodestar", "Lodestar Rounds", "LS", { 1.0, 0.92, 0.55 }, "ammo", { homing = 2, glow = 1, bulletSpeed = 1.1 },
+  "Bright rounds that turn hard toward the nearest enemy, with no loss of damage.")
+F("sanguine", "Sanguine Rounds", "SA", { 0.8, 0.12, 0.2 }, "ammo", { vamp = 2, leech = 1 },
+  "Kills heal you and every hit drinks a little, with no loss of damage.")
+F("jagged", "Jagged Rounds", "JG", { 0.8, 0.45, 0.4 }, "ammo", { bleed = 2, damage = 1.25, critChance = 0.05 },
+  "Tearing hollow points: +25% damage and a deep bleed.")
+F("homecoming", "Homecoming Rounds", "HC", { 0.6, 0.9, 0.7 }, "ammo", { bounces = 3, boomerang = 1, bounceBoost = 0.2 },
+  "Bounce three times, hitting 20% harder after each, then fly back to you.")
+F("motherlode", "Motherlode Rounds", "ML", { 1.0, 0.8, 0.25 }, "ammo", { greed = 0.75, digRadius = 2, digPower = 1, vaultDig = 1, damage = 1.05 },
+  "Dig through rock and shake 75% more gold out of whatever they kill. +5% damage.")
+F("hailburst", "Hailburst Rounds", "HB", { 0.7, 0.9, 1.0 }, "ammo", { split = 1, cluster = 1, damage = 0.8 },
+  "Burst into two on impact and scatter bomblets. -20% damage.")
+F("meltbore", "Meltbore Rounds", "MB", { 0.6, 0.95, 0.4 }, "ammo", { acid = 1, digRadius = 4, digPower = 2, vaultDig = 1, damage = 0.9 },
+  "Corroding drill rounds: bore wide holes through hard rock and leave enemies taking 30% more damage. -10% damage.")
+F("thumper", "Thumper Rounds", "TH", { 0.55, 0.7, 0.95 }, "ammo", { concussive = 1, bounces = 3, impactForce = 3, damage = 0.8 },
+  "Bouncing, stunning rounds with a huge shove. -20% damage.")
+F("icebreaker", "Icebreaker Rounds", "IB", { 0.55, 0.8, 1.0 }, "ammo", { freeze = 1, concussive = 1, impactForce = 2.5, damage = 0.9 },
+  "Chills, stuns and throws what it hits. -10% damage.")
+F("limpet", "Limpet Rounds", "LM", { 0.85, 0.4, 0.3 }, "ammo", { sticky = 1, explosive = 1, blastSize = 0.4, damage = 0.9, fireDelay = 1.15 },
+  "Stick where they land, then go off in a wide blast. -10% damage, fires a little slower.")
+F("deadshot", "Dead Shot Rounds", "DS", { 0.95, 0.35, 0.35 }, "ammo", { critChance = 0.25, critBoost = 0.5, damage = 1.15 },
+  "+25% crit chance, crits hit for 2.5x, +15% damage.")
+F("whisper", "Whisper Rounds", "WH", { 0.85, 0.9, 0.95 }, "ammo", { recoil = 0.4, fireDelay = 0.72, bulletSpeed = 1.3, damage = 0.8 },
+  "Light and quick: 28% faster fire, 60% less recoil, +30% bullet speed. -20% damage.")
+F("longreach", "Long Reach Barrel", "LR", { 0.6, 0.75, 0.9 }, "attachment", { far = 0.8, bulletSpeed = 1.35, spread = 0.7, damage = 1.1 },
+  "Up to 80% more damage at range, +35% bullet speed, 30% tighter, +10% damage.")
+F("bandolier", "Bandolier", "BN", { 0.75, 0.6, 0.35 }, "attachment", { chambers = 2.0, reloadTime = 1.1 },
+  "Double the chambers. Reloads 10% slower.")
+F("slickloader", "Slick Loader", "SL", { 0.6, 0.85, 0.7 }, "attachment", { reloadTime = 0.4, chambers = 1.1 },
+  "Reloads 60% faster, with 10% more chambers.")
+F("featherpull", "Feather Pull", "FP", { 0.9, 0.85, 0.6 }, "attachment", { fireDelay = 0.62, spread = 1.2, recoil = 1.1 },
+  "Fires 38% faster. A little wider and a little more kick.")
+F("deadweight", "Dead Weight", "DW", { 0.55, 0.55, 0.62 }, "attachment", { recoil = 0.3, bulletSpeed = 0.95 },
+  "70% less recoil. Bullets fly a touch slower.")
+F("truebore", "True Bore", "TB", { 0.7, 0.8, 0.85 }, "attachment", { spread = 0.35, critChance = 0.1 },
+  "65% tighter spread and +10% crit chance.")
+F("reddot", "Red Dot Scope", "RD", { 0.95, 0.3, 0.3 }, "attachment", { critChance = 0.25, laser = 1, spread = 0.6 },
+  "A laser sight, +25% crit chance and 40% tighter spread.")
+F("magnumload", "Magnum Load", "MG", { 0.95, 0.6, 0.3 }, "attachment", { damage = 1.4, impactForce = 1.5, recoil = 1.5, fireDelay = 1.1 },
+  "+40% damage and +50% impact. +50% recoil, and fires a little slower.")
+F("selffeeder", "Self-Feeder", "SF", { 0.6, 0.8, 0.55 }, "attachment", { refill = 2, bgReload = 1 },
+  "Every kill puts two rounds back, and the gun reloads itself while holstered.")
+F("claimjumper", "Claim Jumper Kit", "CJ", { 1.0, 0.78, 0.3 }, "attachment", { magnet = 140, greed = 0.4, digRadius = 1, digPower = 1, vaultDig = 1 },
+  "Gold flies to you from 140 px, kills spill 40% more of it, and bullets dig.")
+F("trenchkit", "Trench Kit", "TK", { 0.7, 0.6, 0.45 }, "attachment", { bayonet = 1, close = 1, spread = 1.15 },
+  "Your kick hits three times as hard and shots deal up to double damage at close range. A little wider.")
+F("benchrest", "Bench Rest", "BR", { 0.6, 0.5, 0.38 }, "attachment", { steady = 1, spread = 0.5, recoil = 0.7 },
+  "Half the spread, 30% less recoil, and standing still makes shots almost perfectly accurate.")
+F("rocketeer", "Rocketeer Rig", "RK", { 1.0, 0.6, 0.25 }, "attachment", { jets = 1, rear = 1, recoil = 1.4 },
+  "Fires out the back as well, and the kick carries you: recoil jumps go much further.")
+F("controlled", "Controlled Burst", "CB", { 0.65, 0.75, 0.85 }, "attachment", { burst = 1, recoil = 0.7, spread = 0.7 },
+  "Bursts of three with 30% less recoil and 30% tighter spread.")
+
 -- What fuses into what: two plain items, in either order
 B.fusions = {
   { "hollowpoint", "dumdum", "mushroom" },
@@ -176,6 +238,37 @@ B.fusions = {
   { "rebound", "longrifle", "billiard" },
   { "reaper", "rampant", "deathcycle" },
   { "huntersscope", "killswitch", "executorseye" },
+  -- the thirty of 2026-11-12
+  { "frost", "shock", "rimebolt" },
+  { "incendiary", "explosive", "firebomb" },
+  { "piercing", "slug", "lance" },
+  { "scatter", "flechette", "needlestorm" },
+  { "seeker", "tracer", "lodestar" },
+  { "vampiric", "leechround", "sanguine" },
+  { "barbed", "hollowpoint", "jagged" },
+  { "ricochet", "boomerang", "homecoming" },
+  { "gilded", "brass", "motherlode" },
+  { "splitting", "cluster", "hailburst" },
+  { "acid", "auger", "meltbore" },
+  { "concussive", "rubber", "thumper" },
+  { "frost", "concussive", "icebreaker" },
+  { "sticky", "explosive", "limpet" },
+  { "lucky", "hollowpoint", "deadshot" },
+  { "feather", "lightload", "whisper" },
+  { "longbarrel", "rangefinder", "longreach" },
+  { "extmag", "pouch", "bandolier" },
+  { "speedloader", "clips", "slickloader" },
+  { "hairtrigger", "lightframe", "featherpull" },
+  { "compensator", "brake", "deadweight" },
+  { "choke", "sights", "truebore" },
+  { "scope", "laser", "reddot" },
+  { "charge", "heavybarrel", "magnumload" },
+  { "scavenger", "holsterloader", "selffeeder" },
+  { "magnet", "pick", "claimjumper" },
+  { "bayonet", "sawnstock", "trenchkit" },
+  { "stabilizer", "stock", "benchrest" },
+  { "jets", "backblast", "rocketeer" },
+  { "burst", "foregrip", "controlled" },
 }
 
 return B

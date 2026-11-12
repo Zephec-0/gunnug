@@ -550,6 +550,58 @@ local MODELS = {
 -- is kept where at least two of its four are), so it matches the item bar's
 -- picture. Cached per model; nil for guns without one.
 local groundCache = {}
+-- Halves a picture of a model: each 2x2 block becomes one pixel in the block's commonest colour (one of the
+-- model's own flat colours: averaging them made in-between shades no other sprite has). out is written in full.
+local function shrink(src, out)
+  local w, h = out:getDimensions()
+  local sw, sh = src:getDimensions()
+  for y = 0, h - 1 do
+    for x = 0, w - 1 do
+      local n, best, bestN = 0, nil, 0
+      local seen = {}
+      for dy = 0, 1 do
+        for dx = 0, 1 do
+          local sx, sy = x * 2 + dx, y * 2 + dy
+          if sx < sw and sy < sh then
+            local pr, pg, pb, pa = src:getPixel(sx, sy)
+            if pa > 0.5 then
+              n = n + 1
+              local key = math.floor(pr * 255 + 0.5) * 65536 + math.floor(pg * 255 + 0.5) * 256 + math.floor(pb * 255 + 0.5)
+              local e = seen[key]
+              if not e then
+                e = { 0, pr, pg, pb }
+                seen[key] = e
+              end
+              e[1] = e[1] + 1
+              if e[1] > bestN then
+                best, bestN = e, e[1]
+              end
+            end
+          end
+        end
+      end
+      if n >= 2 then
+        out:setPixel(x, y, best[2], best[3], best[4], 1)
+      else
+        out:setPixel(x, y, 0, 0, 0, 0)
+      end
+    end
+  end
+  return out
+end
+
+local function modelPicture(gun, canvas)
+  love.graphics.push("all")
+  love.graphics.setCanvas(canvas)
+  love.graphics.clear(0, 0, 0, 0)
+  love.graphics.origin()
+  love.graphics.setScissor()
+  love.graphics.setShader()
+  gunhud.drawModel(gun, 0, 0, 1, 1)
+  love.graphics.pop()
+  return canvas:newImageData()
+end
+
 function gunhud.groundImage(gun)
   local model = gun.def.model
   if not MODELS[model] then
@@ -559,42 +611,37 @@ function gunhud.groundImage(gun)
     return groundCache[model]
   end
   local m = MODELS[model]
-  local canvas = love.graphics.newCanvas(m.w + 2, m.h + 2)
-  love.graphics.push("all")
-  love.graphics.setCanvas(canvas)
-  love.graphics.clear(0, 0, 0, 0)
-  love.graphics.origin()
-  gunhud.drawModel({ def = gun.def, spin = 0 }, 0, 0, 1, 1)
-  love.graphics.pop()
-  local src = canvas:newImageData()
-  local w, h = math.ceil(src:getWidth() / 2), math.ceil(src:getHeight() / 2)
-  local out = love.image.newImageData(w, h)
-  for y = 0, h - 1 do
-    for x = 0, w - 1 do
-      local r, g, b, n = 0, 0, 0, 0
-      for dy = 0, 1 do
-        for dx = 0, 1 do
-          local sx, sy = x * 2 + dx, y * 2 + dy
-          if sx < src:getWidth() and sy < src:getHeight() then
-            local pr, pg, pb, pa = src:getPixel(sx, sy)
-            if pa > 0.5 then
-              r, g, b, n = r + pr, g + pg, b + pb, n + 1
-            end
-          end
-        end
-      end
-      if n >= 2 then
-        out:setPixel(x, y, r / n, g / n, b / n, 1)
-      end
-    end
-  end
+  local src = modelPicture({ def = gun.def, spin = 0 }, love.graphics.newCanvas(m.w + 2, m.h + 2))
+  local out = shrink(src, love.image.newImageData(math.ceil(src:getWidth() / 2), math.ceil(src:getHeight() / 2)))
   local img = love.graphics.newImage(out)
   img:setFilter("nearest", "nearest")
   groundCache[model] = img
   return img
 end
 
--- Whether this gun has a drawn model
+-- The same small sprite of this very gun as it is right now: mid-reload, or a Gatling's barrels turning. Made
+-- again on every call (a few hundred pixels), so it is only asked for while the picture is changing (src.itembar).
+local liveCache = setmetatable({}, { __mode = "k" }) -- gun -> { canvas, out, img }
+function gunhud.groundLive(gun)
+  local m = MODELS[gun.def.model]
+  if not m then
+    return nil
+  end
+  local L = liveCache[gun]
+  if not L then
+    L = { canvas = love.graphics.newCanvas(m.w + 2, m.h + 2) }
+    L.out = love.image.newImageData(math.ceil((m.w + 2) / 2), math.ceil((m.h + 2) / 2))
+    L.img = love.graphics.newImage(L.out)
+    L.img:setFilter("nearest", "nearest")
+    liveCache[gun] = L
+  end
+  local src = modelPicture(gun, L.canvas)
+  shrink(src, L.out)
+  src:release()
+  L.img:replacePixels(L.out)
+  return L.img
+end
+
 function gunhud.supports(gun)
   return MODELS[gun.def.model] ~= nil
 end

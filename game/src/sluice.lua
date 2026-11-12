@@ -1,11 +1,11 @@
--- Sluice caches: a chamber sealed in the rock, brim full of water, with a chest in the bottom of it. A corridor
--- runs out to the nearest cave and is stopped by a plank gate (src.cavegen builds the room, the corridor, the gate
--- and the water; src.events spawns the chest). Shoot or dig the gate out and the water pours into the cave. The chest
--- is waiting at the bottom of the draining chamber.
+-- Sluice caches: a dry chamber sealed in the rock with a chest in it. A corridor tall enough to walk runs out to the
+-- nearest cave and is stopped by a gate (src.cavegen builds the room, the corridor, the gates and the water;
+-- src.events spawns the chest).
 --
--- Where there is room a second chamber, a reservoir, sits over the first with a plank gate of its own on the other side.
--- Then the chest's gate is sealed (camp timber that cannot be shot away): shoot out the reservoir's gate, let it empty,
--- and a moment later the sealed gate lifts and the chest chamber drains. (A cache with no reservoir keeps the one gate.)
+-- The puzzle sits over it: a second chamber, a reservoir, brim full of water, with a plank gate of its own on the
+-- other side. The chest's gate is sealed (camp timber that cannot be shot away): shoot out the reservoir's gate, let
+-- it empty, and a moment later the sealed gate lifts, the whole height of the corridor. (A cache with no room for a
+-- reservoir has a plain plank gate to shoot away.)
 --
 -- This module only dresses it: damp seeping from the gate, a faint pulse of the planks, drips from the corridor's
 -- roof, a rusted wheel on the gate (so it reads as a sluice and not a plank wall), and the moment it gives.
@@ -156,11 +156,6 @@ function sluice.draw(view)
       R({ 0.30, 0.17, 0.10 }, 1, wx + 1, wy, 1, 6)
       R({ 0.47, 0.26, 0.14 }, 1, wx, wy + 2, 1, 2)
       -- damp running down the planks, a dark stain at the foot of the gate
-      for k = 0, 2 do
-        local len = 3 + math.floor((math.sin(clock * 0.6 + k * 2 + cx) * 0.5 + 0.5) * 4)
-        R({ 0.35, 0.55, 0.78 }, 0.5, g.x0 + k, g.y0 + 3, 1, len)
-      end
-      R({ 0.10, 0.16, 0.24 }, 0.6, g.x0 - 3, g.y1 - 1, 9, 1)
     end
   end
   love.graphics.setColor(1, 1, 1, 1)
@@ -169,8 +164,9 @@ end
 -- Water seeping through the planks: a drip now and then, a faint blue lick on the gate
 function sluice.drawEmissive(view)
   for _, c in ipairs(caches) do
-    if not c.open and near(view, c) then
-      local g = c.gate
+    -- (the wet gate is the reservoir's; a cache without one has nothing behind its planks)
+    if c.res and not c.resOpen and near(view, c) then
+      local g = c.res.plug
       local pulse = 0.5 + 0.5 * math.sin(clock * 1.4 + c.x)
       R({ 0.5, 0.75, 1.0 }, 0.05 + 0.04 * pulse, g.x0 - 2, g.y0, 7, g.y1 - g.y0 + 1)
       if love.math.random() < 0.04 then

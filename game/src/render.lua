@@ -263,6 +263,7 @@ function render.setLamps(list)
 end
 
 local BASE_W, BASE_H = config.VIRTUAL_W, config.VIRTUAL_H
+render.screen = require("src.screen")
 
 -- The canvases the frame is drawn into, at the current view size
 local function makeCanvases()
@@ -311,6 +312,7 @@ function render.load()
 end
 
 function render.layout()
+  render.screen.layout() -- (the size the frame is drawn at: see src.screen)
   local ww, wh = love.graphics.getDimensions()
   render.uiBase = math.min(ww / BASE_W, wh / BASE_H) -- (the interface's scale does not follow the zoom)
   render.scale = math.min(ww / W, wh / H)
@@ -441,6 +443,20 @@ end
 -- Size of one UI unit in window pixels, independent of the world pixel density
 function render.uiScale()
   return (render.uiBase or render.scale) * config.UI_SCALE
+end
+
+-- One pixel of the interface's art, in window pixels: a game pixel at the usual zoom (3 at 1080p), so pictures in
+-- the menus have the same grain as the world. snap(s) brings a picture's scale down to a whole number of them.
+function render.cell()
+  return math.max(1, math.floor((render.uiBase or render.scale) + 0.5))
+end
+
+function render.snap(s)
+  local c = render.cell()
+  if s >= c then
+    return math.floor(s / c + 1e-6) * c
+  end
+  return s
 end
 
 -- Window pixels -> canvas pixels

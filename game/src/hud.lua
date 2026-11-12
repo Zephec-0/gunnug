@@ -39,6 +39,7 @@ local LIQUID_BOTTOM = { 0.17, 0.01, 0.035 }
 -- the blood boils: the surface churns, bubbles are big and constant, spray
 -- flies, the flask shakes and glows.
 local bubbles, drops = {}, {}
+local oilRing = {} -- the cells just outside the bottle, for the coat of oil (found once per size)
 local statusFx = {} -- what the hunter's conditions throw off the bottle (sparks, smoke, drips)
 local lastBarTime
 
@@ -562,11 +563,6 @@ function hud.drawBottle(player, u, cx, cy)
             setColor(0.95, 0.30, 0.32, 0.55)
           end
           for _, gx in ipairs(lines) do
-            if st and st.oiled then
-              -- (the sheen of oil: a rainbow sliding along the surface)
-              local hr, hg, hb = status.hue(gx * 0.09 + now * 0.25)
-              setColor(hr * 0.85 + 0.1, hg * 0.85 + 0.1, hb * 0.85 + 0.1, 0.75)
-            end
             rect("fill", gx * c, gy * c, c, c)
           end
         end
@@ -670,8 +666,76 @@ function hud.drawBottle(player, u, cx, cy)
     if st.soaked and rnd() < 3 * dt then
       emit(cx + (rnd() - 0.5) * 6 * u, yBot - u, (rnd() - 0.5) * 3 * u, 4 * u, 0.7, { 0.55, 0.8, 1 }, 90 * u)
     end
-    if st.oiled and rnd() < 1.5 * dt then
-      emit(cx + (rnd() - 0.5) * 6 * u, yBot - u, 0, 3 * u, 0.9, { 0.1, 0.07, 0.14 }, 70 * u)
+    if st.oiled then
+      -- Oil: the bottle is coated in it. A skin of dark goo one HUD pixel thick all round the glass (the cells just
+      -- outside the bottle, found once per size), swelling into a second layer in slow lumps that creep round it,
+      -- hanging in thick strings off the underside that stretch and draw back, with a violet sheen sliding along.
+      local ring = oilRing
+      if ring.u ~= u or ring.chips ~= #chips then
+        ring.u, ring.chips, ring.cells = u, #chips, {}
+        local gx0, gx1 = math.floor((xL - cx) / c) - 2, math.ceil((xR - cx) / c) + 2
+        local gy0, gy1 = math.floor((yTop - cy) / c) - 2, math.ceil((yBot - cy) / c) + 2
+        local function inside(gx, gy)
+          return probe(cx + gx * c + c / 2, cy + gy * c + c / 2) ~= 0
+        end
+        local n = 0
+        for gy = gy0, gy1 do
+          for gx = gx0, gx1 do
+            if not inside(gx, gy) then
+              local touch = inside(gx - 1, gy) or inside(gx + 1, gy) or inside(gx, gy - 1) or inside(gx, gy + 1)
+              if touch then
+                n = n + 1
+                -- { column, row, which way is out (for the second layer), hangs under the glass? }
+                local ox = (inside(gx - 1, gy) and 1 or 0) - (inside(gx + 1, gy) and 1 or 0)
+                local oy = (inside(gx, gy - 1) and 1 or 0) - (inside(gx, gy + 1) and 1 or 0)
+                ring.cells[n] = { gx, gy, ox, oy, inside(gx, gy - 1) and not inside(gx, gy + 1) }
+              end
+            end
+          end
+        end
+      end
+      -- (only the lower half of the bottle is in it, as if it had been stood in the stuff: the coat thins out
+      -- to nothing over a few rows at a ragged line across the middle, and is thickest at the bottom. Thick and
+      -- slow: no glints, lumps that barely move, fat strings that take seconds to stretch and draw back.)
+      local BODY, DARK = { 0.15, 0.12, 0.19 }, { 0.09, 0.07, 0.12 } -- (near black: a wet dark, a shade off the night behind it)
+      local function cell(gx, gy, col, alpha)
+        love.graphics.setColor(col[1], col[2], col[3], alpha or 1)
+        love.graphics.rectangle("fill", math.floor(cx / c) * c + gx * c, math.floor(cy / c) * c + gy * c, c, c)
+      end
+      local midRow = ((yTop + yBot) / 2 - cy) / c
+      local botRow = (yBot - cy) / c
+      for _, rc in ipairs(ring.cells) do
+        local gx, gy = rc[1], rc[2]
+        -- how deep in the oil this spot is: 0 at the ragged line, 1 at the bottle's foot
+        local edge = midRow + 1.5 * math.sin(gx * 0.9) + math.sin(gx * 0.37 + 2)
+        local deep = (gy - edge) / math.max(1, botRow - midRow)
+        if deep > 0 then
+          local wave = math.sin(gx * 0.5 + gy * 0.35 - now * 0.25) + 0.6 * math.sin(gx * 0.2 - gy * 0.3 + now * 0.15)
+          cell(gx, gy, BODY)
+          if deep > 0.25 or wave > 0.6 then
+            -- (two pixels thick lower down; on a slanting edge both neighbours are filled, or it comes out a chequer)
+            local col = deep > 0.25 and BODY or DARK
+            cell(gx + rc[3], gy, col)
+            cell(gx, gy + rc[4], col)
+            cell(gx + rc[3], gy + rc[4], col)
+          end
+          if rc[5] and deep > 0.3 and (gx * 7 + gy * 3) % 4 == 0 then
+            -- a fat string off the underside, two pixels wide, on its own slow clock, with a bead at its end
+            local len = math.floor(3 + 3 * math.sin(now * 0.35 + gx * 1.7))
+            for k = 1, len do
+              cell(gx, gy + k + 1, BODY)
+              if k <= len - 1 then
+                cell(gx + 1, gy + k + 1, DARK)
+              end
+            end
+            if len >= 2 then
+              cell(gx, gy + len + 2, BODY)
+              cell(gx + 1, gy + len + 2, BODY)
+              cell(gx, gy + len + 3, DARK)
+            end
+          end
+        end
+      end
     end
     if st.poisoned and rnd() < (1.5 + st.stacks) * dt then
       emit(neckX + (rnd() - 0.5) * 2 * c, neckY, (rnd() - 0.5) * 3 * u, -(4 + rnd() * 5) * u, 0.9, { 0.62, 0.9, 0.3 }, 0)
@@ -684,7 +748,7 @@ function hud.drawBottle(player, u, cx, cy)
       if f.life <= 0 then
         table.remove(statusFx, i)
       else
-        love.graphics.setColor(f.col[1], f.col[2], f.col[3], math.min(1, f.life / f.max * 1.6) * (f.size > 1 and 0.6 or 1))
+        love.graphics.setColor(f.col[1], f.col[2], f.col[3], math.min(1, f.life / f.max * 1.6) * (f.size > 1 and not f.solid and 0.6 or 1))
         love.graphics.rectangle("fill", math.floor(f.x / c) * c, math.floor(f.y / c) * c, c * f.size, c * f.size)
       end
     end
@@ -1063,7 +1127,7 @@ function hud.drawGunStatus(gun, ww, margin, top, u, f, opts)
   end
   local count = gun:maxChambers()
   local kind = pipKind(gun, count)
-  local q = math.max(1, math.floor(u * 0.5 + 0.5))
+  local q = hud.cell(u)
   local spec = PIP[kind]
   local pitch, pw = spec.pitch * q, spec.w * q
   -- A big belt (the Gatling) wraps into rows of at most PIP_ROW

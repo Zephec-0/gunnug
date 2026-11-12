@@ -223,6 +223,7 @@ local function trailFx(b, dt)
   if b.burn then
     fluids.ignite(b.x, b.y, 0.6, true) -- incendiary rounds light gas as they pass through it
   end
+  fluids.lightOil(b.x, b.y, 2) -- (any shot at all lights lamp oil it passes through or lands beside)
   if b.burn and r() < dt * 45 then
     effects.particle(x, y, (r() - 0.5) * 10, -10, 0.35, { 1, 0.55 + r() * 0.3, 0.15 }, -60, true) -- embers
   end

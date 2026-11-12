@@ -115,13 +115,28 @@ end
 
 -- A font about as tall as a vector font of px pixels (capitals about 0.72 of it, a whole number of bitmap
 -- pixels each). style: nil (regular), "bold" or "italic"
+-- How many times the bitmap is enlarged for a font of px pixels. The interface is designed at three window
+-- pixels to the game pixel (1920x1080). On a bigger screen (four or more) each size is worked out as its size in
+-- that design times one factor for the whole screen, so the headings, text and small print keep their
+-- proportions to each other (rounding each on its own made the small print half the size of the text beside it).
+local function enlargement(px)
+  local render = package.loaded["src.render"]
+  local cell = render and render.cell and render.cell() or 3
+  if cell <= 3 then
+    return math.max(1, math.floor(px * 0.72 / CAP + 0.5))
+  end
+  local designed = math.max(1, math.floor(px * 3 / cell * 0.72 / CAP + 0.5))
+  local factor = math.floor(cell * 2 / 3 + 0.34) -- (2 in the design: 3 at 1440p, 4 at 2160p)
+  return math.max(1, math.floor(designed * factor / 2 + 0.5))
+end
+
 function fonts.get(px, style)
-  return variant(style, math.max(1, math.floor(px * 0.72 / CAP + 0.5)))
+  return variant(style, enlargement(px))
 end
 
 -- The same, without the drop shadow
 function fonts.plain(px, style)
-  return variant(style, math.max(1, math.floor(px * 0.72 / CAP + 0.5)), true)
+  return variant(style, enlargement(px), true)
 end
 
 -- Where the ink of one character sits in a font this module made: x, y offset of its top-left from the

@@ -91,6 +91,13 @@ vec2 bend(vec2 d, float r, float k) {
   return center + d / max(r, 0.001) * rr;
 }
 
+const float WIND = 14.0;
+float discStreak(float a, float x, float wound, float seed) {
+  float spin = a + wound * 0.55 / max(x * 0.6, 0.3) - x * 0.75;
+  vec2 ring1 = vec2(cos(spin), sin(spin));
+  return noise(ring1 * 2.2 + vec2(x * 3.5 - time * 0.6 + seed, 0.0)) * 0.7 + noise(ring1 * 4.5 + vec2(seed, x * 8.0)) * 0.3;
+}
+
 vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
   vec2 p = uv * size;
   vec2 d = p - center;
@@ -108,9 +115,11 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
   float x = r / horizon;
   float disc = smoothstep(1.05, 1.5, x) * smoothstep(4.2, 1.8, x);
   // (noise sampled round a circle, so there's no seam where the angle wraps)
-  float spin = a + time * 0.55 / max(x * 0.6, 0.3) - x * 0.75;
-  vec2 ring1 = vec2(cos(spin), sin(spin));
-  float streak = noise(ring1 * 2.2 + vec2(x * 3.5 - time * 0.6, 0.0)) * 0.7 + noise(ring1 * 4.5 + vec2(0.0, x * 8.0)) * 0.3;
+  // The inside turns faster than the outside, so left alone the streaks wind tighter for ever and the disc ends
+  // up a fine scribble. Two copies are wound for WIND seconds at most, half a turn of the clock apart, and each
+  // fades out as it is unwound: the disc always looks as it does in its first seconds.
+  float w1 = mod(time, WIND), w2 = mod(time + WIND * 0.5, WIND);
+  float streak = mix(discStreak(a, x, w2, 31.7), discStreak(a, x, w1, 0.0), 1.0 - abs(2.0 * w1 / WIND - 1.0));
   vec3 hot = mix(vec3(1.0, 0.42, 0.14), vec3(1.0, 0.86, 0.62), smoothstep(2.6, 1.2, x));
   c += hot * disc * pow(streak, 2.2) * 1.15 * (0.85 + 0.15 * sin(time * 0.9));
 

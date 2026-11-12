@@ -92,11 +92,14 @@ function love.textinput(text)
   game.textinput(text)
 end
 
+-- (the frame may be drawn at another size than the window's: see src.screen)
 function love.mousepressed(x, y, button)
+  x, y = require("src.screen").fromWindow(x, y)
   game.mousepressed(x, y, button)
 end
 
 function love.mousereleased(x, y, button)
+  x, y = require("src.screen").fromWindow(x, y)
   game.mousereleased(x, y, button)
 end
 

@@ -448,7 +448,7 @@ local function button(id, label, x, y, w, h, onActivate, opts)
 end
 
 -- A slider for a value 0..1 in tenths
-local function slider(id, x, y, w, h, value, onChange)
+local function slider(id, x, y, w, h, value, onChange, shown)
   local function set(v)
     v = math.max(0, math.min(1, math.floor(v * 10 + 0.5) / 10))
     if v ~= value then
@@ -486,7 +486,7 @@ local function slider(id, x, y, w, h, value, onChange)
   if focused then
     focusFrame(barX - u, y + h * 0.25 - u, barW + 2 * u, h * 0.5 + 2 * u)
   end
-  shadowPrint(math.floor(value * 100 + 0.5) .. "%", x + w - 13 * u, y + (h - F.body:getHeight()) / 2, F.body, focused and TEXT or DIM)
+  shadowPrint(shown or (math.floor(value * 100 + 0.5) .. "%"), x + w - 13 * u, y + (h - F.body:getHeight()) / 2, F.body, focused and TEXT or DIM)
 end
 
 -- An on/off switch
@@ -2113,6 +2113,13 @@ PAGES.settings = function()
       settings.setDisplayMode(modes[i])
       audio.play("page")
     end)
+    y = y + rh
+    -- Brightness: 50% to 150% of the picture as drawn, the middle of the slider leaving it alone
+    row("Brightness", y)
+    local bright = settings.get("brightness")
+    slider("set:brightness", cx, y, cw, ch, bright - 0.5, function(v)
+      settings.set("brightness", 0.5 + v)
+    end, math.floor(bright * 100 + 0.5) .. "%")
     y = y + rh
     for _, s in ipairs(opts) do
       row(s[1], y)

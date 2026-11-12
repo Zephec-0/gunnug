@@ -491,3 +491,37 @@ Design decisions: the premise is that the hunter is defying the gods, and the la
 - [ ] Still one-off hitches of 8-20 ms when an area's contents spawn (catacombs.spawnProps, all in one frame) and when an area is sent to a worker (World:exportRegion, about 8 ms).
 - [ ] Explosive + cluster loadouts are 77-90 fps in the same test (21-28 before): bullets, glows and smoke are the cost.
 - [ ] Play it: check the feel at 120+, that terrain never shows a stale strip when an area finishes building in view, and that the profile still saves (slotN.sav / .bak) after a long session.
+
+## UI scaling and brightness (2026-11-11)
+- [x] (headless screenshots at 960x540, 1280x720, 1366x768, 1600x900, 1280x960 and 1080p in docs/ui-scale; not played) Every window size shows the 1080p layout: src/screen.lua draws the whole frame for the next whole size up (never below 3 window pixels per game pixel) and scales it to the window; love.graphics.getDimensions, love.mouse.getPosition and setCanvas() are wrapped there, mouse clicks are converted in main.lua. Nothing changes at exactly 1920x1080.
+- [x] Item bar: item icons and the slot gun are drawn at the game's pixel size and fill their slots (itembar wholeFit).
+- [x] Windowed mode opens at a whole size (1280x720 on a 1080p desktop) instead of 67% of the desktop.
+- [x] Settings > Display > Brightness (50%-150%, settings.brightness): a curve over the finished frame, interface included; works with bloom off. The F4 panel's exposure slider is separate.
+- [x] Above 1080p (1440p and up) all text sizes step together (fonts enlargement); the 1440p layout was only looked at through a 1080p window (screen.force = 4).
+- [ ] Play it windowed and resize by dragging; check a real 1440p screen if one turns up. The F3 stats overlay is not scaled with the frame.
+- [x] (2026-11-11, headless captures at 3 s, 60 s and 5 min; not played) Title black hole: the disc's streaks no longer wind tighter the longer the title is open (menubg LENS: two copies wound for 14 s at most, cross-faded).
+
+## Batch 2026-11-12 (from playtest; headless-tested with screenshots in docs/batch-1112, not played)
+- [x] Toolbar: item slots a little larger so the icons sit inside them (ITEM_SIZE 16); the gun in the slot shows its reload again (gunhud.groundLive)
+- [x] Hold Ctrl and hover a weapon or ammo/attachment in the open bar: a small red X on the slot, clicking drops it (itembar ctrlDropTarget)
+- [x] Water puzzle: chest room is dry with a 24 px tall corridor and gate; the reservoir over it is the puzzle (shoot its plank gate, it drains, the chest's gate lifts). Spots with room for a reservoir are taken first; a cache without one has a plain plank gate
+- [x] Area mini bosses removed from the Old Mine (warden / dread bat) and the Sunken Hollows (matron); they are still in the compendium list
+- [x] Wet/oil at the bottle: no layers inside the bottle; oil drips off the underside in violet drops
+- [x] Fire, poison and gas clouds stop at 1 hp (Player:hurtOverTime); lava, acid, drowning and shock still kill
+- [x] Camp, west to east: dummy, controls stone, hat stand, tent (open to the east), spawn, campfire
+- [x] Notes are taken when read (they stay in the compendium's Journal) and the world stands still while one is open; any key or click closes it
+- [x] Way to the mine: signposts past the town hall and at the head of the ramp, a broken one by the shaft, and lit chevrons running down the shaft's timber
+- [x] 30 more fused items with icons (src/items_batch2.lua, src/icons.lua)
+- [x] Old Mine monsters deal 70% damage (enemies FIRST_AREA_DAMAGE)
+- [x] Water surface: the ripple line is level, and loose cells of a pool's top row close up into one run
+- [ ] Play it: oil drips readable?, water surface in a real pool, sign placement, fused item balance. Seen again in a test: genworker "wrote 75 cells outside the region" (area 14), not traced
+
+## Batch 2026-11-12 b (headless-tested with screenshots in docs/batch-1112; not played)
+- [x] Ramp sign removed; shaft chevrons are faint stone arrowheads on the walls; spawn 12 px further left (944)
+- [x] Oiled: the bottle is coated in goo (a skin round the outside with lumps and strings off the underside), no drips (hud oilRing)
+- [x] Hold Shift and hover a loose item in the open bar: a yellow arrow, clicking fits it to the first free slot of the gun in hand; nothing on weapons (itembar shiftEquipTarget)
+- [x] Any shot lights lamp oil it passes through or lands beside (fluids.lightOil, called from the bullet step)
+- [x] Oil/gas puzzle: room, corridor and plug are 24 px tall; the blast clears the whole plug and the trough's lip, leaving a doorway. Also fixed: the "already open" check read the slit (air), so the plug never blew
+- [ ] Play it: goo readability, Shift-click feel, shooting spilled oil near yourself (it now always lights), the oil puzzle end to end with the barrels
+- [x] (2026-11-12, headless screenshot; not played) Oil goo covers only the lower half of the bottle, thicker and slow, no glints
+- [x] (2026-11-12, headless-tested; not played) Shift arrow points down on a toolbar item (onto the held gun) and up on an item fitted to a gun (back to the first free toolbar slot); oil goo near black and thinner

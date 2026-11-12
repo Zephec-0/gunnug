@@ -111,12 +111,15 @@ end
 
 function journal.update(dt, player)
   clock = clock + dt
-  if reading then
-    local px = player:center()
-    if math.abs(px - reading.x) > 90 or player.dead then
-      reading = nil
-    end
-  end
+end
+
+-- A page is open: the game stands still behind it (src.game), and any key or click puts it away
+function journal.isReading()
+  return reading ~= nil
+end
+
+function journal.close()
+  reading = nil
 end
 
 -- The page the hunter stands next to, if any
@@ -127,7 +130,7 @@ local function nearest(player)
   local px, py = player:center()
   local best, bestD
   for _, p in ipairs(journal.PAGES) do
-    local g = p.x and ground(p)
+    local g = p.x and not isRead(p.id) and ground(p) -- (a page that has been read was taken: it is in the compendium)
     if g and math.abs(px - p.x) < REACH_X and math.abs(py - (g - 6)) < REACH_Y then
       local d = math.abs(px - p.x)
       if not bestD or d < bestD then
@@ -171,8 +174,8 @@ function journal.draw(view)
   for _, p in ipairs(journal.PAGES) do
     if inView(view, p) then
       local g = ground(p)
-      if g then
-        local read = isRead(p.id)
+      if g and not isRead(p.id) then
+        local read = false
         local bob = math.floor(math.sin(clock * 1.6 + p.x * 0.05) * 1 + 0.5)
         local x, y = p.x - 3, g - 10 + bob
         local paper = read and { 0.66, 0.60, 0.48 } or { 0.92, 0.86, 0.68 }

@@ -81,10 +81,13 @@ local FRAME_TOP = PIT_Y - 150 -- the headframe's crossbeam, high enough to be se
 -- the first area and every fight (it vanished once everything was built).
 local GEN_BUDGET = 0.010
 
-local SPAWN_X = 990
-local CAMPFIRE_X = 860 -- (west of the tent, just past the practice dummy, well clear of the stores and the hat stand)
-local TENT_X = 930
-local STONE_X = 876 -- the stone with the controls carved in it (src.controlstone), between the practice range and the tent
+-- The camp, west to east: the practice dummy, the controls stone, the hat stand, the tent (open to the east), the
+-- open ground the hunter wakes on, and the campfire
+local HATSTAND_X = 878
+local TENT_X = 906
+local SPAWN_X = 944
+local CAMPFIRE_X = 982
+local STONE_X = 854 -- the stone with the controls carved in it (src.controlstone), between the practice range and the hat stand
 -- (the camp's people and the bounty board live on the lots of the town, src.town)
 local WINCH_X = 1758 -- left edge of the winch house
 local SUN_X, SUN_Y = 440, 196 -- on screen, low over the horizon
@@ -666,7 +669,7 @@ function overworld.populate(world)
     end
   end
   -- The hat stand, by the spawn: the hat worn into a run sets a rule for it (src.meta HATS)
-  npcs.setHatStand(950, ground(950))
+  npcs.setHatStand(HATSTAND_X, ground(HATSTAND_X))
   -- The Bartender, once the hunter has fallen three times: drinking at the oasis pond's west bank
   npcs.setPond(POND_X0 - 6, ground(POND_X0 - 6))
   props.spawn("crate", 1700, ground(1700) - 7)
@@ -902,7 +905,7 @@ local function lanterns()
     { SHAFT_CX - 12, FRAME_TOP + 20 },
     { RAMP_X0 - 4, surface(RAMP_X0 - 4) - 22 },
     { PIT_X0 - 8, surface(PIT_X0 - 8) - 22 },
-    { TENT_X - 26, surface(TENT_X - 26) - 22 },
+    { TENT_X + 20, surface(TENT_X + 20) - 22 },
   }
   for _, e in ipairs(catacombs.entries()) do
     if e.walk then
@@ -1391,6 +1394,59 @@ local function drawRails(vx0, vx1)
 end
 
 -- The winch house: a plank shack with a slanted roof, a door and a lit window
+-- Painted arrows (a cream paint, worn) on a sign's board: one pointing east, one pointing down
+local PAINT = { 0.88, 0.80, 0.60 }
+local function arrowEast(x, y)
+  rect(x, y + 2, 10, 1)
+  rect(x + 7, y, 1, 1) rect(x + 8, y + 1, 1, 1) rect(x + 8, y + 3, 1, 1) rect(x + 7, y + 4, 1, 1)
+end
+local function arrowDown(x, y)
+  rect(x + 2, y, 1, 7)
+  rect(x, y + 4, 1, 1) rect(x + 1, y + 5, 1, 1) rect(x + 3, y + 5, 1, 1) rect(x + 4, y + 4, 1, 1)
+end
+
+-- The way to the old mine, for whoever has never been: a signpost past the town pointing east, and a broken one on
+-- the pit floor, its board hanging, pointing straight down the shaft. (Stone arrowheads down the shaft's walls:
+-- see drawEmissive.)
+local function drawMineSigns()
+  local function post(x, lean)
+    local g = surface(x)
+    love.graphics.setColor(TIMBER)
+    beam(x, g, x + lean, g - 19, 2)
+    return g
+  end
+  local function board(x, y, w)
+    love.graphics.setColor(0.44, 0.33, 0.22)
+    rect(x, y, w, 9)
+    love.graphics.setColor(TIMBER_LIT)
+    rect(x, y, w, 1)
+    love.graphics.setColor(0.24, 0.17, 0.12)
+    rect(x, y + 8, w, 1)
+    rect(x, y + 4, w, 1) -- (the gap between its two planks)
+  end
+  if visibleX(1275, 1310) then
+    local g = post(1292, 0)
+    board(1281, g - 22, 24)
+    love.graphics.setColor(PAINT)
+    arrowEast(1288, g - 20)
+  end
+  local px = SHAFT_X0 - 20
+  if visibleX(px - 12, px + 16) then
+    -- (snapped: the post leans toward the shaft and the board hangs from one nail)
+    local g = PIT_Y
+    love.graphics.setColor(TIMBER)
+    beam(px, g, px + 5, g - 15, 2)
+    love.graphics.setColor(0.44, 0.33, 0.22)
+    love.graphics.polygon("fill", px + 2, g - 17, px + 15, g - 13, px + 13, g - 5, px, g - 9)
+    love.graphics.setColor(0.24, 0.17, 0.12)
+    beam(px, g - 9, px + 13, g - 5, 1)
+    love.graphics.setColor(PAINT)
+    arrowDown(px + 5, g - 15)
+    love.graphics.setColor(0.62, 0.62, 0.66)
+    rect(px + 3, g - 16, 1, 1)
+  end
+end
+
 local function drawWinchHouse()
   if not visibleX(WINCH_X - 4, WINCH_X + 42) then
     return
@@ -1415,28 +1471,28 @@ end
 
 -- The hunter's camp: a canvas lean-to, a bedroll, and the campfire ring
 local function drawCamp()
-  if not visibleX(math.min(TENT_X - 30, CAMPFIRE_X - 10), math.max(TENT_X + 20, CAMPFIRE_X + 10)) then
+  if not visibleX(math.min(TENT_X - 30, CAMPFIRE_X - 10), math.max(TENT_X + 30, CAMPFIRE_X + 10)) then
     return
   end
   local g = surface(TENT_X)
-  -- Lean-to: a sloping canvas sheet over a ridge pole, open toward the fire
+  -- Lean-to: a sloping canvas sheet over a ridge pole, open to the east, toward the fire
   love.graphics.setColor(TIMBER)
-  rect(TENT_X - 18, g - 20, 2, 20)
-  rect(TENT_X + 14, g - 3, 2, 3)
+  rect(TENT_X + 16, g - 20, 2, 20)
+  rect(TENT_X - 16, g - 3, 2, 3)
   love.graphics.setColor(0.50, 0.44, 0.34)
-  love.graphics.polygon("fill", TENT_X - 17, g - 20, TENT_X + 16, g, TENT_X - 17, g)
+  love.graphics.polygon("fill", TENT_X + 17, g - 20, TENT_X - 16, g, TENT_X + 17, g)
   love.graphics.setColor(0.40, 0.35, 0.27)
-  love.graphics.polygon("fill", TENT_X - 17, g - 13, TENT_X + 4, g, TENT_X - 17, g)
+  love.graphics.polygon("fill", TENT_X + 17, g - 13, TENT_X - 4, g, TENT_X + 17, g)
   love.graphics.setColor(0.60, 0.54, 0.42)
-  beam(TENT_X - 17, g - 20, TENT_X + 15, g - 1, 1)
+  beam(TENT_X + 16, g - 20, TENT_X - 16, g - 1, 1)
   -- A bedroll and a pack under it
   love.graphics.setColor(0.42, 0.14, 0.13)
-  rect(TENT_X - 12, g - 3, 12, 3)
+  rect(TENT_X, g - 3, 12, 3)
   love.graphics.setColor(0.30, 0.10, 0.10)
-  rect(TENT_X - 12, g - 3, 2, 3)
+  rect(TENT_X + 10, g - 3, 2, 3)
   love.graphics.setColor(0.34, 0.27, 0.18)
-  rect(TENT_X - 15, g - 6, 4, 6)
-  drawLanternPost(TENT_X - 26)
+  rect(TENT_X + 11, g - 6, 4, 6)
+  drawLanternPost(TENT_X + 20)
   -- Campfire: a ring of stones and crossed logs
   local cg = surface(CAMPFIRE_X)
   love.graphics.setColor(0.36, 0.33, 0.34)
@@ -1732,6 +1788,7 @@ function overworld.drawDecor(camX, camY)
   end
   drawWinchHouse()
   drawHeadframe()
+  drawMineSigns()
   drawWeeds()
   perf.lap("decor: surface scenery")
 end
@@ -1876,6 +1933,35 @@ function overworld.drawEmissive(camX, camY)
   love.graphics.rectangle("fill", WINCH_X + 8, g - 17, 7, 5)
   love.graphics.setColor(0.18, 0.13, 0.10)
   love.graphics.rectangle("fill", WINCH_X + 11, g - 17, 1, 5)
+  -- Down the shaft's walls: outcrops of pale stone that happen to be shaped like arrowheads pointing down, a few
+  -- pixels each, no two quite alike. They catch a little light (drawn here so the dark of the shaft does not swallow
+  -- them), with a slow, faint shimmer passing down from one to the next: a hint, not a sign.
+  if SHAFT_X1 + 8 >= cullX0 and SHAFT_X0 - 8 <= cullX1 then
+    local tt = love.timer.getTime()
+    local n = 0
+    for y0 = PIT_Y + 18, SHAFT_BOTTOM - 10, 34 do
+      n = n + 1
+      local h = (n * 7919) % 13 -- (a fixed scatter: which wall, how big, how far off the row)
+      local left = n % 2 == 1
+      local half = 2 + h % 2 -- the arrowhead is 2 * half + 1 wide
+      local y = y0 + (h % 5) * 2
+      local x = left and SHAFT_X0 + 1 or SHAFT_X1 - 2 * half - 1
+      local run = (tt * 0.9 - n * 0.5) % 9
+      local a = 0.16 + 0.12 * math.max(0, 1 - math.abs(run - 0.5) * 1.4)
+      for i = 0, half do
+        -- (two pixels thick: a lit top face and a darker underside)
+        love.graphics.setColor(0.74, 0.66, 0.56, a)
+        love.graphics.rectangle("fill", x + i, y + i, 1, 1)
+        love.graphics.rectangle("fill", x + 2 * half - i, y + i, 1, 1)
+        love.graphics.setColor(0.42, 0.36, 0.32, a)
+        love.graphics.rectangle("fill", x + i, y + i + 1, 1, 1)
+        love.graphics.rectangle("fill", x + 2 * half - i, y + i + 1, 1, 1)
+      end
+      -- (a chip or two of the same stone beside it, so it reads as rock and not paint)
+      love.graphics.setColor(0.60, 0.53, 0.46, a * 0.8)
+      love.graphics.rectangle("fill", left and x + 2 * half + 2 or x - 2, y + 1 + h % 3, 1, 1)
+    end
+  end
   -- Campfire flames: a few flickering tongues
   local cg = surface(CAMPFIRE_X)
   local t = love.timer.getTime()
